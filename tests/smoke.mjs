@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import * as Three from 'three';
 import {WEAPONS,ENEMY_TYPES,movementVector,segmentHit} from '../dist/rules.js';
+import {DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding} from '../dist/preferences.js';
 
 assert.equal(WEAPONS.length,5);assert.equal(Object.keys(ENEMY_TYPES).length,6);
 for(let i=0;i<360;i++){
@@ -18,13 +19,13 @@ class Element {
  appendChild(el){this.children.push(el)} replaceChildren(){this.children=[]} querySelector(){return new Element()}
  addEventListener(){} setAttribute(){} focus(){} remove(){} setPointerCapture(){} getBoundingClientRect(){return {left:0,top:0,width:110,height:110}}
 }
-const nodes=new Map();const document={querySelector(s){if(!nodes.has(s))nodes.set(s,new Element());return nodes.get(s)},querySelectorAll(s){return s==='.weapon'?nodes.get('#weapons').children:[]},createElement(){return new Element()},addEventListener(){}};
+const nodes=new Map();const document={body:new Element(),querySelector(s){if(!nodes.has(s))nodes.set(s,new Element());return nodes.get(s)},querySelectorAll(s){return s==='.weapon'?nodes.get('#weapons').children:[]},createElement(){return new Element()},addEventListener(){}};
 class Renderer {constructor(){this.shadowMap={}}setPixelRatio(){}setSize(){}}
 class Composer {addPass(){}render(){}setSize(){}setPixelRatio(){}}
-const context={T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,movementVector,segmentHit,document,window:{},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console,setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(){}};
+const context={T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console,setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(){},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
 vm.createContext(context);
 const source=fs.readFileSync(new URL('../dist/game.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
-vm.runInContext(source+`\n globalThis.test={start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects, get state(){return {player,mode,enemies,shots,hazards,kills,score}},setAim(v){aim=v},setKeys(v){keys=v},setAuto(v){autoAim=v},setMode(v){mode=v}}`,context);
+vm.runInContext(source+`\n globalThis.test={start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed}},setAim(v){aim=v},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
 const t=context.test;
 assert.equal(context.window.gameReady,true);
 t.scene.traverse(o=>{assert.ok(o.position.toArray().every(Number.isFinite));assert.ok(o.scale.toArray().every(Number.isFinite))});
@@ -32,7 +33,7 @@ t.start();assert.equal(t.state.mode,'play');
 t.setKeys({KeyW:true,KeyD:true});for(let i=0;i<15;i++)t.update(.016);
 assert.ok(Math.hypot(t.state.player.x,t.state.player.z)>0);t.dash();assert.ok(t.state.player.dashing>0);
 for(let weapon=0;weapon<5;weapon++){
- t.start();t.setKeys({});t.setAuto(false);t.equip(weapon);const enemy=t.spawnEnemy('brute');enemy.x=0;enemy.z=4;enemy.hp=500;enemy.max=500;t.setAim(0);t.fire();assert.ok(t.state.shots.length>=WEAPONS[weapon].count);
+ t.start();t.setKeys({});t.equip(weapon);const enemy=t.spawnEnemy('brute');enemy.x=0;enemy.z=4;enemy.hp=500;enemy.max=500;t.setAim(0);t.fire();assert.ok(t.state.shots.length>=WEAPONS[weapon].count);
  for(let n=0;n<25;n++)t.update(.016);
  assert.ok(enemy.hp<500,WEAPONS[weapon].label+' should hit the target');
 }
@@ -44,11 +45,22 @@ for(const type of Object.keys(ENEMY_TYPES)){
 }
 t.start();t.state.player.xp=11;t.update(.016);assert.equal(t.state.mode,'upgrade');assert.equal(t.state.player.level,2);
 t.start();assert.equal(t.state.shots.length,0);assert.equal(t.state.enemies.length,0);assert.equal(t.state.hazards.length,0);
-t.setAuto(true);
+t.start();const near=t.spawnEnemy('runner');near.x=0;near.z=5;t.setStick({x:1,y:0});
+for(let i=0;i<15;i++)t.update(.016);
+assert.equal(t.state.shots.filter(b=>!b.enemy).length,0,'Aim stick and nearby enemy must never fire');
+t.setKeys({Mouse0:true});t.update(.016);assert.ok(t.state.shots.some(b=>!b.enemy),'Held fire button shoots');
+const pausedAt=t.state.elapsed;t.pause();t.update(1);assert.equal(t.state.elapsed,pausedAt);
+t.openPanel('#settings');t.update(1);assert.equal(t.state.elapsed,pausedAt);t.closePanel();assert.equal(t.state.mode,'pause');t.pause();
+assert.equal(t.state.mode,'play');const count=t.state.shots.length;t.update(.016);assert.equal(t.state.shots.length,count,'Resume must not resume held firing');
+t.start();assignBinding(t.prefs.bindings,'fire','KeyJ');t.setKeys({Mouse0:true});t.update(.016);assert.equal(t.state.shots.length,0);t.setKeys({KeyJ:true});t.update(.016);assert.ok(t.state.shots.length>0);t.prefs.bindings={...DEFAULT_BINDINGS};
+const testBindings={...DEFAULT_BINDINGS};assignBinding(testBindings,'forward','KeyS');assert.equal(testBindings.back,'KeyW');
+const prefRoundTrip=loadPreferences({getItem:()=>JSON.stringify({...t.prefs,master:25,music:0,effects:80})});assert.equal(prefRoundTrip.master,25);assert.equal(prefRoundTrip.music,0);assert.equal(prefRoundTrip.effects,80);
+t.start();
 for(let tick=0;tick<4500;tick++){
  t.state.player.inv=2;
  if(t.state.mode==='upgrade')nodes.get('#cards').children[0].onclick();
  if(tick%500===0)t.equip(Math.floor(tick/500)%5);
+ t.setKeys({Mouse0:true});const target=t.state.enemies.find(e=>e.hp>0);if(target)t.setAim(Math.atan2(target.x-t.state.player.x,target.z-t.state.player.z));
  t.update(1/60);t.updateEffects(1/60);
 }
 assert.ok(t.state.kills>0);
@@ -67,3 +79,4 @@ checkImports(new URL('../dist/game.js',import.meta.url).pathname);
 assert.ok(fs.existsSync(new URL('../dist/style.css',import.meta.url)));
 console.log('PASS: 75-second combat simulation, upgrades, all runtime module references ('+visited.size+' modules).');
 console.log('PASS: scene initialization, 360° movement, dash, five weapon hits, six enemy classes, ranged/charge/area attacks, level-up, clean restart.');
+console.log('PASS: no automatic fire, explicit fire input, aim-only stick, pause/menu freeze, resume clears firing, remapped fire key, conflict swap, audio preference persistence.');

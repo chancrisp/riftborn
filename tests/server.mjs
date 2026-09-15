@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
+import worker from '../dist/server/index.js';
+const sqlite=new DatabaseSync(':memory:');
+for(const file of fs.readdirSync('drizzle').filter(f=>f.endsWith('.sql')))sqlite.exec(fs.readFileSync('drizzle/'+file,'utf8'));
+const env={DB:{prepare(sql){
+ let values=[];
+ return {bind(...v){values=v;return this},async run(){return sqlite.prepare(sql).run(...values)},async all(){return {results:sqlite.prepare(sql).all(...values)}}};
+}}};
+const get=()=>worker.fetch(new Request('https://game.test/api/scores'),env);
+const post=p=>worker.fetch(new Request('https://game.test/api/scores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}),env);
+assert.deepEqual((await (await get()).json()).scores,[]);
+const run={id:'11111111-1111-4111-8111-111111111111',name:'Test Runner',score:250,kills:2,wave:2,seconds:35};
+assert.equal((await post(run)).status,200);assert.equal((await post(run)).status,200);
+assert.equal((await (await get()).json()).scores.length,1,'Retries must not duplicate scores');
+assert.equal((await post({...run,id:'22222222-2222-4222-8222-222222222222',score:900})).status,200);
+assert.equal((await (await get()).json()).scores[0].score,900);
+assert.equal((await post({...run,score:-1})).status,400);assert.equal((await post({...run,name:'a'.repeat(100)})).status,400);
+for(const path of ['/','/game.js','/preferences.js','/menus.css','/vendor/three.module.js'])assert.equal((await worker.fetch(new Request('https://game.test'+path),env)).status,200);
+assert.equal((await worker.fetch(new Request('https://game.test/server/index.js'),env)).status,404);
+console.log('PASS: D1 schema, score insert/ranking, idempotent retries, invalid payloads, public asset serving.');
