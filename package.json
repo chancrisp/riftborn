@@ -1,0 +1,7 @@
+{
+  "type": "module",
+  "scripts": { "test": "node tests/smoke.mjs" },
+  "dependencies": {
+    "three": "0.180.0"
+  }
+}
