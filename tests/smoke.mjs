@@ -6,7 +6,7 @@ import * as Three from 'three';
 import {WEAPONS,ENEMY_TYPES,movementVector,segmentHit} from '../dist/rules.js';
 import {DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding} from '../dist/preferences.js';
 
-assert.equal(WEAPONS.length,5);assert.equal(Object.keys(ENEMY_TYPES).length,6);
+assert.equal(WEAPONS.length,5);assert.equal(Object.keys(ENEMY_TYPES).length,10);
 for(let i=0;i<360;i++){
  const a=i*Math.PI/180,v=movementVector(Math.sin(a),Math.cos(a),.6);
  assert.ok(Math.abs(Math.hypot(v.x,v.z)-1)<1e-10);
@@ -25,7 +25,7 @@ class Composer {addPass(){}render(){}setSize(){}setPixelRatio(){}}
 const context={T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console,setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(){},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
 vm.createContext(context);
 const source=fs.readFileSync(new URL('../dist/game.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
-vm.runInContext(source+`\n globalThis.test={start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed}},setAim(v){aim=v},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
+vm.runInContext(source+`\n globalThis.test={start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun,activatePortal,enterStage, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed,stage,stageKills,stageGoal,portalActive}},setAim(v){aim=v},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
 const t=context.test;
 assert.equal(context.window.gameReady,true);
 t.scene.traverse(o=>{assert.ok(o.position.toArray().every(Number.isFinite));assert.ok(o.scale.toArray().every(Number.isFinite))});
@@ -45,6 +45,7 @@ for(const type of Object.keys(ENEMY_TYPES)){
 }
 t.start();t.state.player.xp=11;t.update(.016);assert.equal(t.state.mode,'upgrade');assert.equal(t.state.player.level,2);
 t.start();assert.equal(t.state.shots.length,0);assert.equal(t.state.enemies.length,0);assert.equal(t.state.hazards.length,0);
+t.activatePortal();assert.equal(t.state.portalActive,true);assert.equal(t.state.stage,1);t.enterStage();assert.equal(t.state.stage,2);assert.equal(t.state.stageKills,0);assert.ok(t.state.stageGoal>t.state.player.xp);assert.equal(t.state.portalActive,false);t.start();
 t.start();const near=t.spawnEnemy('runner');near.x=0;near.z=5;t.setStick({x:1,y:0});
 for(let i=0;i<15;i++)t.update(.016);
 assert.equal(t.state.shots.filter(b=>!b.enemy).length,0,'Aim stick and nearby enemy must never fire');

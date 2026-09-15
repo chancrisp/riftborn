@@ -12,6 +12,10 @@ export const ENEMY_TYPES = {
  charger:{hp:125,speed:2.2,radius:.65,damage:17,score:220,xp:3,color:'#ff998b'},
  brute:{hp:310,speed:1.25,radius:.88,damage:22,score:400,xp:5,color:'#b99beb'},
  mortar:{hp:95,speed:1.8,radius:.5,damage:10,score:240,xp:3,color:'#93bfff'}
+ ,sniper:{hp:76,speed:1.25,radius:.52,damage:28,score:330,xp:4,color:'#ff6fa5'}
+ ,leaper:{hp:145,speed:2.9,radius:.62,damage:24,score:300,xp:4,color:'#ffad5c'}
+ ,splitter:{hp:190,speed:1.9,radius:.7,damage:15,score:360,xp:5,color:'#65e7d1'}
+ ,stormer:{hp:210,speed:2.35,radius:.72,damage:12,score:440,xp:6,color:'#6d96ff'}
 };
 // Screen-relative input rotated into world space; analog magnitude is preserved.
 export function movementVector(x,y,yaw){const length=Math.max(1,Math.hypot(x,y));x/=length;y/=length;return {x:Math.cos(yaw)*x+Math.sin(yaw)*y,z:-Math.sin(yaw)*x+Math.cos(yaw)*y}}
