@@ -25,7 +25,7 @@ class Composer {addPass(){}render(){}setSize(){}setPixelRatio(){}}
 const context={T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console,setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(){},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
 vm.createContext(context);
 const source=fs.readFileSync(new URL('../dist/game.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
-vm.runInContext(source+`\n globalThis.test={start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun,activatePortal,enterStage,moveWithCollision,portalBearing,setTimeOfDay,ambient,sun,rim,flora,floraLights,updateFlora, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed,stage,stageKills,stageGoal,portalActive,portal:stagePortal.position}},setAim(v){aim=v},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
+vm.runInContext(source+`\n globalThis.test={start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun,activatePortal,enterStage,hurtEnemy,bossUpdate,updateCombatUI,moveWithCollision,portalBearing,setTimeOfDay,ambient,sun,rim,flora,floraLights,updateFlora, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed,stage,stageKills,stageGoal,portalActive,bossSpawned,victory,gems,portal:stagePortal.position}},setAim(v){aim=v},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
 const t=context.test;
 assert.equal(context.window.gameReady,true);
 t.scene.traverse(o=>{assert.ok(o.position.toArray().every(Number.isFinite));assert.ok(o.scale.toArray().every(Number.isFinite))});
@@ -100,3 +100,14 @@ assert.ok(Math.abs(t.portalBearing(1,0,Math.PI/2)-Math.PI/2)<1e-9);
 t.setTimeOfDay('night');assert.ok(t.ambient.intensity<.4);assert.ok(t.sun.intensity<.6);assert.ok(t.rim.intensity<.6);assert.ok(t.flora.visible);t.updateFlora(1);assert.ok(t.floraLights.every(l=>l.intensity>0));
 t.setTimeOfDay('day');assert.equal(t.ambient.intensity,2.6);assert.equal(t.flora.visible,false);assert.ok(t.floraLights.every(l=>l.intensity===0));
 console.log('PASS: unobstructed walking and portal activation in stages 1–4, compass cardinal bearings and camera rotation, dark night lighting, flora illumination, day restoration.');
+
+t.start();const sniper=t.spawnEnemy('sniper');sniper.x=0;sniper.z=18;sniper.cool=-1;
+t.enemyUpdate(sniper,.016);assert.equal(sniper.state,'snipe');assert.ok(sniper.warning);assert.equal(t.state.shots.length,0);
+t.enemyUpdate(sniper,.5);assert.equal(t.state.shots.length,0);t.enemyUpdate(sniper,.5);assert.equal(t.state.shots.length,1);assert.equal(sniper.warning,null);
+t.start();const victim=t.spawnEnemy('runner');t.hurtEnemy(victim,10000);const carried=t.state.gems.reduce((n,g)=>n+g.v,0),xp=t.state.player.xp;t.activatePortal();t.enterStage();assert.equal(t.state.player.xp,xp+carried);assert.equal(t.state.player.inv,2);
+for(let stage=2;stage<5;stage++){t.activatePortal();t.enterStage()}
+t.activatePortal();assert.equal(t.state.bossSpawned,true);assert.equal(t.state.portalActive,false);const boss=t.state.enemies.find(e=>e.kind==='warden');assert.ok(boss);t.activatePortal();assert.equal(t.state.enemies.filter(e=>e.kind==='warden').length,1);
+boss.cool=-1;t.enemyUpdate(boss,.016);assert.equal(boss.state,'bossWindup');assert.equal(t.state.shots.length,0);t.enemyUpdate(boss,1.2);assert.equal(t.state.shots.length,14);
+boss.hp=boss.max*.4;t.enemyUpdate(boss,.016);assert.equal(boss.enraged,true);t.hurtEnemy(boss,100000);assert.equal(t.state.victory,true);assert.equal(t.state.mode,'dead');assert.ok(nodes.get('.menu-card h1').innerHTML.includes('CONQUERED'));
+t.start();assert.equal(t.state.victory,false);assert.equal(t.state.bossSpawned,false);assert.equal(t.state.stage,1);
+console.log('PASS: sniper warning precedes shot, portal collects XP and grants arrival protection, unique final boss with delayed attacks/enrage, victory and clean restart.');
