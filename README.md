@@ -14,6 +14,8 @@ The existing weapons, planar combat hit rules, stage objectives, portals, XP col
 
 ## Development and checks
 
+The centered main menu keeps only the title and primary actions over a live CPU-driven run at 1.5× speed. The CPU targets enemies, changes weapons, navigates terrain and portals, chooses upgrades, and loops through stages. Demo runs never submit scores and reset completely when the player starts. Callsign, lighting and control instructions live in Settings. Duplicate gameplay objectives and decorative menu copy have been removed.
+
 Requires a recent Node.js release (Node 24 for the SQLite server tests).
 
 ```sh
