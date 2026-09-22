@@ -1,7 +1,7 @@
 {
   "type": "module",
   "scripts": {
-    "test": "node tests/smoke.mjs && node tests/server.mjs",
+    "test": "node tests/smoke.mjs && node tests/terrain.mjs && node tests/server.mjs",
     "build": "node build.mjs",
     "db:generate": "drizzle-kit generate"
   },

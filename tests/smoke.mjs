@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {createTerrain} from '../dist/terrain.js';
+import {buildStageWorld} from '../dist/scenery.js';
 import {webcrypto} from 'node:crypto';
 import * as Three from 'three';
 import {WEAPONS,ENEMY_TYPES,movementVector,segmentHit} from '../dist/rules.js';
@@ -23,9 +26,10 @@ const nodes=new Map();const document={body:new Element(),querySelector(s){if(!no
 class Renderer {constructor(){this.shadowMap={}}setPixelRatio(){}setSize(){}}
 class Composer {addPass(){}render(){}setSize(){}setPixelRatio(){}}
 const context={T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console,setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(){},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
+Object.assign(context,{createTerrain,buildStageWorld});
 vm.createContext(context);
-const source=fs.readFileSync(new URL('../dist/game.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
-vm.runInContext(source+`\n globalThis.test={start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun,activatePortal,enterStage,hurtEnemy,bossUpdate,updateCombatUI,moveWithCollision,portalBearing,setTimeOfDay,ambient,sun,rim,flora,floraLights,updateFlora, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed,stage,stageKills,stageGoal,portalActive,bossSpawned,victory,gems,portal:stagePortal.position}},setAim(v){aim=v},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
+const source=fs.readFileSync(new URL('../dist/game.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
+vm.runInContext(source+`\n globalThis.test={height,start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun,activatePortal,enterStage,hurtEnemy,bossUpdate,updateCombatUI,moveWithCollision,portalBearing,setTimeOfDay,ambient,sun,rim,flora,floraLights,updateFlora, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed,stage,stageKills,stageGoal,portalActive,bossSpawned,victory,gems,portal:stagePortal.position}},setAim(v){aim=v},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
 const t=context.test;
 assert.equal(context.window.gameReady,true);
 t.scene.traverse(o=>{assert.ok(o.position.toArray().every(Number.isFinite));assert.ok(o.scale.toArray().every(Number.isFinite))});
@@ -72,11 +76,11 @@ function checkImports(file){
  assert.ok(fs.existsSync(file),'Missing module '+file);
  for(const m of fs.readFileSync(file,'utf8').matchAll(/(?:from\s*|import\s*)['"]([^'"]+)['"]/g)){
   const spec=m[1];
-  if(spec==='three')checkImports(new URL('../dist/vendor/three.module.js',import.meta.url).pathname);
-  else if(spec.startsWith('.'))checkImports(new URL(spec,'file://'+file).pathname);
+  if(spec==='three')checkImports(fileURLToPath(new URL('../dist/vendor/three.module.js',import.meta.url)));
+  else if(spec.startsWith('.'))checkImports(fileURLToPath(new URL(spec,pathToFileURL(file))));
  }
 }
-checkImports(new URL('../dist/game.js',import.meta.url).pathname);
+checkImports(fileURLToPath(new URL('../dist/game.js',import.meta.url)));
 assert.ok(fs.existsSync(new URL('../dist/style.css',import.meta.url)));
 console.log('PASS: 75-second combat simulation, upgrades, all runtime module references ('+visited.size+' modules).');
 console.log('PASS: scene initialization, 360° movement, dash, five weapon hits, six enemy classes, ranged/charge/area attacks, level-up, clean restart.');
@@ -111,3 +115,18 @@ boss.cool=-1;t.enemyUpdate(boss,.016);assert.equal(boss.state,'bossWindup');asse
 boss.hp=boss.max*.4;t.enemyUpdate(boss,.016);assert.equal(boss.enraged,true);t.hurtEnemy(boss,100000);assert.equal(t.state.victory,true);assert.equal(t.state.mode,'dead');assert.ok(nodes.get('.menu-card h1').innerHTML.includes('CONQUERED'));
 t.start();assert.equal(t.state.victory,false);assert.equal(t.state.bossSpawned,false);assert.equal(t.state.stage,1);
 console.log('PASS: sniper warning precedes shot, portal collects XP and grants arrival protection, unique final boss with delayed attacks/enrage, victory and clean restart.');
+
+// Combat visuals, portal clearance and resource counts across repeated transitions.
+t.start();
+const lightingCount=()=>{let count=0;t.scene.traverse(o=>{if(o.isLight)count++});return count};
+const initialLights=lightingCount();
+for(let stage=1;stage<=5;stage++){
+ const p=t.state.player,portal=t.state.portal;p.x=portal.x;p.z=portal.z;
+ t.setAim(0);t.fire();const shot=t.state.shots.at(-1);
+ assert.ok(Math.abs(shot.m.position.y-t.height(shot.x,shot.z)-1.1)<1e-6,'Shot starts above elevated ground');
+ assert.ok(t.flora.children.length===3);assert.equal(lightingCount(),initialLights,'Stage rebuild must not leak lights');
+ for(const kind of Object.keys(ENEMY_TYPES)){const e=t.spawnEnemy(kind);assert.ok(Number.isFinite(e.c.g.position.y));assert.ok(Math.abs(e.c.g.position.y-t.height(e.x,e.z))<1e-6)}
+ if(stage<5){t.activatePortal();t.enterStage()}
+}
+t.start();assert.equal(lightingCount(),initialLights);assert.equal(t.flora.children.length,3);
+console.log('PASS: elevated projectile/enemy placement, all enemy types in all stages, constant light/foliage counts through stage rebuilds and restart.');

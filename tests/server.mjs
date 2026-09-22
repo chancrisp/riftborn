@@ -17,6 +17,6 @@ assert.equal((await (await get()).json()).scores.length,1,'Retries must not dupl
 assert.equal((await post({...run,id:'22222222-2222-4222-8222-222222222222',score:900})).status,200);
 assert.equal((await (await get()).json()).scores[0].score,900);
 assert.equal((await post({...run,score:-1})).status,400);assert.equal((await post({...run,name:'a'.repeat(100)})).status,400);
-for(const path of ['/','/game.js','/preferences.js','/menus.css','/vendor/three.module.js'])assert.equal((await worker.fetch(new Request('https://game.test'+path),env)).status,200);
+for(const path of ['/','/game.js','/terrain.js','/scenery.js','/preferences.js','/menus.css','/vendor/three.module.js'])assert.equal((await worker.fetch(new Request('https://game.test'+path),env)).status,200);
 assert.equal((await worker.fetch(new Request('https://game.test/server/index.js'),env)).status,404);
 console.log('PASS: D1 schema, score insert/ranking, idempotent retries, invalid payloads, public asset serving.');
