@@ -1,0 +1,242 @@
+[
+  {
+    "seed": 11,
+    "mode": "normal",
+    "stage": 2,
+    "curse": 50,
+    "damage": 0,
+    "peakEnemies": 5,
+    "peakHazards": 0,
+    "finished": null
+  },
+  {
+    "seed": 11,
+    "mode": "normal",
+    "stage": 3,
+    "curse": 50,
+    "damage": 545,
+    "peakEnemies": 20,
+    "peakHazards": 2,
+    "finished": null
+  },
+  {
+    "seed": 11,
+    "mode": "normal",
+    "stage": 4,
+    "curse": 50,
+    "damage": 322,
+    "peakEnemies": 23,
+    "peakHazards": 3,
+    "finished": null
+  },
+  {
+    "seed": 11,
+    "mode": "normal",
+    "stage": 5,
+    "curse": 50,
+    "damage": 0,
+    "peakEnemies": 1,
+    "peakHazards": 0,
+    "finished": 3.4
+  },
+  {
+    "seed": 11,
+    "mode": "death",
+    "stage": 2,
+    "curse": 50,
+    "damage": 36,
+    "peakEnemies": 5,
+    "peakHazards": 0,
+    "finished": 16.3
+  },
+  {
+    "seed": 11,
+    "mode": "death",
+    "stage": 3,
+    "curse": 50,
+    "damage": 791,
+    "peakEnemies": 22,
+    "peakHazards": 6,
+    "finished": null
+  },
+  {
+    "seed": 11,
+    "mode": "death",
+    "stage": 4,
+    "curse": 50,
+    "damage": 884,
+    "peakEnemies": 30,
+    "peakHazards": 11,
+    "finished": null
+  },
+  {
+    "seed": 11,
+    "mode": "death",
+    "stage": 5,
+    "curse": 50,
+    "damage": 0,
+    "peakEnemies": 1,
+    "peakHazards": 0,
+    "finished": 3.4
+  },
+  {
+    "seed": 7361,
+    "mode": "normal",
+    "stage": 2,
+    "curse": 50,
+    "damage": 33,
+    "peakEnemies": 8,
+    "peakHazards": 0,
+    "finished": 4.5
+  },
+  {
+    "seed": 7361,
+    "mode": "normal",
+    "stage": 3,
+    "curse": 50,
+    "damage": 184,
+    "peakEnemies": 12,
+    "peakHazards": 3,
+    "finished": null
+  },
+  {
+    "seed": 7361,
+    "mode": "normal",
+    "stage": 4,
+    "curse": 50,
+    "damage": 160,
+    "peakEnemies": 18,
+    "peakHazards": 2,
+    "finished": null
+  },
+  {
+    "seed": 7361,
+    "mode": "normal",
+    "stage": 5,
+    "curse": 50,
+    "damage": 0,
+    "peakEnemies": 1,
+    "peakHazards": 0,
+    "finished": 4.5
+  },
+  {
+    "seed": 7361,
+    "mode": "death",
+    "stage": 2,
+    "curse": 50,
+    "damage": 90,
+    "peakEnemies": 11,
+    "peakHazards": 5,
+    "finished": 11.5
+  },
+  {
+    "seed": 7361,
+    "mode": "death",
+    "stage": 3,
+    "curse": 50,
+    "damage": 146,
+    "peakEnemies": 16,
+    "peakHazards": 6,
+    "finished": null
+  },
+  {
+    "seed": 7361,
+    "mode": "death",
+    "stage": 4,
+    "curse": 50,
+    "damage": 293,
+    "peakEnemies": 28,
+    "peakHazards": 11,
+    "finished": null
+  },
+  {
+    "seed": 7361,
+    "mode": "death",
+    "stage": 5,
+    "curse": 50,
+    "damage": 0,
+    "peakEnemies": 1,
+    "peakHazards": 0,
+    "finished": 4.5
+  },
+  {
+    "seed": 91257,
+    "mode": "normal",
+    "stage": 2,
+    "curse": 50,
+    "damage": 0,
+    "peakEnemies": 7,
+    "peakHazards": 0,
+    "finished": null
+  },
+  {
+    "seed": 91257,
+    "mode": "normal",
+    "stage": 3,
+    "curse": 50,
+    "damage": 47,
+    "peakEnemies": 15,
+    "peakHazards": 4,
+    "finished": null
+  },
+  {
+    "seed": 91257,
+    "mode": "normal",
+    "stage": 4,
+    "curse": 50,
+    "damage": 48,
+    "peakEnemies": 16,
+    "peakHazards": 1,
+    "finished": null
+  },
+  {
+    "seed": 91257,
+    "mode": "normal",
+    "stage": 5,
+    "curse": 50,
+    "damage": 0,
+    "peakEnemies": 1,
+    "peakHazards": 3,
+    "finished": 10.3
+  },
+  {
+    "seed": 91257,
+    "mode": "death",
+    "stage": 2,
+    "curse": 50,
+    "damage": 0,
+    "peakEnemies": 7,
+    "peakHazards": 5,
+    "finished": 16.4
+  },
+  {
+    "seed": 91257,
+    "mode": "death",
+    "stage": 3,
+    "curse": 50,
+    "damage": 325,
+    "peakEnemies": 23,
+    "peakHazards": 10,
+    "finished": null
+  },
+  {
+    "seed": 91257,
+    "mode": "death",
+    "stage": 4,
+    "curse": 50,
+    "damage": 228,
+    "peakEnemies": 17,
+    "peakHazards": 10,
+    "finished": null
+  },
+  {
+    "seed": 91257,
+    "mode": "death",
+    "stage": 5,
+    "curse": 50,
+    "damage": 0,
+    "peakEnemies": 1,
+    "peakHazards": 3,
+    "finished": 10.3
+  }
+]

@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8"><title>Local refinement checks</title><h1>Local refinement checks</h1><pre id="result">Running…</pre><button id="recover">Reload and recover queue</button><script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script><script type="module">
+import {ScoreOutbox,scoreStore} from './score-outbox.js?v=16';
+import {createMusicPlayer,MusicIntensity} from './soundtrack.js?v=16';
+const output=document.querySelector('#result'),store=scoreStore('riftborn-refinement-qa-20260927'),payload={id:'qa-local-only',name:'QA',score:30,stage:2,seconds:10,death_mode:false,gameplay_version:'builds-1'};
+const log=[];const check=(yes,text)=>{if(!yes)throw Error(text);log.push('PASS '+text);output.textContent=log.join('\n')};
+try{
+ const recovering=new URLSearchParams(location.search).has('recover');
+ if(!recovering){await store.change(rows=>rows.splice(0));const q=new ScoreOutbox({store,send:async()=>{throw Error('offline')}});await q.add(payload);await q.flush();check((await q.list())[0].attempts===1,'real IndexedDB retains failed upload');}
+ else{
+  check((await store.read())[0]?.payload.id===payload.id,'reload retained original ID and payload');let calls=0;
+  const send=async p=>{check(p.score===30,'immutable original score');calls++;return {ok:true,status:200}};
+  const a=new ScoreOutbox({store,send}),b=new ScoreOutbox({store:scoreStore('riftborn-refinement-qa-20260927'),send});
+  await b.add({...payload,score:999});await a.retry();await Promise.all([a.flush(),b.flush()]);check(calls===1,'two IndexedDB connections claimed only one upload');check((await store.read()).length===0,'confirmed upload removed pending record');
+ }
+ const ctx=new OfflineAudioContext(2,48000*2,48000),bus=ctx.createGain();bus.gain.value=.154;bus.connect(ctx.destination);const music=createMusicPlayer(ctx,bus);
+ for(let step=0;step<16;step++)music.schedule(step,.02+step*60/168/4,true,.85,'boss');
+ const buffer=await ctx.startRendering();let peak=0,energy=0;for(const sample of buffer.getChannelData(0)){peak=Math.max(peak,Math.abs(sample));energy+=sample*sample}
+ check(peak>0&&peak<.99,'synth output nonzero and not clipped: peak '+peak.toFixed(3)+' RMS '+Math.sqrt(energy/buffer.length).toFixed(3));check(music.metrics.peak<=96,'bounded music nodes: peak '+music.metrics.peak);music.stop();check(music.active===0,'audio stop disconnects all voices');
+}catch(e){output.textContent+='\nFAIL '+e.stack}
+document.querySelector('#recover').onclick=()=>location.href='?recover=1';
+</script>

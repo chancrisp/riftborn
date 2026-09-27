@@ -7,3 +7,5 @@ d.begin({x:0,y:1,z:0});assert.equal(echoes.length,0,'Dash cannot fire');d.shot({
 d.begin({x:0,y:1,z:0});d.tick(2.1);d.shot({},{});assert.equal(echoes.length,1);valid=false;d.begin({x:0,y:1,z:0});d.shot({},{});assert.equal(echoes.length,1);
 trait='wake';valid=true;for(let i=0;i<100;i++)d.record({x:i,y:1,z:0},{x:i+1,y:1,z:0});assert.ok(d.wake.length<=24);assert.equal(d.slow({x:99,z:0}),.6);assert.equal(d.slow({x:99,z:0,kind:'warden'}),1);d.clear();assert.equal(d.wake.length,0);assert.equal(d.echo,null);
 console.log('PASS dash traits: manual volley echo, shared target, expiry, obstruction, wake caps/resistance and cleanup.');
+
+const {BuildFeedback}=await import('../dist/combat-feedback.js');const cue=new BuildFeedback();const capped=new DashEffects({trait:()=> 'echo',valid:()=>true,ghost:()=>({}),remove(){},event:type=>cue.emit(type),fire:()=>0});capped.begin({x:0,y:1,z:0});assert.match(cue.text,/READY/);capped.shot({},{});assert.equal(cue.text,'');assert.equal(capped.echo,null);

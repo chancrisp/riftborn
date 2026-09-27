@@ -9,7 +9,13 @@ const hooks=[
  [12,19,24,null,22,19,15,19,12,null,15,19,23,22,19,11]
 ];
 
-export function scoreEvents(step,death=false){
+// Latch the requested arrangement at a bar boundary without resetting transport.
+export class MusicIntensity{
+ constructor(){this.reset()}
+ reset(){this.current='normal'}
+ at(step,target){if(step%16===0)this.current=['quiet','normal','trial','boss'].includes(target)?target:'normal';return this.current}
+}
+export function scoreEvents(step,death=false,activity='normal'){
  const bar=Math.floor(step/16)%16,beat=step%16,section=Math.floor(bar/4),chord=bar%4;
  const root=[0,-4,-2,-5][chord],breakdown=section===2,climax=section===3;
  const sixteenth=60/(death?MUSIC_TEMPO.death:MUSIC_TEMPO.normal)/4,events=[];
@@ -33,10 +39,17 @@ export function scoreEvents(step,death=false){
  }
  if(beat===10&&bar%2===1)add('bell',.09,.85,root+31);
  if(climax&&beat===14)add('bell',.1,.8,root+36);
+ if(activity==='quiet')return events.filter(n=>['bass','organ','bell'].includes(n.voice)).map(n=>({...n,gain:n.gain*.7}));
+ if(activity==='trial'||activity==='boss'){
+  if(beat%4===2)add('bass',.1,sixteenth*.6,root+19+(death?1:0));
+  if(activity==='boss'&&beat%4===2)add('bell',.06,.35,root+31);
+  if(activity==='boss'&&beat%4===3)add('hat',.07,.035);
+ }
  return events;
 }
 
 export function createMusicPlayer(ctx,bus){
+ const voices=new Set(),metrics={peak:0,dropped:0};
  const compressor=ctx.createDynamicsCompressor();
  compressor.threshold.value=-15;compressor.knee.value=15;compressor.ratio.value=3;
  compressor.attack.value=.006;compressor.release.value=.18;compressor.connect(bus);
@@ -52,23 +65,23 @@ export function createMusicPlayer(ctx,bus){
   gain.gain.exponentialRampToValueAtTime(.0001,time+duration);return gain;
  }
  function oscillator(frequency,type,time,duration,volume,{end,filter,echo=false,attack,pan=0}={}){
-  const osc=ctx.createOscillator(),gain=envelope(time,duration,volume,attack),nodes=[osc,gain];
+  if(voices.size>=96){metrics.dropped++;return}const osc=ctx.createOscillator(),gain=envelope(time,duration,volume,attack),nodes=[osc,gain];
   osc.type=type;osc.frequency.setValueAtTime(frequency,time);
   if(end)osc.frequency.exponentialRampToValueAtTime(end,time+duration);
   if(filter){const f=ctx.createBiquadFilter();f.type='lowpass';f.Q.value=.65;f.frequency.setValueAtTime(filter,time);f.frequency.exponentialRampToValueAtTime(Math.max(180,filter*.23),time+duration);osc.connect(f);f.connect(gain);nodes.push(f)}else osc.connect(gain);
   const stereo=ctx.createStereoPanner();stereo.pan.value=pan;gain.connect(stereo);stereo.connect(compressor);nodes.push(stereo);
   if(echo)stereo.connect(delay);
-  osc.onended=()=>nodes.forEach(n=>n.disconnect());osc.start(time);osc.stop(time+duration+.015);
+  voices.add(osc);metrics.peak=Math.max(metrics.peak,voices.size);osc.onended=()=>{voices.delete(osc);nodes.forEach(n=>n.disconnect())};osc.start(time);osc.stop(time+duration+.015);
  }
  function percussion(time,duration,volume,frequency,type){
-  const source=ctx.createBufferSource(),filter=ctx.createBiquadFilter(),gain=envelope(time,duration,volume,.002);
+  if(voices.size>=96){metrics.dropped++;return}const source=ctx.createBufferSource(),filter=ctx.createBiquadFilter(),gain=envelope(time,duration,volume,.002);
   source.buffer=noise;filter.type=type;filter.frequency.value=frequency;filter.Q.value=.65;
   source.connect(filter);filter.connect(gain);gain.connect(compressor);
-  source.onended=()=>{source.disconnect();filter.disconnect();gain.disconnect()};source.start(time);source.stop(time+duration+.01);
+  voices.add(source);metrics.peak=Math.max(metrics.peak,voices.size);source.onended=()=>{voices.delete(source);source.disconnect();filter.disconnect();gain.disconnect()};source.start(time);source.stop(time+duration+.01);
  }
- return {schedule(step,time,death,volume=1){
+ return {metrics,get active(){return voices.size},stop(){for(const voice of [...voices]){try{voice.stop()}catch{}voice.onended?.()}feedback.gain.value=0},schedule(step,time,death,volume=1,activity='normal'){
   if(volume<=0)return;
-  for(const n of scoreEvents(step,death)){
+  feedback.gain.value=.24;for(const n of scoreEvents(step,death,activity)){
    const g=n.gain*volume,d=n.duration,f=n.frequency;
    switch(n.voice){
     case 'bass':oscillator(f,'sawtooth',time,d,g,{filter:death?2200:1500});oscillator(f/2,'sine',time,d,g*.4);break;

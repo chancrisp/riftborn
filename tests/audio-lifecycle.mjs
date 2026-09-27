@@ -1,3 +1,4 @@
+import {MusicIntensity} from '../dist/soundtrack.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -15,7 +16,7 @@ class Context{
 }
 const elements=new Map(),$=id=>{if(!elements.has(id))elements.set(id,{textContent:''});return elements.get(id)};
 const prefs={master:100,music:70,effects:100,muted:false};
-const context={window:{AudioContext:Context},prefs,demoActive:false,mode:'play',runDeath:false,runTuning:{bpm:140},console,$,savePrefs(){},syncSettings(){},setTimeout:()=>{timers++;return timers},clearTimeout(){},createMusicPlayer:()=>({schedule(){notes++}})};
+const context={MusicIntensity,document:{hidden:false},overlay:null,bossSpawned:false,quarryState:"dormant",trial:null,window:{AudioContext:Context},prefs,demoActive:false,mode:'play',runDeath:false,runTuning:{bpm:140},console,$,savePrefs(){},syncSettings(){},setTimeout:()=>{timers++;return timers},clearTimeout(){},createMusicPlayer:()=>({schedule(){notes++}})};
 vm.createContext(context);vm.runInContext(audioSource+';globalThis.subject=audio;',context);
 const audio=context.subject;audio.start();await Promise.resolve();audio.tick();
 assert.ok(resumes>0,'First run must explicitly resume a suspended AudioContext');
@@ -28,3 +29,6 @@ vm.runInContext(game.slice(game.indexOf("$('#sound').onclick="),game.indexOf("$(
 prefs.master=0;elements.get('#sound').onclick();assert.equal(prefs.master,100);assert.equal(prefs.muted,false,'Sound button restores a zeroed master');
 elements.get('#sound').onclick();assert.equal(prefs.muted,true,'Second click still mutes');
 console.log('PASS: first-run audio unlock, interrupted-context recovery, and connected nonzero volume buses.');
+
+const scheduled=notes;context.document.hidden=true;audio.tick();assert.equal(notes,scheduled);context.document.hidden=false;audio.ctx.currentTime=100;audio.tick();assert.ok(notes-scheduled<=2,'No catch-up scheduling after hidden tab');
+console.log('PASS hidden audio: no catch-up burst.');

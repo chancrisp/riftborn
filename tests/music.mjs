@@ -15,3 +15,9 @@ for(const death of [false,true]){
 }
 assert.notDeepEqual(scoreEvents(0,false),scoreEvents(0,true),'Modes have distinct arrangements');
 console.log('PASS: two varied horror-synth arrangements, driving tempos, instrument coverage and bounded voices.');
+
+const {MusicIntensity}=await import('../dist/soundtrack.js');
+const intensity=new MusicIntensity();assert.equal(intensity.at(1,'boss'),'normal');assert.equal(intensity.at(16,'boss'),'boss');assert.equal(intensity.at(17,'quiet'),'boss');assert.equal(intensity.at(32,'quiet'),'quiet');intensity.reset();assert.equal(intensity.current,'normal');
+for(const death of [false,true])for(const activity of ['quiet','normal','trial','boss'])for(let step=0;step<256;step++)assert.ok(scoreEvents(step,death,activity).length<=16);
+assert.ok(scoreEvents(2,false,'boss').length>scoreEvents(2,false,'normal').length);
+console.log('PASS adaptive music: bar-boundary changes, reset and bounded encounter layers.');

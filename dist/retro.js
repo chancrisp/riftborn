@@ -1,5 +1,6 @@
+import {cutawayShader} from './occlusion.js?v=16';
 import * as T from 'three';
-import {createMonster} from './monsters.js?v=13';
+import {createMonster} from './monsters.js?v=16';
 
 // Shared PS1 material pipeline: one atlas, affine UVs, snapped vertices and no PBR.
 const pixels=new Uint8Array(64*64*4);
@@ -8,7 +9,7 @@ const fallback=new T.DataTexture(pixels,64,64);fallback.needsUpdate=true;
 export const retroResolution=new T.Vector2(320,240);
 const atlas=typeof document!=='undefined'&&document.createElementNS?new T.TextureLoader().load('./assets/ps1-atlas.png'):fallback;
 atlas.magFilter=atlas.minFilter=T.NearestFilter;atlas.generateMipmaps=false;atlas.colorSpace=T.SRGBColorSpace;
-export function retroMaterial(color='#ffffff',tile=3,{glow=0,vertexColors=false}={}){
+export function retroMaterial(color='#ffffff',tile=3,{glow=0,vertexColors=false,occlusion=false}={}){
  const mat=new T.MeshLambertMaterial({color:new T.Color(color).lerp(new T.Color('#ffffff'),.35),map:atlas,vertexColors,flatShading:true,emissive:color,emissiveIntensity:Math.min(glow,.55)});
  mat.onBeforeCompile=shader=>{
   shader.uniforms.retroResolution={value:retroResolution};shader.uniforms.atlasTile={value:new T.Vector2(tile%4,3-Math.floor(tile/4))};
@@ -21,8 +22,9 @@ export function retroMaterial(color='#ffffff',tile=3,{glow=0,vertexColors=false}
   shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`vec2 texel=floor(fract(affineUV/affineW)*64.0);
    vec2 atlasUV=(atlasTile+(texel+.5)/64.0)/4.0;
    diffuseColor*=texture2D(map,atlasUV);`);
+  if(occlusion)cutawayShader(shader);
  };
- mat.customProgramCacheKey=()=> 'ps1-affine-v1';
+ mat.customProgramCacheKey=()=> occlusion?'ps1-affine-cutaway-v2':'ps1-affine-v1';
  return mat;
 }
 export const RetroShader={

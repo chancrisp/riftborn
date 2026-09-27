@@ -20,3 +20,7 @@ for(const seed of [11,7361,91257])for(let stage=1;stage<=5;stage++){
  world(stage,seed);if(stage<5){assert.ok(ev('statueWorld.statues.length'));assert.equal(ev('beginTrial(statueWorld.statues[0])'),true,`Trial placement ${stage}/${seed}`);for(const e of t.state.enemies)assert.ok(ev(`terrain.walkable(${e.x},${e.z},${e.def.radius})`));ev('abandonTrial()')}
 }
 console.log('PASS campaign: Quarry gate/stagger, five-weapon anchors, progressive shields, vent cleanup, Warden nodes/deadline/victory, 15 seeded worlds.');
+
+for(const seed of [11,7361,91257]){world(5,seed);ev(`runRandom=randomSource(${seed});summonBoss();{const e=enemies[0];e.enraged=true;e.nodeCooldown=0;updateNodeEvent(e,.02)}`);assert.equal(ev('encounterObjects.length'),2);assert.equal(ev(`encounterObjects.every(o=>!traceWorld({x:player.x,y:height(player.x,player.z)+1.47,z:player.z},{x:o.x,y:height(o.x,o.z)+1.3,z:o.z},shotWorld(),0))`),true,'Nodes need immediate terrain/cover sightlines');}
+
+world(5,7361);ev(`summonBoss();{const e=enemies[0];e.x=5;e.z=-21;e.enraged=true;e.nodeCooldown=0;updateNodeEvent(e,.02)}`);assert.equal(ev(`encounterObjects.every(o=>!traceWorld({x:player.x,y:height(player.x,player.z)+1.47,z:player.z},{x:o.x,y:height(o.x,o.z)+1.3,z:o.z},shotWorld(),0))`),true,'Ridge-blocked node pair needs an alternate placement');

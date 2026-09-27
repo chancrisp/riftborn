@@ -1,4 +1,6 @@
-# Builds & Bargains validation and handoff
+# Builds & Bargains validation and handoff (historical)
+
+This records the original local-only handoff. Builds & Bargains was subsequently published as Sites version 15. Current refinement behavior, durable uploads, checks and limits are documented in [REFINEMENT-VALIDATION.md](REFINEMENT-VALIDATION.md); the deployment/session-only limitations below describe that earlier moment.
 
 27 September 2026. Implemented against the inspected `e79470c` checkout without resetting it. Local source is `.sites-runtime/source`, with changed files also mirrored to the project root after checking the root against the baseline. No new dependencies. No deployment, push, domain change or account change. Existing public site remains unchanged.
 

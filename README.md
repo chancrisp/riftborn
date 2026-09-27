@@ -1,8 +1,14 @@
 # Riftborn
 
-## Builds & Bargains — local update, 27 September 2026
+## Builds & Bargains + refinement update, 27 September 2026
 
-This checkout implements the new run-build update. **It has not been deployed.** The existing public site, account, audience and domain are unchanged. Gameplay version for new scores is `builds-1`.
+Builds & Bargains shipped as Sites version 15. This checkout adds the refinement pass described below. The existing public site, account, audience, database and domain are preserved. Gameplay version remains `builds-1`; this is a small readability/fairness patch, not a new progression or scoring system.
+
+The refinement pass adds terrain-conforming danger outlines, scaled charge corridors, distinct attack sounds and stronger weapon feedback without changing player shot recovery or damage. Foreground scenery uses a small PS1 dither cutaway around the player; collision, bullet cover and instancing stay intact. Ordinary reward cards show current → upgraded values from shared combat calculations. One restrained build cue reports successful mod/dash events alongside the existing Storm Needle counter.
+
+Trials and bosses add soundtrack layers at bar boundaries; rewards and pause ease the mix. Run reports compare compatible local runs and retain personal-best scores beyond the 50 recent-run list. An IndexedDB outbox preserves failed score uploads through reloads, with atomic tab ownership, fixed IDs, backoff and explicit failures. If local storage is blocked/full, unsaved fallback runs stay in memory with a keep-tab-open message. Tutorial/demo/practice/test runs remain isolated.
+
+Small pacing fixes: ranged enemies get at least 0.25s of anticipation even when first entering range with a ready attack; leapers get a 0.35s final landing warning (formerly 0.2s); each vent active phase starts its pulse clock consistently; Warden nodes require two visible, separated placements before their six-second deadline starts. Encounter HP, damage, quotas, rewards and mode/curse multipliers are unchanged. See [refinement evidence and limitations](docs/REFINEMENT-VALIDATION.md).
 
 Keep moving, manually aim/fire, collect XP and choose ordinary upgrades. Clear each stage's quota, then enter its rift. All five weapons remain available from the start. After Meadows, choose **Rift Echo** (one 50%-damage repeated volley after a dash) or **Void Wake** (a short slowing trail). Quarry now requires defeating **Iron Maw** after its 22-kill quota; bait its charge into solid cover to expose it. Defeating it guarantees a major weapon-mod draft before the exit opens.
 

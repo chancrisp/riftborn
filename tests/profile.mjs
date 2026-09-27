@@ -8,3 +8,5 @@ recordEnemy(p,'skitter',true,false);assert.equal(p.enemies.skitter,undefined);re
 let saved;assert.equal(saveProfile({setItem:(k,v)=>{assert.equal(k,PROFILE_KEY);saved=v}},p),true);assert.equal(loadProfile({getItem:()=>saved}).cosmetics.trail,'ember');assert.equal(saveProfile({setItem(){throw Error('full')}},p),false);assert.equal(loadProfile({getItem(){throw Error('blocked')}}).version,1);
 rememberRun(p,{id:'a',score:100,death_mode:true});rememberRun(p,{id:'a',score:100,death_mode:true});assert.equal(p.runs.length,1);
 console.log('PASS profile: migration, malformed/unavailable/full storage, isolated progress, unlock/equip and result deduplication.');
+
+rememberRun(p,{id:'best',name:'Ash',score:10000,death_mode:false,gameplay_version:'builds-1'});for(let i=0;i<60;i++)rememberRun(p,{id:String(i),name:'Ash',score:10,death_mode:false,gameplay_version:'builds-1'});assert.equal(p.runs.length,50);assert.equal(p.scoreBests['builds-1:normal'],10000);

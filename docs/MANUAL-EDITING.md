@@ -25,7 +25,7 @@ The preview migrates its own `.sites-runtime/preview.sqlite`. It does not read o
 | Change | Source |
 | --- | --- |
 | Base weapons, monsters and Death multipliers | `dist/rules.js` |
-| Ordinary upgrade choices and player base stats | `dist/game.js`: `UPGRADES`, `freshPlayer` |
+| Ordinary upgrades / shared combat previews | `dist/upgrades.js`; `dist/game.js`: `freshPlayer` |
 | Major-mod / dash tuning and descriptions | `dist/progression.js`: `BALANCE`, `MODS`, `DASH_TRAITS` |
 | Secondary hits, chains, scars, pulls | `dist/combat-effects.js` |
 | Echo lifetime / Wake route tracking | `dist/dash-traits.js` |
@@ -62,4 +62,20 @@ Change the seed to compare terrain. **Reset scenario** also applies the panel's 
 
 Defaults remain movement WASD, mouse aim and held left-click fire, Space dash, 1–5 weapons, Q/E or right-drag camera rotation, wheel zoom, F interact and P/Esc pause. See Settings for saved/rebound values. Controller uses left/right sticks to move/aim, right trigger fire, A dash, bumpers weapons, X interact and Menu pause. In menus use D-pad/stick, A confirm and B back; A cycles settings values and opens the username keyboard. Touch controls share the existing movement/aim sticks, fire/dash/interact buttons and menu actions.
 
-Useful focused checks: `node tests/builds.mjs`, `node tests/mods.mjs`, `node tests/campaign.mjs`, `node tests/inputs.mjs`, `node tests/stress.mjs`, and `node tests/server.mjs` (build first for packaged-asset assertions). Run the complete `npm test` before publishing. This handoff deliberately does not publish.
+Useful focused checks: `node tests/builds.mjs`, `node tests/mods.mjs`, `node tests/campaign.mjs`, `node tests/inputs.mjs`, `node tests/stress.mjs`, and `node tests/server.mjs` (build first for packaged-asset assertions). Run the complete `npm test` before publishing. Publishing must update the existing Sites project and preserve its public audience/URL. The prior Builds & Bargains local-only handoff was later published as version 15.
+
+## Refinement editing map
+
+- `warnings.js`: terrain-conforming ring/corridor geometry and charge prediction. `game.js`: `warnLine`, `warnLanding`, hazard/vent lifecycle. Dispose owned geometries through `disposeMarker`; never resize the damage boundary as a pulse animation.
+- `combat-feedback.js`: five weapon feel profiles and one bounded build notification. `CombatEffects.api.event` / `DashEffects.api.event` report actual events. Secondary/projectile adapters return a created shot or falsey; do not announce a successful volley from a failed allocation.
+- `occlusion.js`: aperture size, floor/depth guards, restoration rate and PS1 checker mask. `retroMaterial(...,{occlusion:true})` opts scenery in. Collision and navigation never read these shader uniforms.
+- `upgrades.js`: `shotStats`, `applyUpgrade`, `upgradePreview`. Combat and card values share this path. The preview clones the player; it must never apply the offered upgrade prematurely.
+- `soundtrack.js`: `MusicIntensity`, encounter additions in `scoreEvents`, source limits, stop/disconnect. `game.js` audio coordinator owns music bus easing, gesture recovery and hidden-tab scheduling.
+- `run-history.js`: compatible previous-run/best comparisons. `profile.js` retains bests independently of the recent-50 list.
+- `score-outbox.js`: immutable local queue, atomic IndexedDB transaction adapter, expiring leases, backoff, retained rejection/fallback states. Never replace an existing ID's payload on retry. `game.js` owns HTTP timeout and visible save status.
+
+Practice adds **Camera obstruction**, **Toggle zoom** and **Disable/Enable cutaway** for A/B inspection. Its player stays visible despite practice invulnerability. Metrics show rolling cutaway CPU cost, renderer submission CPU time and total composer draw calls; none is GPU execution time. The three new controls are loopback-only. The regular camera uses Q/E/right-drag and wheel zoom.
+
+New checks: `node tests/refinement.mjs`, `node tests/occlusion.mjs`, `node tests/outbox.mjs`, `node tests/polish-pacing.mjs`. The pacing script records actual HP removed by `hurtPlayer` separately from healing and writes ignored `.sites-runtime/refinement-pacing.json`. Terrain seeds are fixed, but random reward offers and visual RNG can still vary outcomes; do not present a single sample as a deterministic balance result.
+
+For browser storage/audio checking, copy `tests/refinement-browser.html` to `dist/qa-refinement.html` temporarily and visit the loopback page. It uses a separate QA IndexedDB database and stubbed network sender, never `/api/scores`. Its reload button verifies durable recovery; an offline audio graph checks nonzero output and source cleanup. The probe is excluded from the public asset whitelist; remove the temporary copy after use.

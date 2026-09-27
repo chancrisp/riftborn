@@ -31,7 +31,7 @@ for(const seed of [11,7361,91257])for(let stage=1;stage<=5;stage++){
 }
 // Abandonment cancels pending owned attacks, not just the marked creatures.
 t.start();ev("beginTrial(statueWorld.statues[0]);hazard(0,0,2,20,1,'trial-slam',trial.id)");
-const attacker=t.state.enemies[0];attacker.kind='gunner';attacker.cool=-1;attacker.x=0;attacker.z=6;t.enemyUpdate(attacker,1/60);
+const attacker=t.state.enemies[0];attacker.kind='gunner';attacker.cool=-1;attacker.x=0;attacker.z=6;for(let n=0;n<17;n++)t.enemyUpdate(attacker,1/60);
 assert.ok(t.state.hazards.length);assert.ok(t.state.shots.some(b=>b.emitter===attacker));ev('abandonTrial()');
 assert.equal(t.state.hazards.length,0);assert.equal(t.state.shots.filter(b=>b.emitter===attacker).length,0);
 timings.sort((a,b)=>a-b);
