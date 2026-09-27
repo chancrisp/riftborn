@@ -1,6 +1,6 @@
-import {cutawayShader} from './occlusion.js?v=16';
+import {cutawayShader} from './occlusion.js?v=17';
 import * as T from 'three';
-import {createMonster} from './monsters.js?v=16';
+import {createMonster} from './monsters.js?v=17';
 
 // Shared PS1 material pipeline: one atlas, affine UVs, snapped vertices and no PBR.
 const pixels=new Uint8Array(64*64*4);

@@ -54,3 +54,16 @@ Ordinary cards keep the existing square PS1 buttons and add one gold comparison 
 `combat-feedback.js` owns one short, noninteractive build cue, rate-limited per event family. Combat/Dash adapters emit only after actual effects are created. Consuming an Echo clears READY even if a blocked/capped volley creates no shot. Visual hit compression does not alter movement, collision, damage or AI timers. Reduced motion lowers player recoil, removes muzzle light flashes and keeps the existing shake/lightning suppression.
 
 Music intensity latches on 16-step bar boundaries without resetting the transport. Quiet reward/pause gain eases immediately, while quiet instrumentation arrives at the next boundary. Trial/boss layers retain the two original arrangements. A 96-source music limit and 32-tone SFX limit bound audio work; ended nodes disconnect. Hidden/muted/inactive contexts stop scheduled music, and recovery begins at current audio time, never replaying a backlog.
+
+## Campaign presentation and return goals
+
+Short in-world sequences use solid letterboxing, the existing cream/gold pixel type and one centered caption/action. They freeze combat, clear imminent attacks, support explicit pause/skip and respect reduced motion. Warden phase material copies retain the custom PS1 shader; phase materials live until the aftermath ends. Rift Echo clones retain the same material callbacks. No new cinematic rendering framework is used.
+
+Two-option discovery and dash drafts center their cards; narrow screens stack and scroll them. Numeric build detail replaces repeated static explanation. Journal challenges use plain progress rows, one Track action each, and cosmetic choices with visible disabled/selected states. Tracking/equipping restores focus after updating the rows. The phone layout was checked at 390×844. Functional HUD/table labels are at least 11px in the adjusted rules.
+
+Landmarks are part of the world's stone/wood/metal vocabulary and safe navigation/collision model. Optional lore appears only on interaction and can be left immediately. One recovery per stage is distinct from permanent Journal discovery. The Journal explicitly labels browser-local storage; practice cannot earn progress.
+
+
+Elevation cues follow collision truth: walkable ground is lighter, steep faces use darker vertically textured stone, and upper boundaries carry thin upward-facing lips. Authored ramp colors are stronger without adding obstacles or changing heights. Ultra fine keeps the same PS1 textures, snapping and palette at a clearer 720-pixel internal height.
+
+The menu has a restrained original synth/organ theme after browser audio unlock. Normal/Death scores extend to alternating 32-bar forms. Steps, monster voices, impacts and environmental cues are sparse, distance-aware and rate-limited; warning tones retain voice headroom. No external recordings or licensed music are bundled.

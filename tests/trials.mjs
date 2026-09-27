@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 assert.ok(fs.existsSync('dist/trials.js'),'Skull Trials need explicit lifecycle and placement validation');
-const {SkullTrial}=await import('../dist/trials.js');
+const {SkullTrial,trialLocations}=await import('../dist/trials.js');
+const ground={safeNear:(x,z)=>({x,z}),clear:()=>true};
+const placements=trialLocations(ground,{x:0,z:0},4,{x:0,z:5});
+assert.equal(placements.length,4);assert.ok(placements.every(p=>Math.hypot(p.x,p.z-5)>=6),'Trial placements exclude the player before consuming the statue');
 let curse=0;const t=new SkullTrial(2);
 assert.equal(t.activate([],()=>curse++),false);assert.equal(curse,0);assert.equal(t.state,'available');
 assert.equal(t.activate(['a','b'],()=>curse++),true);assert.equal(t.activate(['c'],()=>curse++),false);assert.equal(curse,1);

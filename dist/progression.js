@@ -1,5 +1,5 @@
 // Run-only builds. Nothing here grants permanent combat strength.
-export const GAMEPLAY_VERSION='builds-1';
+export const GAMEPLAY_VERSION='campaign-2';
 export const BALANCE={splinter:.35,stormHits:7,stormTargets:3,stormRadius:7,stormDamage:.7,graveRange:8,graveFragments:5,graveDamage:.6,scarLife:1.4,scarTick:.3,scarDamage:.18,maxScars:12,pullLife:.45,pullRadius:5,pullSpeed:7,maxPulls:8,echoWindow:2,echoDamage:.5,wakeLife:2,wakeSlow:.6,maxWake:24};
 export const MODS=[
  {name:'Splinter Rounds',weapon:'RIFLE',text:'First hit splits two 35% diagonal rounds. Splinters never split again.'},

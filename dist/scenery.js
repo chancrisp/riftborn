@@ -1,7 +1,8 @@
 // SCENERY REFERENCE: covers stop projectiles, obstacles stop walking. Keep both in sync when adding solid structures; reserve space around navigation paths.
 import * as T from 'three';
-import {retroMaterial} from './retro.js?v=16';
-import {EXTENT,CELLS,randomSource} from './terrain.js?v=16';
+import {retroMaterial} from './retro.js?v=17';
+import {randomSource} from './terrain.js?v=17';
+import {createTerrainSurface} from './terrain-visuals.js?v=17';
 
 // Static scenery is batched by geometry/material: silhouettes without hundreds of draw calls.
 export function buildStageWorld(terrain){
@@ -17,11 +18,7 @@ export function buildStageWorld(terrain){
   }
   return [shape,{min:geometry.boundingBox.min,max:geometry.boundingBox.max,planes:[...planes.values()]}];
  }));
- const ground=new T.BufferGeometry(),positions=[],colors=[],uvs=[],indices=[],cLow=new T.Color(low),cHigh=new T.Color(high),cTrail=new T.Color(trail);
- for(let iz=0;iz<=CELLS;iz++)for(let ix=0;ix<=CELLS;ix++){const x=ix-EXTENT,z=iz-EXTENT,y=terrain.heights[iz*(CELLS+1)+ix],route=terrain.routeAt(x,z);positions.push(x,y,z);uvs.push(x/6,z/6);const c=cLow.clone().lerp(cHigh,T.MathUtils.clamp((y+3)/14,0,1));if(route.distance<2.1)c.lerp(cTrail,.42);c.lerp(new T.Color('#ffffff'),.62).multiplyScalar(rng(.92,1.07));colors.push(c.r,c.g,c.b)}
- for(let z=0;z<CELLS;z++)for(let x=0;x<CELLS;x++){const a=z*(CELLS+1)+x,b=a+1,c=a+CELLS+1,d=c+1;indices.push(a,c,b,b,c,d)}
- ground.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));ground.setAttribute('position',new T.Float32BufferAttribute(positions,3));ground.setAttribute('color',new T.Float32BufferAttribute(colors,3));ground.setIndex(indices);ground.computeVertexNormals();
- const groundMat=retroMaterial('#d0cab4',terrain.tutorial?5:[4,5,8,10,11][s-1],{vertexColors:true,occlusion:true}),surface=new T.Mesh(ground,groundMat);surface.receiveShadow=true;group.add(surface);
+ const groundView=createTerrainSurface(terrain,{low,high,trail},rng),surface=groundView.surface;group.add(surface,groundView.ledge);
  function add(shape,color,x,y,z,sx,sy,sz,glow=0,rotation=0){if(sy>.35&&Math.hypot(x,z)<75)covers.push({shape,x,y,z,sx,sy,sz,rotation,hull:hulls[shape]});const key=shape+color+glow;if(!batches.has(key))batches.set(key,{shape,color,glow,items:[]});batches.get(key).items.push({x,y,z,sx,sy,sz,rotation})}
  function allowed(x,z,r){return !terrain.tutorial&&Math.hypot(x,z)>11&&Math.hypot(x,z)<63&&terrain.routeAt(x,z).distance>5.7+r&&Math.hypot(x-terrain.points[0][0],z-terrain.points[0][1])>9+r&&terrain.clear(x,z,r+1.4)}
  function block(x,z,sx,sz,h,color){const y=terrain.height(x,z);add('box',color,x,y+h/2,z,sx,h,sz);terrain.obstacles.push({x,z,sx,sz});return y}
@@ -74,5 +71,5 @@ export function buildStageWorld(terrain){
  const dummy=new T.Object3D(),materials=[];
  for(const {shape,color,glow,items} of batches.values()){const mat=retroMaterial(color,shape==='cone'&&s===1?14:shape==='cylinder'&&s===1?7:glow&&s===3?9:[5,6,8,10,11][s-1],{glow,occlusion:true});materials.push(mat);const m=new T.InstancedMesh(geometries[shape],mat,items.length);items.forEach((p,i)=>{dummy.position.set(p.x,p.y,p.z);dummy.scale.set(p.sx,p.sy,p.sz);dummy.rotation.set(0,p.rotation,0);dummy.updateMatrix();m.setMatrixAt(i,dummy.matrix)});m.castShadow=true;m.receiveShadow=true;m.computeBoundingSphere();group.add(m)}
  terrain.rebuildNavigation();
- return {group,surface,covers,drawCalls:batches.size+1,dispose(){group.removeFromParent();ground.dispose();groundMat.dispose();Object.values(geometries).forEach(g=>g.dispose());materials.forEach(m=>m.dispose());group.traverse(o=>{if(o.isInstancedMesh)o.dispose()})}};
+ return {group,surface,covers,drawCalls:batches.size+groundView.drawCalls,dispose(){group.removeFromParent();groundView.dispose();Object.values(geometries).forEach(g=>g.dispose());materials.forEach(m=>m.dispose());group.traverse(o=>{if(o.isInstancedMesh)o.dispose()})}};
 }

@@ -1,4 +1,4 @@
-import {BALANCE as B} from './progression.js?v=16';
+import {BALANCE as B} from './progression.js?v=17';
 export class DashEffects{
  constructor(api){this.api=api;this.echo=null;this.wake=[]}
  clear(){if(this.echo)this.api.remove(this.echo.visual);for(const s of this.wake)this.api.remove(s.visual);this.echo=null;this.wake=[]}

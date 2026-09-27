@@ -1,23 +1,31 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>Riftborn audio verification</title>
-<button id="render">Render both arrangements</button><pre id="result">Ready</pre>
+<button id="render">Render menu + both campaign scores</button><pre id="result">Ready</pre>
 <script type="module">
 import {createMusicPlayer,MUSIC_TEMPO} from '../soundtrack.js';
 document.querySelector('#render').onclick=async()=>{
- const result=document.querySelector('#result');result.textContent='Rendering';
+ const result=document.querySelector('#result'),button=document.querySelector('#render');result.textContent='Rendering';button.disabled=true;
  try{
   const results=[];
-  for(const death of [false,true]){
-   const tick=60/(death?MUSIC_TEMPO.death:MUSIC_TEMPO.normal)/4,length=256*tick+4;
+  for(const spec of [{name:'Menu',death:false,activity:'menu',steps:256},{name:'Normal',death:false,activity:'normal',steps:512},{name:'Death',death:true,activity:'normal',steps:512}]){
+   const {death,activity,steps}=spec,tick=60/(death?MUSIC_TEMPO.death:MUSIC_TEMPO.normal)/4,length=steps*tick+4;
    const ctx=new OfflineAudioContext(2,Math.ceil(length*44100),44100),master=ctx.createGain();
    master.gain.value=.22;master.connect(ctx.destination);const player=createMusicPlayer(ctx,master);
-   for(let step=0;step<256;step++)player.schedule(step,.02+step*tick,death);
+   // Schedule in bounded windows as time advances. Enqueuing the entire song at
+   // t=0 would count future sources as active and silently truncate it at 96.
+   let step=0;
+   const schedule=until=>{while(step<steps&&.02+step*tick<until){player.schedule(step,.02+step*tick,death,1,activity);step++}};
+   schedule(.4);
+   const windows=[];
+   for(let time=.25;time<steps*tick;time+=.25)windows.push(ctx.suspend(time).then(()=>{schedule(ctx.currentTime+.4);return ctx.resume()}));
    const rendered=await ctx.startRendering();let peak=0,energy=0,finite=true;
+   await Promise.all(windows);
    for(let c=0;c<2;c++)for(const x of rendered.getChannelData(c)){peak=Math.max(peak,Math.abs(x));energy+=x*x;finite&&=Number.isFinite(x)}
    const rms=Math.sqrt(energy/rendered.length/2);
-   if(!finite||peak>=1||rms<.005)throw new Error('Invalid audio signal');
-   results.push({mode:death?'Death':'Normal',seconds:length,peak,rms,finite});
+   const halves=[0,1].map(half=>{let sum=0,count=0;const start=Math.floor(half*steps*tick*.5*44100),end=Math.floor((half+1)*steps*tick*.5*44100);for(let c=0;c<2;c++)for(const x of rendered.getChannelData(c).subarray(start,end)){sum+=x*x;count++}return Math.sqrt(sum/count)});
+   if(!finite||peak>=1||rms<.001||halves.some(value=>value<.001)||player.metrics.dropped||step!==steps)throw new Error('Invalid/truncated audio signal: '+JSON.stringify({mode:spec.name,peak,rms,halves,step,metrics:player.metrics}));
+   results.push({mode:spec.name,bars:steps/16,seconds:length,peak,rms,halves,finite,voices:player.metrics});
   }
   result.textContent='PASS '+JSON.stringify(results,null,2);
- }catch(e){result.textContent='FAIL '+e.stack}
+ }catch(e){result.textContent='FAIL '+e.stack}finally{button.disabled=false}
 };
 </script></html>

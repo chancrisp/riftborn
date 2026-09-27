@@ -1,4 +1,4 @@
-import {BALANCE as B} from './progression.js?v=16';
+import {BALANCE as B} from './progression.js?v=17';
 // Bounded secondary effects use the same collision and damage functions as primary
 // weapons. Shot groups are shared by all pellets from one trigger pull.
 export class CombatEffects{

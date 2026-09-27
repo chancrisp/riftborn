@@ -1,6 +1,6 @@
 import * as T from 'three';
-import {retroMaterial} from './retro.js?v=16';
-import {randomSource} from './terrain.js?v=16';
+import {retroMaterial} from './retro.js?v=17';
+import {randomSource} from './terrain.js?v=17';
 
 // BALANCE: drops expire quickly and refresh their timer instead of stacking strength.
 // Durations are seconds; movement/fire multipliers are applied by game.js.

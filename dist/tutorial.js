@@ -21,10 +21,10 @@ export function tutorialCopy(t,{bindings,keyLabel,input,weapon}){
  const key=action=>keyLabel(bindings[action]);
  const copy={
   move:['MOVE',input==='touch'?'Use the left stick to move.':input==='pad'?'Left stick · Move around the courtyard.':`${['forward','left','back','right'].map(key).join(' / ')} · Move around the courtyard.`],
-  dash:['DASH',input==='touch'?'Tap DASH while moving.':input==='pad'?'A · Dash while moving.':`${key('dash')} · Dash while moving.`],
+  dash:['DASH',input==='touch'?'Tap DASH while moving to evade danger.':input==='pad'?'A · Dash while moving to evade danger.':`${key('dash')} · Dash while moving to evade danger.`],
   shoot:['AIM & FIRE',input==='touch'?'Right stick to aim. Hold FIRE to shoot.':input==='pad'?'Right stick to aim. Right trigger to fire.':`Aim with the mouse. Hold ${key('fire')} to fire.`],
   weapon:['SWITCH WEAPONS',input==='touch'?'Tap a different weapon along the bottom.':input==='pad'?'Use either bumper to switch weapons.':`${key('weapon1')}–${key('weapon5')} or click a weapon slot. Try another weapon.`],
-  combat:['DEFEAT '+TUTORIAL_GOAL+' ENEMIES',`${t.kills} / ${TUTORIAL_GOAL} · Try your weapons on these slow enemies.`],
+  combat:['DEFEAT '+TUTORIAL_GOAL+' ENEMIES',`${t.kills} / ${TUTORIAL_GOAL} · Try your weapons. Keep moving; solid stone blocks shots.`],
   rift:['ENTER THE RIFT','Follow the arrow. Step into the rift to finish.']
  };
  const [title,hint]=copy[t.step];return {title,hint,weapon:`${weapon.label} · ${weapon.description}`};

@@ -1,9 +1,13 @@
+import {EXTRA_SOUNDS,EXTRA_LAYERS,EFFECT_GAPS,ENEMY_VOICES,STEP_SOUNDS,AMBIENT_SOUNDS} from '../dist/audio-effects.js';
+import {recordWeaponKill,recordDiscovery,completeMasteryRun,masteryEntries,trackMastery,cosmeticAvailable,COSMETICS} from '../dist/mastery.js';
+import {createLandmark,LANDMARKS} from '../dist/landmarks.js';
+import {CampaignSequence,EncounterPacing,movementResponse,STAGE_STORIES} from '../dist/campaign.js';
 import {updateCutaway} from '../dist/occlusion.js';
 import {BuildFeedback,WEAPON_FEEDBACK} from '../dist/combat-feedback.js';
 import {dangerMarker,disposeMarker,chargePath} from '../dist/warnings.js';
 import {ScoreOutbox} from '../dist/score-outbox.js';
 import {compareRun} from '../dist/run-history.js';
-import {UPGRADE_INFO,shotStats,applyUpgrade,upgradePreview} from '../dist/upgrades.js';
+import {UPGRADE_INFO,shotStats,applyUpgrade,upgradePreview,modPreview,dashPreview} from '../dist/upgrades.js';
 import {loadProfile,saveProfile,award,recordEnemy,equipCosmetic,rememberRun,BESTIARY} from '../dist/profile.js';
 import {CHALLENGE,NodeCharge,quarryImpact,anchorMultiplier} from '../dist/challenges.js';
 import {DashEffects} from '../dist/dash-traits.js';
@@ -46,9 +50,11 @@ const listeners=new Map();
 const nodes=new Map();const document={body:new Element(),querySelector(s){if(!nodes.has(s))nodes.set(s,new Element());return nodes.get(s)},querySelectorAll(s){return s==='.weapon'?nodes.get('#weapons').children:[]},createElement(){return new Element()},addEventListener(){}};
 class Renderer {constructor(){this.shadowMap={};this.info={reset(){}}}setPixelRatio(){}setSize(){}}
 class Composer {addPass(){}render(){}setSize(){}setPixelRatio(){}}
-const context={updateCutaway,BuildFeedback,WEAPON_FEEDBACK,dangerMarker,disposeMarker,chargePath,ScoreOutbox,compareRun,UPGRADE_INFO,shotStats,applyUpgrade,upgradePreview,randomSource,loadProfile,saveProfile,award,recordEnemy,equipCosmetic,rememberRun,BESTIARY,CHALLENGE,NodeCharge,quarryImpact,anchorMultiplier,DashEffects,SkullTrial,TRIAL_NAMES,trialLocations,CombatEffects,createBuild,RewardQueue,MODS,DASH_TRAITS,modOffer,shuffled,BALANCE,GAMEPLAY_VERSION,SimulationClock,PadMenu,T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,DEATH_TYPES,RUN_MODES,enemyPool,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{__RIFTBORN_TEST__:true},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console:{...console,error(...args){if(args[0]!=='Audio startup failed')console.error(...args)}},setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(name,fn){listeners.set(name,fn)},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
+const context={EXTRA_SOUNDS,EXTRA_LAYERS,EFFECT_GAPS,ENEMY_VOICES,STEP_SOUNDS,AMBIENT_SOUNDS,recordWeaponKill,recordDiscovery,completeMasteryRun,masteryEntries,trackMastery,cosmeticAvailable,COSMETICS,createLandmark,LANDMARKS,CampaignSequence,EncounterPacing,movementResponse,STAGE_STORIES,updateCutaway,BuildFeedback,WEAPON_FEEDBACK,dangerMarker,disposeMarker,chargePath,ScoreOutbox,compareRun,UPGRADE_INFO,shotStats,applyUpgrade,upgradePreview,modPreview,dashPreview,randomSource,loadProfile,saveProfile,award,recordEnemy,equipCosmetic,rememberRun,BESTIARY,CHALLENGE,NodeCharge,quarryImpact,anchorMultiplier,DashEffects,SkullTrial,TRIAL_NAMES,trialLocations,CombatEffects,createBuild,RewardQueue,MODS,DASH_TRAITS,modOffer,shuffled,BALANCE,GAMEPLAY_VERSION,SimulationClock,PadMenu,T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,DEATH_TYPES,RUN_MODES,enemyPool,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{__RIFTBORN_TEST__:true},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console:{...console,error(...args){if(args[0]!=='Audio startup failed')console.error(...args)}},setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(name,fn){listeners.set(name,fn)},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
 Object.assign(context,{POWERUPS,DROP_LIFETIME,MAX_DROPS,STATUE_BONUS,rollPowerup,createBoons,collectBoon,tickBoons,absorbDamage,createStatues,createTutorial,tutorialCopy,TUTORIAL_PORTAL,TUTORIAL_GOAL,createStorm,createMusicPlayer,MusicIntensity,renderHeight,fogRange,FramePacer,traceWorld,hitBody,pointAt,createTerrain,buildStageWorld,retroMaterial,retroCharacter,retroResolution,RetroShader,ShaderPass:class{}});
 vm.createContext(context);
+// Keep generated run seeds and gameplay randomness reproducible in this VM.
+vm.runInContext('Math.random=randomSource(7361)',context);
 const source=fs.readFileSync(new URL('../dist/game.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
 vm.runInContext(source+`\n globalThis.test={height,start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun,activatePortal,enterStage,hurtEnemy,bossUpdate,updateCombatUI,moveWithCollision,portalBearing,setNightmare,ambient,sun,rim,storm, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed,stage,stageKills,stageGoal,portalActive,bossSpawned,victory,gems,portal:stagePortal.position}},setAim(v){aim=v;aimPitch=0},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
 const t=context.test;
@@ -83,7 +89,7 @@ for(let weapon=0;weapon<5;weapon++){
  assert.ok(enemy.hp<500,WEAPONS[weapon].label+' should hit the target');
 }
 for(const type of Object.keys(ENEMY_TYPES)){
- t.start();const e=t.spawnEnemy(type);e.x=0;e.z=type==='brute'?2:7;e.cool=-1;t.enemyUpdate(e,.016);
+ t.start();const e=t.spawnEnemy(type);e.x=0;e.z=type==='brute'?2:7;e.spawn=0;e.cool=-1;t.enemyUpdate(e,.016);
  if(type==='gunner'){assert.equal(t.state.shots.length,0);t.enemyUpdate(e,.3);assert.equal(t.state.shots.length,3)}
  if(type==='mortar'||type==='brute')assert.ok(t.state.hazards.length>0);
  if(type==='charger'){assert.equal(e.state,'windup');t.enemyUpdate(e,.9);assert.equal(e.state,'charge')}
@@ -150,7 +156,7 @@ assert.ok(Array.from(t.storm.rain.geometry.attributes.position.array).every(Numb
 t.setNightmare(false);assert.equal(t.ambient.intensity,dayAmbient);assert.equal(t.storm.group.visible,false);assert.equal(t.storm.light.intensity,0);
 console.log('PASS: portal routes, compass bearings, Nightmare storm/fog, and clean return to normal lighting.');
 
-t.start();const sniper=t.spawnEnemy('sniper');sniper.x=0;sniper.z=18;sniper.cool=-1;
+t.start();const sniper=t.spawnEnemy('sniper');sniper.x=0;sniper.z=18;sniper.spawn=0;sniper.cool=-1;
 t.enemyUpdate(sniper,.016);assert.equal(sniper.state,'snipe');assert.ok(sniper.warning);assert.equal(t.state.shots.length,0);
 t.enemyUpdate(sniper,.5);assert.equal(t.state.shots.length,0);t.enemyUpdate(sniper,.5);assert.equal(t.state.shots.length,1);assert.equal(sniper.warning,null);
 t.start();const victim=t.spawnEnemy('runner');t.hurtEnemy(victim,10000);const carried=t.state.gems.reduce((n,g)=>n+g.v,0),xp=t.state.player.xp;t.activatePortal();t.enterStage();assert.equal(t.state.player.xp,xp+carried);assert.equal(t.state.player.inv,2);
@@ -216,20 +222,20 @@ esc();assert.equal(t.state.mode,'pause');assert.equal(death.state.runDeath,true,
 assert.equal(death.setDeathMode(false),false,'A live run cannot change difficulty');
 t.openPanel('#settings');esc();assert.equal(t.state.mode,'pause');assert.equal(death.state.runDeath,true);esc();
 t.state.player.inv=0;death.hurtPlayer(10);assert.equal(t.state.player.hp,85,'Death damage is multiplied exactly once');
-const faster=t.spawnEnemy('charger');Object.assign(faster,{x:0,z:3,cool:10});t.enemyUpdate(faster,.05);const fastDistance=Math.hypot(faster.x,faster.z-3);
+const faster=t.spawnEnemy('charger');Object.assign(faster,{x:0,z:3,cool:10,spawn:0});t.enemyUpdate(faster,.05);const fastDistance=Math.hypot(faster.x,faster.z-3);
 t.setMode('menu');death.setDeathMode(false);t.start();t.state.player.inv=0;death.hurtPlayer(10);assert.equal(t.state.player.hp,90);
-const ordinary=t.spawnEnemy('charger');Object.assign(ordinary,{x:0,z:3,cool:10});t.enemyUpdate(ordinary,.05);assert.ok(fastDistance>Math.hypot(ordinary.x,ordinary.z-3)*1.3,'Death enemies move faster on the same surface');
+const ordinary=t.spawnEnemy('charger');Object.assign(ordinary,{x:0,z:3,cool:10,spawn:0});t.enemyUpdate(ordinary,.05);assert.ok(fastDistance>Math.hypot(ordinary.x,ordinary.z-3)*1.3,'Death enemies move faster on the same surface');
 for(let stage=1;stage<=5;stage++){
  const normal=enemyPool(['runner','brute'],false,stage),hard=enemyPool(normal,true,stage);
  assert.ok(normal.every(k=>!DEATH_TYPES[k]));assert.ok(hard.includes('revenant')&&hard.includes('hexer'));assert.equal(hard.includes('broodmother'),stage>1);
 }
 t.setMode('menu');death.setDeathMode(true);
 for(const kind of Object.keys(DEATH_TYPES)){
- t.start();const e=t.spawnEnemy(kind);Object.assign(e,{x:0,z:6,cool:-1});t.enemyUpdate(e,.016);assert.equal(e.state,'deathWindup');assert.equal(t.state.hazards.length,0);
+ t.start();const e=t.spawnEnemy(kind);Object.assign(e,{x:0,z:6,cool:-1,spawn:0});t.enemyUpdate(e,.016);assert.equal(e.state,'deathWindup');assert.equal(t.state.hazards.length,0);
  t.enemyUpdate(e,1.3);
  if(kind==='revenant'){assert.equal(e.state,'deathRush');const before={x:e.x,z:e.z};t.enemyUpdate(e,.1);assert.ok(Math.hypot(e.x-before.x,e.z-before.z)>1,'Revenant rush travels after its warning')}
  if(kind==='hexer'){assert.equal(t.state.hazards.length,5);assert.ok(t.state.hazards.every(h=>h.kind==='hex'),'Hexer marks a delayed cross attack')}
- if(kind==='broodmother'){assert.equal(t.state.enemies.filter(m=>m.kind==='skitter').length,3,'Broodmother releases crawlers');for(let i=0;i<8;i++){e.state='approach';e.cool=-1;t.enemyUpdate(e,.016);t.enemyUpdate(e,1.3)}assert.ok(t.state.enemies.filter(m=>m.kind==='skitter').length<=8,'Summons remain bounded')}
+ if(kind==='broodmother'){assert.equal(t.state.enemies.filter(m=>m.kind==='skitter').length,3,'Broodmother releases crawlers');for(let i=0;i<8;i++){e.state='approach';e.spawn=0;e.cool=-1;t.enemyUpdate(e,.016);t.enemyUpdate(e,1.3)}assert.ok(t.state.enemies.filter(m=>m.kind==='skitter').length<=8,'Summons remain bounded')}
 }
 for(const kind of [...Object.keys(ENEMY_TYPES),...Object.keys(DEATH_TYPES),'warden']){
  const model=retroCharacter(kind,()=>{throw Error('Monsters must not carry player firearms')});assert.equal(model.monster,true);assert.equal(model.gunMount.visible,false);
@@ -255,8 +261,8 @@ assert.ok(deathSpacing<death.audio.next/death.audio.step);assert.notDeepEqual(de
 notes.length=0;death.audio.ctx.currentTime=600;death.audio.tick();assert.ok(notes.length<=2,'Background catchup must not schedule a burst of stale notes');
 assert.ok(notes.every(n=>n.time>=600));
 notes.length=0;t.prefs.muted=true;death.audio.tick();assert.equal(notes.length,0);t.prefs.muted=false;
-t.start(true);death.audio.tick();assert.equal(notes.length,0,'Attract demo never schedules music');
-console.log('PASS: distinct mode arrangements and tempos, bounded audio catchup, mute and silent demo.');
+t.start(true);death.audio.ctx.currentTime+=1;death.audio.tick();assert.ok(notes.length>0,'Unlocked main menu keeps its music during the CPU demo');
+console.log('PASS: distinct mode arrangements and tempos, bounded audio catchup, mute and unlocked menu music.');
 
 vm.runInContext('globalThis.trainingTest={get state(){return {tutorial,terrain,runId,runDeath,pending:pendingScores.size}}}',context);
 const training=context.trainingTest;let tutorialPosts=0;context.fetch=async()=>{tutorialPosts++;return {ok:true,json:async()=>({scores:[]})}};

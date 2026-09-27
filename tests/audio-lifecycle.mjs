@@ -1,3 +1,4 @@
+import {EXTRA_SOUNDS,EXTRA_LAYERS,EFFECT_GAPS,ENEMY_VOICES,STEP_SOUNDS,AMBIENT_SOUNDS} from '../dist/audio-effects.js';
 import {MusicIntensity} from '../dist/soundtrack.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -16,7 +17,7 @@ class Context{
 }
 const elements=new Map(),$=id=>{if(!elements.has(id))elements.set(id,{textContent:''});return elements.get(id)};
 const prefs={master:100,music:70,effects:100,muted:false};
-const context={MusicIntensity,document:{hidden:false},overlay:null,bossSpawned:false,quarryState:"dormant",trial:null,window:{AudioContext:Context},prefs,demoActive:false,mode:'play',runDeath:false,runTuning:{bpm:140},console,$,savePrefs(){},syncSettings(){},setTimeout:()=>{timers++;return timers},clearTimeout(){},createMusicPlayer:()=>({schedule(){notes++}})};
+const context={EXTRA_SOUNDS,EXTRA_LAYERS,EFFECT_GAPS,ENEMY_VOICES,STEP_SOUNDS,AMBIENT_SOUNDS,menuDeath:false,RUN_MODES:{normal:{bpm:140},death:{bpm:168}},cinematic:null,MusicIntensity,document:{hidden:false},overlay:null,bossSpawned:false,quarryState:"dormant",trial:null,window:{AudioContext:Context},prefs,demoActive:false,mode:'play',runDeath:false,runTuning:{bpm:140},console,$,savePrefs(){},syncSettings(){},setTimeout:()=>{timers++;return timers},clearTimeout(){},createMusicPlayer:()=>({schedule(){notes++}})};
 vm.createContext(context);vm.runInContext(audioSource+';globalThis.subject=audio;',context);
 const audio=context.subject;audio.start();await Promise.resolve();audio.tick();
 assert.ok(resumes>0,'First run must explicitly resume a suspended AudioContext');
@@ -32,3 +33,10 @@ console.log('PASS: first-run audio unlock, interrupted-context recovery, and con
 
 const scheduled=notes;context.document.hidden=true;audio.tick();assert.equal(notes,scheduled);context.document.hidden=false;audio.ctx.currentTime=100;audio.tick();assert.ok(notes-scheduled<=2,'No catch-up scheduling after hidden tab');
 console.log('PASS hidden audio: no catch-up burst.');
+context.demoActive=true;context.mode='menu';prefs.muted=false;audio.ctx.currentTime+=1;const beforeMenu=notes;audio.tick();assert.ok(notes>beforeMenu,'Main menu schedules music after audio has been unlocked');
+const beforeDemoFX=notes;audio.fx('rifle');assert.equal(notes,beforeDemoFX,'CPU demo weapon effects stay silent');
+audio.fx('uiOpen');assert.ok(notes>beforeDemoFX,'Menu actions can make a quiet interface cue');
+prefs.effects=0;const beforeMutedFX=notes;audio.fx('uiConfirm');assert.equal(notes,beforeMutedFX,'Zero effects volume avoids scheduling silent voices');
+
+context.demoActive=false;context.mode='play';prefs.effects=100;audio.sfxVoices=25;audio.ctx.currentTime+=1;const crowded=notes;audio.fx('stepStone');assert.equal(notes,crowded,'Optional foley reserves voices for warnings');audio.fx('warnCharge');assert.ok(notes>crowded,'Attack cues can use the reserved headroom');
+console.log('PASS menu audio and effects: gesture-unlocked menu score, silent CPU combat, interface cues, effects mute and warning voice reserve.');

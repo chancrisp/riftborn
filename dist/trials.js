@@ -11,11 +11,11 @@ export class SkullTrial{
 export const TRIAL_NAMES=['HUNT THE RESTLESS','QUARRY HUNT','VENT HUNT','ANCHOR GUARD'];
 // Validate all placements before consuming a statue. safeNear must find distinct,
 // traversable sites, not silently clamp the roster into the same blocked cell.
-export function trialLocations(terrain,statue,count=4){
+export function trialLocations(terrain,statue,count=4,player=null){
  const sites=[];
  for(let i=0;i<32&&sites.length<count;i++){
   const a=i*Math.PI*2/13,r=5+Math.floor(i/13)*2,p=terrain.safeNear(statue.x+Math.sin(a)*r,statue.z+Math.cos(a)*r,1.2);
-  if(!p||!terrain.clear(p.x,p.z,1.2)||Math.hypot(p.x-statue.x,p.z-statue.z)>13||sites.some(s=>Math.hypot(s.x-p.x,s.z-p.z)<3))continue;
+  if(!p||(player&&Math.hypot(p.x-player.x,p.z-player.z)<6)||!terrain.clear(p.x,p.z,1.2)||Math.hypot(p.x-statue.x,p.z-statue.z)>13||sites.some(s=>Math.hypot(s.x-p.x,s.z-p.z)<3))continue;
   sites.push(p);
  }
  return sites.length===count?sites:[];

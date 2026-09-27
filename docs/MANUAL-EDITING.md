@@ -79,3 +79,26 @@ Practice adds **Camera obstruction**, **Toggle zoom** and **Disable/Enable cutaw
 New checks: `node tests/refinement.mjs`, `node tests/occlusion.mjs`, `node tests/outbox.mjs`, `node tests/polish-pacing.mjs`. The pacing script records actual HP removed by `hurtPlayer` separately from healing and writes ignored `.sites-runtime/refinement-pacing.json`. Terrain seeds are fixed, but random reward offers and visual RNG can still vary outcomes; do not present a single sample as a deterministic balance result.
 
 For browser storage/audio checking, copy `tests/refinement-browser.html` to `dist/qa-refinement.html` temporarily and visit the loopback page. It uses a separate QA IndexedDB database and stubbed network sender, never `/api/scores`. Its reload button verifies durable recovery; an offline audio graph checks nonzero output and source cleanup. The probe is excluded from the public asset whitelist; remove the temporary copy after use.
+
+## Campaign quality editing map
+
+- `campaign.js`: sequence durations/captions, `CampaignSequence`, `EncounterPacing`, movement response and stage story lines. `game.js` owns `beginSequence`/`completeSequence`/`resetSequence`, model/camera animation and input dispatch. Never overwrite a newly started sequence with a pause or reward mode.
+- `landmarks.js`: five landmark definitions/lore, low-poly construction, reachable placement, cover/collision registration, once-only claim and owned-resource disposal. Construct after scenery and before statues; dispose before replacing terrain. `game.js` owns F/controller/touch interaction and the reward/profile hooks.
+- `mastery.js`: sanitized local progress, eligible kill/discovery recording, once-only challenge outcomes, goals and cosmetic availability. `profile.js` migrates old profiles additively. Keep `realProgress()` gating at every real-run hook; mock/practice never persists.
+- `upgrades.js`: `modPreview` receives the offered weapon; `dashPreview` receives the equipped weapon and current build. Derive text from BALANCE/shotStats, distinguish base from critical damage, and do not change state while making a preview.
+- `game.js`: `ordinaryOptions`, `assistedPitch`, `updateAmbient`, `renderProfile` and `renderRunSummary` connect gameplay to the above modules. Uppercase section comments continue to identify editing areas.
+
+Practice adds **Visit landmark** and **Hold boss entrance**. Its shortcuts intentionally bypass combat requirements for visual inspection only. Real sequences can be paused by the configured Pause key/controller Menu and skipped by Escape/controller B. Continue resumes a paused sequence; Enter/Space match the visible button.
+
+Focused checks: `campaign-flow.mjs`, `campaign-quality.mjs`, `build-previews.mjs`, `mastery.mjs`, `landmarks.mjs`, `campaign-runs.mjs`. The last uses real 60Hz gameplay/projectiles/portals/drafts with 10,000 starting HP and writes `.sites-runtime/campaign-runs.json`; it is not a human balance test. See `CAMPAIGN-QUALITY-VALIDATION.md` for evidence and limits.
+
+
+## Terrain clarity and expanded audio
+
+- `terrain.js`: `MAX_WALK_SLOPE`, `surfaceGradient`/`surfaceSlope`, swept `canMove`, contour projection in `move`, and navigation edge clearance. Portal clearing blend radii are 5 and 10 units. Keep rendered and collision heightfields identical. A point can pass a directional slope test while its face remains too steep in another direction; use the face gradient for walkability.
+- `terrain-visuals.js`: exact indexed surface grouped into walkable treads and dark rock faces, vertical cliff UVs and upward-facing upper rim ribbons. No collision/height changes. It uses at most three draw calls per world.
+- `preferences.js` and the Pixelation select in `index.html`: Ultra fine is 720 pixels of internal height; `graphics.js` preserves explicit resolutions. Higher resolution costs more GPU time.
+- `audio-effects.js`: compact oscillator definitions, optional layers, cooldowns and stage/enemy cue maps. `game.js` owns actual triggers in `updateFoley`, `enemySound`, `updateAmbient` and interaction/combat events. SFX reserve headroom for warnings and stop adding voices at the bound.
+- `soundtrack.js`: dedicated 16-bar menu score, alternating 32-bar Normal/Death arrangements and bar-latched encounter intensity. `game.js` owns gesture unlock and gain targets. CPU-demo SFX stay silent, but menu music plays once unlocked.
+
+Focused regressions: `terrain-traversal.mjs`, `terrain-readability.mjs`, `audio-effects.mjs`, `audio-lifecycle.mjs`, `music.mjs`. `music-browser.html` renders all three arrangements through native OfflineAudioContext; the temporary live probe checks the real main-menu graph after a user gesture. Neither probe ships.

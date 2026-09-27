@@ -9,6 +9,8 @@ assert.equal(bad.pixelation,'auto');assert.equal(bad.fog,0);assert.equal(bad.fps
 const {renderHeight,fogRange,FramePacer}=await import('../dist/graphics.js');
 assert.equal(renderHeight('auto',false,false),320);assert.equal(renderHeight('auto',true,false),240);assert.equal(renderHeight('auto',false,true),240);
 assert.equal(renderHeight(480,false,true),480,'An explicit pixelation choice is never silently overridden');
+assert.equal(loadPreferences({getItem:()=>JSON.stringify({pixelation:720})}).pixelation,720,'Ultra fine survives saving and reloading');
+assert.equal(renderHeight(720,true,true),720,'Ultra fine remains explicit even on mobile or after a slow frame');
 assert.ok(fogRange(0,true).near>200);assert.ok(fogRange(100,true).far<fogRange(50,true).far);assert.ok(fogRange(50,true).near>=36);assert.ok(fogRange(50,true).far<80);assert.ok(fogRange(100,true,50).near>=53,'Zoomed-out player remains before the fog');
 assert.equal(defaults.nightmare,false);assert.equal(stored.nightmare,false,'Legacy Night Mode retires to normal');assert.equal(loadPreferences({getItem:()=>JSON.stringify({nightmare:true})}).nightmare,true);
 for(const cap of [30,60,120,0]){const pacer=new FramePacer();let frames=0;for(let i=0;i<1440;i++)if(pacer.ready(i*1000/144,cap))frames++;assert.ok(Math.abs(frames-(cap||144)*10)<=1,`Frame cap ${cap} at 144Hz: ${frames}`)}
