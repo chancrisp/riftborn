@@ -1,5 +1,21 @@
 # Riftborn
 
+## Builds & Bargains — local update, 27 September 2026
+
+This checkout implements the new run-build update. **It has not been deployed.** The existing public site, account, audience and domain are unchanged. Gameplay version for new scores is `builds-1`.
+
+Keep moving, manually aim/fire, collect XP and choose ordinary upgrades. Clear each stage's quota, then enter its rift. All five weapons remain available from the start. After Meadows, choose **Rift Echo** (one 50%-damage repeated volley after a dash) or **Void Wake** (a short slowing trail). Quarry now requires defeating **Iron Maw** after its 22-kill quota; bait its charge into solid cover to expose it. Defeating it guarantees a major weapon-mod draft before the exit opens.
+
+The five independent run-only mods are **Splinter Rounds** (Rifle split shots), **Storm Needle** (Stinger hit-charge chains), **Graveburst** (Scatter close-kill fragments), **Rift Scar** (Lancer damaging flight traces), and **Event Horizon** (Havoc delayed pull/explosion). Ordinary upgrades remain a separate nine-item pool. Queued rewards pause combat and offer only valid choices. Pause lists your build and each effect.
+
+One skull statue in each of the first four stages offers a **Skull Trial**. Preview the encounter and permanent-for-this-run +5 percentage-point curse before accepting. Defeat the marked enemies to choose one mod draft, ordinary draft, or **35 healing + 30 ward for 10s**. Other statues explicitly offer challenge without loot. Caldera trials add warned vents; Citadel trials use three destructible protective anchors. Abandon an active trial in Pause or leave through an open rift: the curse stays, but no reward is earned. Quarry waits for completion or explicit abandonment before its required boss. The Warden's second phase adds two charging nodes: break both within six seconds for a vulnerability opening, or avoid the warned blasts.
+
+The **Journal** remembers discovered enemies, milestones, an editable last username, and two selectable cosmetic rewards (trial skull badge / Warden ember dash). No persistent combat stats or weapon access are gated. End-of-run reports show actual damage by weapon, build, stage/time, curse/trials and the actual lethal source. New leaderboard queries separate Normal, Death and historically unknown modes and filter gameplay version **before** the top-25 limit. Older servers remain honestly labeled as a combined legacy board; local personal results remain separate.
+
+Weapon switching cannot shorten an existing shot cooldown. Havoc uses one critical roll per blast; Ghost Rounds remains bullet-only. Gameplay uses bounded 60 Hz simulation independent of render caps. Gaps over 250ms are discarded to avoid unseen catch-up damage. Controller menus include visible focus, confirm/back and an on-screen username keyboard. Mouse/keyboard, saved bindings and touch controls remain available.
+
+See [tuning and interaction rules](docs/BUILDS-BALANCE.md), [manual editing and reproducible scenarios](docs/MANUAL-EDITING.md), and [validation / limitations](docs/BUILDS-VALIDATION.md). Fun and balance still need human playtesting.
+
 Five geographical stages, each rebuilt when entered:
 
 - **Meadows:** rolling hills, shallow valleys, woodland and stone arches.
@@ -16,7 +32,7 @@ Five weapons, stage objectives, portals, XP collection, upgrades, a final boss, 
 
 Regular enemy kills have an 18% chance to drop one temporary powerup: **Speed Boost** (30% movement for 8s), **Rapid Fire** (50% faster firing for 8s), **Insta Kill** (5s; bosses instead take 1.5× damage), **Bone Ward** (30 damage absorption for up to 10s), or **Mend** (+20 health, capped at maximum). Up to four pickups can remain on the ground, expiring after 14s. Repeat pickups refresh rather than stack; their clocks pause with gameplay. Collected effects survive a rift, but a new run clears them.
 
-Each regular stage scatters up to four reachable skull statues away from reserved paths. Approach one and use **Interact** (default **F**, controller **X**, or the touch button). Each statue activates once and adds five percentage points to run difficulty. The HUD appears at **Difficulty: 105%**, then 110%, and so on. This multiplier raises enemy health, speed, damage and spawn cadence, persists across stages, and combines with Death Mode. Starting another run resets it. Interact is rebindable in Settings; older saved keybindings are preserved.
+Each regular stage scatters up to four reachable skull statues away from reserved paths. Approach one and use **Interact** (default **F**, controller **X**, or the touch button), then confirm its preview. Each statue activates once and adds five percentage points to run difficulty. The HUD appears at **Statue curse: 105%**, then 110%, and so on; this is not a measurement of total difficulty. The multiplier raises enemy health, speed, damage and spawn cadence, persists across stages, and combines with Death Mode. Starting another run resets it. Interact is rebindable in Settings; older saved keybindings are preserved. The first statue in stages 1–4 is reward-bearing; see the trial rules above.
 
 The drifting red skull selects **Death Mode** on the main menu. A subtle red screen tint and label show the selection. Esc cancels it before starting (the skull also toggles it for touch users). After username entry, difficulty is locked for that run; Esc only pauses. Death Mode multiplies enemy movement speed by 1.35 and damage by 1.5, including boss attacks, and plays an original 168 BPM score instead of the normal 140 BPM arrangement. Exclusive Revenants telegraph rapid rushes, Hexers mark delayed cross-shaped blasts, and Broodmothers release bounded crawler packs from stage 2 onward.
 
@@ -28,7 +44,7 @@ Nightmare now has heavier rain, a much shorter fog falloff, a dark sky, and a st
 
 ## Development and checks
 
-The centered main menu keeps the title, primary actions and secret skull over a live CPU-driven run at 1.5× speed. The CPU targets enemies, changes weapons, navigates terrain and portals, chooses upgrades, and loops through stages. Demo runs never submit scores and reset completely when the player starts. Starting or replaying a run always requests a fresh username.
+The centered main menu keeps the title, primary actions and secret skull over a live CPU-driven run at 1.5× speed. The CPU targets enemies, changes weapons, navigates terrain and portals, chooses upgrades, and loops through stages. Demo runs never submit scores or profile progress and reset completely when the player starts. Starting or replaying a run always opens username confirmation, now prefilled from the local profile and still editable.
 
 Settings has Graphics, Audio and Controls tabs with keyboard navigation. Graphics offers a Nightmare toggle, automatic or 160/240/320/480-pixel internal vertical resolution, a fog slider including Off, and 30/60/120/unlimited FPS caps. The cap limits rendering without slowing simulation. Actual FPS depends on hardware/display; explicit pixelation choices are not overridden by automatic performance fallback. Audio retains separate master/music/effects levels and mute, with Test sound for an audible check. Starting a run explicitly resumes the audio context; later player input can recover an interrupted context. The sound indicator accounts for zero volume, and toggling sound on restores a zeroed master. Controls retains key rebinding and controller help. Preferences save locally under the existing compatibility key.
 
@@ -54,14 +70,14 @@ Static scenery uses instancing; old terrain geometry, materials and instance buf
 
 ## Editing the game manually
 
-The editable game modules live in `dist/`. They are source files despite the folder name. Look for the uppercase section comments in `game.js`; they mark where each system begins. `dist/server/index.js` is generated by `node build.mjs` — edit `server/` for server changes instead. During a Sites editing session the publishing checkout is `.sites-runtime/source`; the project root is synchronized after publication. Avoid editing both copies at the same time.
+The editable game modules live in `dist/`. They are source files despite the folder name. Look for the uppercase section comments in `game.js`; they mark where each system begins. `dist/server/index.js` is generated by `node build.mjs` — edit `server/` for server changes instead. The working checkout is `.sites-runtime/source`; this local-only handoff also synchronizes the root mirror. Avoid editing both copies at the same time. See [the expanded editing guide](docs/MANUAL-EDITING.md) for the new modules, controls and seeded practice scenarios.
 
 | What you want to change | File and place to look |
 | --- | --- |
 | Weapon damage, fire rate, pellets, range | `dist/rules.js` → `WEAPONS` |
 | Enemy health, speed, damage; Death Mode multipliers | `dist/rules.js` → `ENEMY_TYPES`, `DEATH_TYPES`, `RUN_MODES` |
 | Enemy attacks and movement patterns | `dist/game.js` → `enemyUpdate`, `deathEnemyUpdate`, `bossUpdate` |
-| Player health, speed, dash; permanent upgrades | `dist/game.js` → `freshPlayer`, `dash`, `UPGRADES` |
+| Player health, speed, dash; ordinary run upgrades | `dist/game.js` → `freshPlayer`, `dash`, `UPGRADES` |
 | Powerup chance, duration, colors; statue bonus | `dist/encounters.js` → constants and `POWERUPS` |
 | Powerup speed/fire multipliers and boss exception | `dist/game.js` → `update`, `hurtEnemy` |
 | Tutorial steps, hints, kill goal | `dist/tutorial.js`; `game.js` → `tutorialEvent` for enemy spawning |

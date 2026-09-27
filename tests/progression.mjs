@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+assert.ok(fs.existsSync('dist/progression.js'),'Run builds and the once-only reward queue are required');
+const {createBuild,RewardQueue,modOffer,MODS}=await import('../dist/progression.js');
+const build=createBuild(),q=new RewardQueue();
+assert.equal(MODS.length,5);assert.equal(modOffer(build,()=>.5).length,3);
+build.mods=[0,1,2,3];assert.deepEqual(modOffer(build),[4]);build.mods.push(4);assert.deepEqual(modOffer(build),[]);
+assert.equal(q.add('quarry','major'),true);assert.equal(q.add('quarry','major'),false);q.add('xp:2','ordinary');assert.equal(q.next().type,'major');assert.equal(q.next().type,'ordinary');assert.equal(q.next(),null);
+assert.equal(q.add('quarry','major'),false);assert.equal(createBuild().mods.length,0);
+console.log('PASS builds: distinct/exhausted offers, stable event deduplication and queue order.');

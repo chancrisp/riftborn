@@ -47,3 +47,12 @@ for(const path of ['/monsters.js','/graphics.js','/assets/death-skull.png','/ret
  assert.deepEqual(Buffer.from(await response.arrayBuffer()),fs.readFileSync('dist'+path),'Bundled asset must preserve all bytes: '+path);
 }
 console.log('PASS: D1 schema, score insert/ranking, idempotent retries, invalid payloads, public asset serving.');
+const metaRun={...run,id:'55555555-5555-4555-8555-555555555555',death_mode:false,gameplay_version:'builds-1',outcome:'defeat',statue_count:2,statue_modifier:110};
+assert.equal((await post(metaRun)).status,200);
+const ranked=async(mode,version)=> (await (await worker.fetch(new Request(`https://game.test/api/scores?mode=${mode}&version=${version}`),env)).json());
+const filtered=await ranked('normal','builds-1');assert.equal(filtered.capabilities?.modeFilter,true,'Backend must explicitly support full mode filtering');assert.equal(filtered.scores.length,1);assert.equal(filtered.scores[0].statue_count,2);assert.equal(filtered.scores[0].outcome,'defeat');
+for(let i=0;i<30;i++)await post({...metaRun,id:`66666666-6666-4666-8666-${String(i).padStart(12,'0')}`,score:5000+i,death_mode:true});
+assert.equal((await ranked('normal','builds-1')).scores.length,1,'Filter before LIMIT despite 30 higher Death scores');assert.equal((await ranked('death','builds-1')).scores.length,25);assert.equal((await ranked('unknown','all')).scores[0].gameplay_version,null,'Legacy version stays unknown');
+for(const patch of [{statue_count:-1},{statue_modifier:101},{outcome:'fake'},{gameplay_version:'<script>'}])assert.equal((await post({...metaRun,...patch})).status,400);
+assert.ok(sqlite.prepare('EXPLAIN QUERY PLAN SELECT * FROM scores WHERE death_mode=0 AND gameplay_version=? ORDER BY score DESC,wave DESC,seconds DESC LIMIT 25').all('builds-1').some(r=>r.detail.includes('idx_scores_mode_version')));
+console.log('PASS ranking: additive metadata, preserved unknowns, filters before top 25, mode/version index and validation.');

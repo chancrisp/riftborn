@@ -1,3 +1,10 @@
+import {loadProfile,saveProfile,award,recordEnemy,equipCosmetic,rememberRun,BESTIARY} from '../dist/profile.js';
+import {CHALLENGE,NodeCharge,quarryImpact,anchorMultiplier} from '../dist/challenges.js';
+import {DashEffects} from '../dist/dash-traits.js';
+import {SkullTrial,TRIAL_NAMES,trialLocations} from '../dist/trials.js';
+import {CombatEffects} from '../dist/combat-effects.js';
+import {createBuild,RewardQueue,MODS,DASH_TRAITS,modOffer,shuffled,BALANCE,GAMEPLAY_VERSION} from '../dist/progression.js';
+import {SimulationClock,PadMenu} from '../dist/simulation.js';
 import {POWERUPS,DROP_LIFETIME,MAX_DROPS,STATUE_BONUS,rollPowerup,createBoons,collectBoon,tickBoons,absorbDamage,createStatues} from '../dist/encounters.js';
 import {createTutorial,tutorialCopy,TUTORIAL_PORTAL,TUTORIAL_GOAL} from '../dist/tutorial.js';
 import {createStorm} from '../dist/storm.js';
@@ -7,7 +14,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {fileURLToPath,pathToFileURL} from 'node:url';
-import {createTerrain} from '../dist/terrain.js';
+import {createTerrain,randomSource} from '../dist/terrain.js';
 import {buildStageWorld} from '../dist/scenery.js';
 import {webcrypto} from 'node:crypto';
 import * as Three from 'three';
@@ -33,12 +40,15 @@ const listeners=new Map();
 const nodes=new Map();const document={body:new Element(),querySelector(s){if(!nodes.has(s))nodes.set(s,new Element());return nodes.get(s)},querySelectorAll(s){return s==='.weapon'?nodes.get('#weapons').children:[]},createElement(){return new Element()},addEventListener(){}};
 class Renderer {constructor(){this.shadowMap={}}setPixelRatio(){}setSize(){}}
 class Composer {addPass(){}render(){}setSize(){}setPixelRatio(){}}
-const context={T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,DEATH_TYPES,RUN_MODES,enemyPool,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console:{...console,error(...args){if(args[0]!=='Audio startup failed')console.error(...args)}},setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(name,fn){listeners.set(name,fn)},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
+const context={randomSource,loadProfile,saveProfile,award,recordEnemy,equipCosmetic,rememberRun,BESTIARY,CHALLENGE,NodeCharge,quarryImpact,anchorMultiplier,DashEffects,SkullTrial,TRIAL_NAMES,trialLocations,CombatEffects,createBuild,RewardQueue,MODS,DASH_TRAITS,modOffer,shuffled,BALANCE,GAMEPLAY_VERSION,SimulationClock,PadMenu,T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,DEATH_TYPES,RUN_MODES,enemyPool,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{__RIFTBORN_TEST__:true},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console:{...console,error(...args){if(args[0]!=='Audio startup failed')console.error(...args)}},setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(name,fn){listeners.set(name,fn)},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
 Object.assign(context,{POWERUPS,DROP_LIFETIME,MAX_DROPS,STATUE_BONUS,rollPowerup,createBoons,collectBoon,tickBoons,absorbDamage,createStatues,createTutorial,tutorialCopy,TUTORIAL_PORTAL,TUTORIAL_GOAL,createStorm,createMusicPlayer,renderHeight,fogRange,FramePacer,traceWorld,hitBody,pointAt,createTerrain,buildStageWorld,retroMaterial,retroCharacter,retroResolution,RetroShader,ShaderPass:class{}});
 vm.createContext(context);
 const source=fs.readFileSync(new URL('../dist/game.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
 vm.runInContext(source+`\n globalThis.test={height,start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun,activatePortal,enterStage,hurtEnemy,bossUpdate,updateCombatUI,moveWithCollision,portalBearing,setNightmare,ambient,sun,rim,storm, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed,stage,stageKills,stageGoal,portalActive,bossSpawned,victory,gems,portal:stagePortal.position}},setAim(v){aim=v;aimPitch=0},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
 const t=context.test;
+// Legacy portal-route scenarios now explicitly accept the new mandatory reward.
+function settleRewards(){vm.runInContext('showReward()',context);for(let n=0;n<30&&t.state.mode==='upgrade';n++)nodes.get('#cards').children[0].onclick()}
+const originalActivate=t.activatePortal;t.activatePortal=()=>{originalActivate();const mini=t.state.enemies.find(e=>e.miniboss&&e.hp>0);if(mini)t.hurtEnemy(mini,1e6);settleRewards()};
 assert.equal(typeof document.querySelector('#deathSkull').onclick,'function','The red skull must enable Death Mode from the menu');
 vm.runInContext(`globalThis.demoTest={updateDemo,start,get state(){return {demoActive,demoAge,runId,pending:pendingScores.size,player,kills,shots,mode}},setPointer(){mouse.moved=true;mouse.x=0;mouse.y=0}}`,context);
 const demo=context.demoTest;
@@ -229,7 +239,7 @@ await nodes.get('#retryScore').onclick();assert.deepEqual(attempts[1],attempts[0
 await nodes.get('#refreshLeaderboard').onclick();const rows=nodes.get('#leaderboardRows').children;
 assert.equal(rows.length,3);assert.ok(rows.every(r=>r.children.length===4));
 assert.equal(rows[0].children[0].children[0].src,'assets/death-skull.png');assert.equal(rows[0].children[0].children[0].alt,'Death Mode');
-assert.equal(rows[1].children[0].children.length,0);assert.equal(rows[2].children[0].children.length,0);
+assert.ok(rows[1].children[0].children.every(c=>!c.src));assert.ok(rows[2].children[0].children.every(c=>!c.src));
 console.log('PASS: immutable Death Mode score on offline retry, shared skull beside player, no skull on normal/unknown runs.');
 
 const notes=[];death.audio.tone=()=>{};death.audio.ctx={state:'running',currentTime:0,resume(){return Promise.resolve()}};death.audio.score={schedule:(step,time,mode,volume)=>notes.push({step,time,mode,volume,events:scoreEvents(step,mode)})};
@@ -252,7 +262,7 @@ nodes.get('#tutorial').onclick();assert.equal(training.state.tutorial.step,'move
 console.log('PASS: tutorial controls, unique walkable courtyard, five easy enemies, exact five-kill rift, completion/abort/replay, no leaderboard submission and clean normal restart.');
 
 vm.runInContext('globalThis.encounterTest={interact,dropPowerup,updatePowerups,get state(){return {boons,powerups,statueWorld,difficultyBonus}}}',context);
-const encounter=context.encounterTest;t.start();const statue=encounter.state.statueWorld.statues[0];assert.ok(statue,'A run must have an optional statue');const tough=t.spawnEnemy('runner');const maxBefore=tough.max;t.state.player.x=statue.x+2;t.state.player.z=statue.z;listeners.get('keydown')({code:t.prefs.bindings.interact,preventDefault(){}});assert.equal(encounter.state.difficultyBonus,5);assert.equal(tough.max,maxBefore*1.05);encounter.interact();assert.equal(encounter.state.difficultyBonus,5,'A statue activates once');assert.equal(nodes.get('#difficultyMeter').textContent,'Difficulty: 105%');
+const encounter=context.encounterTest;t.start();const statue=encounter.state.statueWorld.statues[1];assert.ok(statue,'A run must have an optional statue');const tough=t.spawnEnemy('runner');const maxBefore=tough.max;t.state.player.x=statue.x+2;t.state.player.z=statue.z;listeners.get('keydown')({code:t.prefs.bindings.interact,preventDefault(){}});nodes.get('#cards').children[0].onclick();assert.equal(encounter.state.difficultyBonus,5);assert.equal(tough.max,maxBefore*1.05);encounter.interact();assert.equal(encounter.state.difficultyBonus,5,'A statue activates once');assert.equal(nodes.get('#difficultyMeter').textContent,'Statue curse: 105%');
 for(const kind of Object.keys(POWERUPS)){encounter.dropPowerup(t.state.player.x,t.state.player.z,kind);encounter.updatePowerups(.016);if(kind!=='heal')assert.ok(encounter.state.boons[kind]>0)}assert.equal(encounter.state.powerups.length,0);assert.ok(encounter.state.boons.shield>0);
 const doomed=t.spawnEnemy('brute');t.hurtEnemy(doomed,1);assert.ok(doomed.hp<=0);const warden=t.spawnEnemy('warden'),bossHp=warden.hp;t.hurtEnemy(warden,1);assert.equal(warden.hp,bossHp-1.5,'Insta kill cannot bypass a boss');
 t.state.player.inv=0;const protectedHp=t.state.player.hp;death.hurtPlayer(10);assert.equal(t.state.player.hp,protectedHp);t.activatePortal();t.enterStage();assert.equal(encounter.state.difficultyBonus,5,'Statue difficulty persists through the rift');t.start();assert.equal(encounter.state.difficultyBonus,0);assert.ok(Object.values(encounter.state.boons).every(v=>v===0));assert.equal(encounter.state.powerups.length,0);

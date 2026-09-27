@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+assert.ok(fs.existsSync('dist/trials.js'),'Skull Trials need explicit lifecycle and placement validation');
+const {SkullTrial}=await import('../dist/trials.js');
+let curse=0;const t=new SkullTrial(2);
+assert.equal(t.activate([],()=>curse++),false);assert.equal(curse,0);assert.equal(t.state,'available');
+assert.equal(t.activate(['a','b'],()=>curse++),true);assert.equal(t.activate(['c'],()=>curse++),false);assert.equal(curse,1);
+t.descendant('a','child');assert.equal(t.defeat('ambient'),false);assert.equal(t.defeat('a'),false);assert.equal(t.defeat('b'),false);assert.equal(t.defeat('child'),true);assert.equal(t.state,'completed');assert.equal(t.claim(),true);assert.equal(t.claim(),false);
+const abandoned=new SkullTrial(1);abandoned.activate(['a'],()=>{});abandoned.abandon();assert.equal(abandoned.defeat('a'),false);assert.equal(abandoned.claim(),false);assert.equal(abandoned.state,'abandoned');
+console.log('PASS trials: placement failure, once-only activation, descendants, ambient isolation, completion/claim/abandon.');
