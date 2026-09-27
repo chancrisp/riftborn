@@ -1,0 +1,42 @@
+@font-face{font-family:Crypt;src:url('./assets/crypt-pixel.ttf') format('truetype');font-display:swap}
+:root{--mint:#b8c49a;--yellow:#d4bc78;--ink:#15151e;--white:#ded6be;--muted:#9c9a8b}
+*{border-radius:0!important;backdrop-filter:none!important;transition:none!important}
+body,button,input,select,output,table{font-family:Crypt,'Courier New',monospace!important;font-weight:400!important;font-style:normal!important;letter-spacing:0!important}
+body{background:#15151e;font-size:16px}#game{image-rendering:pixelated;image-rendering:crisp-edges}
+h1,h2,h3,.wordmark,.level strong,.world-state b,.damage,#waveToast,#bossHUD>b,.primary,.card strong,.card p,.eyebrow{font-family:Crypt,'Courier New',monospace!important;font-style:normal!important;font-weight:400!important;letter-spacing:0!important}
+button{background:#292c31!important;border:2px solid!important;border-color:#8e9180 #111318 #111318 #8e9180!important;box-shadow:2px 2px 0 #000!important;color:var(--white)!important;transform:none!important;text-shadow:2px 2px #111!important;font-size:16px!important}
+button:hover,button:focus-visible{background:#434b48!important;color:#ede0a3!important;filter:none!important;outline:2px solid #d4bc78;outline-offset:2px}
+button:active{border-color:#111318 #8e9180 #8e9180 #111318!important;transform:translate(1px,1px)!important}
+#menu{background:#10141e55;padding:28px;text-align:center}.menu-card{width:min(100%,420px);max-width:420px;text-shadow:2px 2px #000}
+.menu-card h1{font-size:clamp(42px,7vw,76px);line-height:1.12;letter-spacing:-2px!important;margin:0 0 12px;text-shadow:3px 3px #24232a,5px 5px #09090e}
+.menu-card h1 span{color:#d4bc78}.menu-card .edition{font:16px Crypt,monospace;letter-spacing:4px!important;margin:8px 0 30px}
+.menu-card .primary{font-size:20px!important;padding:15px;background:#3d4640!important}.menu-card .menu-links{gap:12px}.menu-card .menu-links button{font-size:14px!important}
+.menu-card p,#loadNote{font-size:14px}.modal{background:#0e121ceb}.modal>div{max-width:900px}.settings-panel,.leaderboard-panel,.pause-card{background:#23262b;border:3px solid;border-color:#888879 #111318 #111318 #888879;box-shadow:5px 5px #000;padding:24px}
+h2,.panel-head h2{font-size:28px!important;line-height:1.3;margin:12px 0 22px}.settings-grid h3{font-size:18px!important;color:#d4bc78}.muted,.settings-grid .muted{font-size:14px!important;line-height:1.7}.panel-head{align-items:flex-start}
+.username input{font-family:Crypt,monospace;font-size:16px;background:#11151b;border:2px solid #747a6b;padding:12px;color:#ded6be}input[type=range]{accent-color:#b8c49a}
+.bind-row{font-size:14px}.bind-row button{font-size:12px!important}.mode-btn{font-size:12px!important}.mode-btn.active{color:#ede0a3!important;background:#454c43!important}
+header{background:none;padding:18px}.wordmark{font-size:18px;line-height:1.2;text-shadow:2px 2px #000}.wordmark span{font:10px Crypt!important;letter-spacing:2px!important}.world-state{background:#151a21e8;border:2px solid #858779;box-shadow:3px 3px #000;padding:8px 16px}.world-state b{font-size:16px}.world-state span{font-size:10px}.actions button{font-size:12px!important}
+#status{filter:none}.level{transform:none;background:#20262d;border:2px solid #898a7b;width:52px;height:58px}.level strong{font-size:23px}.health-label,.substats{font-size:10px}.health-label b{font-size:12px}.track{transform:none;background:#11151b;border:2px solid #8e9180;height:16px;padding:2px}.track>div{background:#819c72}.xp-track{height:6px;background:#11151b;border:1px solid #858779}.xp-track>div{background:#c8b574}
+.weapon{height:68px;width:74px;border-bottom-color:var(--rarity)!important;gap:5px}.weapon.active{outline:2px solid #d4bc78;background:#424a41!important}.weapon .name{font-size:10px}.weapon .kind{display:none}.weapon .num{font-size:9px}
+.portal-compass{background:#252330ec;border:2px solid #8e8498;box-shadow:2px 2px #000;padding:7px 12px;top:92px}.portal-compass .compass-arrow{font:26px 'Courier New'!important;color:#b7a0c8;text-shadow:none}.portal-compass b{font-size:10px}.portal-compass small{font-size:10px;color:#b5abbf}
+#bossHUD>b{font-size:16px}#bossFill{background:#967191}#bossHUD>div{border:2px solid #b1a1b1;background:#1e1829}
+#waveToast{font-size:24px;color:#d4bc78;text-shadow:2px 2px #111;top:21%}.damage{font-size:18px}.damage.critical{font-size:22px}
+.card{background:#2b3036!important;border:3px solid!important;border-color:#919780 #111318 #111318 #919780!important;min-height:176px;padding:20px}.card strong{font-size:18px}.card p{font-size:14px}.card .symbol{font-size:24px;color:#c7b77b}.card:hover{transform:none}
+th{background:#252b30;color:#c7b77b;font-size:12px}td{font-size:14px}td,th{border-bottom:1px solid #5c6259;padding:12px 10px}
+.stick{background:#1d2638aa;border:2px solid #aaa98c}.stick span{background:#747c6b;border:2px solid #c6c2a3}.stick small{font-size:10px}#crosshair{border-radius:0!important;border:1px solid #d4bc78;filter:none;box-shadow:none!important}#crosshair.confirmed{border-color:#c89f70}
+@media(max-width:700px){header{padding:10px}.wordmark{font-size:12px}.wordmark span{font-size:8px!important}.world-state{padding:6px}.world-state b{font-size:10px}.world-state span{font-size:8px}.actions button{font-size:10px!important;padding:6px}.menu-card h1{font-size:48px}.menu-card .edition{font-size:12px}.menu-card .menu-links button{font-size:12px!important}.panel-head h2{font-size:22px!important}.settings-panel,.leaderboard-panel,.pause-card{padding:16px}.portal-compass{top:79px}.weapon{width:58px;height:62px}.weapon .name{font-size:8px}.modal h2{font-size:24px!important}.card{min-height:0}.card strong{font-size:16px}.card p{font-size:12px}.primary{min-width:0}}
+@media(max-height:520px){.menu-card h1{font-size:36px}.menu-card .edition{margin-bottom:18px}.menu-card .primary{padding:11px}.menu-card .menu-links{margin-top:10px}}
+
+#hitflash{box-shadow:inset 0 0 0 8px #8b393e}.menu-card h1{overflow-wrap:anywhere}.weapon-sprite{display:block;width:58px;height:27px;background-image:url(./assets/weapons.png);background-repeat:no-repeat;image-rendering:pixelated;background-size:326px 109px}.sprite-0{background-position:-4px -39px}.sprite-1{background-position:-71px -39px}.sprite-2{background-position:-122px -39px}.sprite-3{background-position:-194px -39px}.sprite-4{background-position:-262px -39px}
+
+/* The username step shares the same console panel and focus treatment. */
+.menu-card .brand-title{font-size:clamp(32px,6.8vw,60px);white-space:nowrap;letter-spacing:-2px!important;margin-bottom:32px}.menu-card .edition:empty{display:none}
+#runSetup{z-index:45}.modal>.run-panel{width:min(100%,400px);padding:28px;background:#23262b;border:3px solid;border-color:#888879 #111318 #111318 #888879;box-shadow:5px 5px #000;text-align:left}
+.run-panel h2{margin-top:0}.run-panel .username{color:var(--mint);font-size:16px;letter-spacing:0}
+#playerName{width:100%;padding:12px;margin-top:10px;background:#11151b;border:2px solid #747a6b;color:var(--white);font-size:18px;touch-action:manipulation}
+#playerName:focus{outline:2px solid var(--yellow);outline-offset:2px}#playerName[aria-invalid=true]{border-color:#bc8277}
+#usernameError{min-height:20px;font-size:12px;color:#d8a99a;margin:12px 0}.run-panel button{width:100%;min-width:0;margin:0 0 12px}.run-panel button:last-child{margin-bottom:0}
+#leaderboardRows td:nth-child(2),thead th:nth-child(2){text-align:right;font-variant-numeric:tabular-nums}#leaderboardRows td:nth-child(2){color:var(--yellow)}#leaderboardRows td:nth-child(3){color:var(--white);font-weight:400}
+*{scrollbar-color:#8e9180 #1a1e24;scrollbar-width:thin}button:disabled{cursor:default;opacity:.5}
+.weapon-sprite{width:52px;height:26px;background-size:282px 94px}.sprite-0{background-position:0 -32px}.sprite-1{background-position:-57px -32px}.sprite-2{background-position:-107px -32px}.sprite-3{background-position:-169px -32px}.sprite-4{background-position:-230px -32px}
+@media(max-width:700px){.leaderboard-panel table{table-layout:fixed;white-space:normal}.leaderboard-panel .table-scroll td{font-size:11px;padding:12px 5px;overflow-wrap:anywhere}.leaderboard-panel .table-scroll th{font-size:10px;padding:12px 5px}.leaderboard-panel th:nth-child(1){width:32%}.leaderboard-panel th:nth-child(2){width:19%}.leaderboard-panel th:nth-child(3){width:17%}.leaderboard-panel th:nth-child(4){width:32%}}

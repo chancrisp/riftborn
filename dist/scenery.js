@@ -1,17 +1,27 @@
 import * as T from 'three';
-import {EXTENT,CELLS,randomSource} from './terrain.js';
+import {retroMaterial} from './retro.js?v=9';
+import {EXTENT,CELLS,randomSource} from './terrain.js?v=9';
 
 // Static scenery is batched by geometry/material: silhouettes without hundreds of draw calls.
 export function buildStageWorld(terrain){
+ const covers=[];
  const group=new T.Group(),rng=randomSource(terrain.seed+terrain.stage*3571),s=terrain.stage;
  const palettes=[['#497c57','#75915f','#bac1a0'],['#424c66','#687992','#b3b0a1'],['#372d40','#6d3948','#b77561'],['#273958','#546d91','#a5bcd1'],['#241e48','#503b76','#9e83b6']];
  const [low,high,trail]=palettes[s-1],batches=new Map(),geometries={box:new T.BoxGeometry(1,1,1),ico:new T.IcosahedronGeometry(1,0),cone:new T.ConeGeometry(1,1,6),cylinder:new T.CylinderGeometry(1,1,1,8),gem:new T.OctahedronGeometry(1,0)};
- const ground=new T.BufferGeometry(),positions=[],colors=[],indices=[],cLow=new T.Color(low),cHigh=new T.Color(high),cTrail=new T.Color(trail);
- for(let iz=0;iz<=CELLS;iz++)for(let ix=0;ix<=CELLS;ix++){const x=ix-EXTENT,z=iz-EXTENT,y=terrain.heights[iz*(CELLS+1)+ix],route=terrain.routeAt(x,z);positions.push(x,y,z);const c=cLow.clone().lerp(cHigh,T.MathUtils.clamp((y+3)/14,0,1));if(route.distance<2.1)c.lerp(cTrail,.42);c.multiplyScalar(rng(.92,1.07));colors.push(c.r,c.g,c.b)}
+ const hulls=Object.fromEntries(Object.entries(geometries).map(([shape,geometry])=>{
+  geometry.computeBoundingBox();const pos=geometry.attributes.position,index=geometry.index,planes=new Map();
+  for(let i=0;i<(index?.count??pos.count);i+=3){
+   const vertex=j=>new T.Vector3().fromBufferAttribute(pos,index?index.getX(i+j):i+j),a=vertex(0),b=vertex(1),c=vertex(2),n=b.sub(a).cross(c.sub(a)).normalize();
+   if(n.lengthSq()<.5)continue;const w=n.dot(a),key=[n.x,n.y,n.z,w].map(v=>v.toFixed(5)).join(',');planes.set(key,{x:n.x,y:n.y,z:n.z,w});
+  }
+  return [shape,{min:geometry.boundingBox.min,max:geometry.boundingBox.max,planes:[...planes.values()]}];
+ }));
+ const ground=new T.BufferGeometry(),positions=[],colors=[],uvs=[],indices=[],cLow=new T.Color(low),cHigh=new T.Color(high),cTrail=new T.Color(trail);
+ for(let iz=0;iz<=CELLS;iz++)for(let ix=0;ix<=CELLS;ix++){const x=ix-EXTENT,z=iz-EXTENT,y=terrain.heights[iz*(CELLS+1)+ix],route=terrain.routeAt(x,z);positions.push(x,y,z);uvs.push(x/6,z/6);const c=cLow.clone().lerp(cHigh,T.MathUtils.clamp((y+3)/14,0,1));if(route.distance<2.1)c.lerp(cTrail,.42);c.lerp(new T.Color('#ffffff'),.62).multiplyScalar(rng(.92,1.07));colors.push(c.r,c.g,c.b)}
  for(let z=0;z<CELLS;z++)for(let x=0;x<CELLS;x++){const a=z*(CELLS+1)+x,b=a+1,c=a+CELLS+1,d=c+1;indices.push(a,c,b,b,c,d)}
- ground.setAttribute('position',new T.Float32BufferAttribute(positions,3));ground.setAttribute('color',new T.Float32BufferAttribute(colors,3));ground.setIndex(indices);ground.computeVertexNormals();
- const groundMat=new T.MeshStandardMaterial({vertexColors:true,roughness:1,flatShading:true}),surface=new T.Mesh(ground,groundMat);surface.receiveShadow=true;group.add(surface);
- function add(shape,color,x,y,z,sx,sy,sz,glow=0,rotation=0){const key=shape+color+glow;if(!batches.has(key))batches.set(key,{shape,color,glow,items:[]});batches.get(key).items.push({x,y,z,sx,sy,sz,rotation})}
+ ground.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));ground.setAttribute('position',new T.Float32BufferAttribute(positions,3));ground.setAttribute('color',new T.Float32BufferAttribute(colors,3));ground.setIndex(indices);ground.computeVertexNormals();
+ const groundMat=retroMaterial('#d0cab4',[4,5,8,10,11][s-1],{vertexColors:true}),surface=new T.Mesh(ground,groundMat);surface.receiveShadow=true;group.add(surface);
+ function add(shape,color,x,y,z,sx,sy,sz,glow=0,rotation=0){if(sy>.35&&Math.hypot(x,z)<75)covers.push({shape,x,y,z,sx,sy,sz,rotation,hull:hulls[shape]});const key=shape+color+glow;if(!batches.has(key))batches.set(key,{shape,color,glow,items:[]});batches.get(key).items.push({x,y,z,sx,sy,sz,rotation})}
  function allowed(x,z,r){return Math.hypot(x,z)>11&&Math.hypot(x,z)<63&&terrain.routeAt(x,z).distance>5.7+r&&Math.hypot(x-terrain.points[0][0],z-terrain.points[0][1])>9+r&&terrain.clear(x,z,r+.8)}
  function block(x,z,sx,sz,h,color){const y=terrain.height(x,z);add('box',color,x,y+h/2,z,sx,h,sz);terrain.obstacles.push({x,z,sx,sz});return y}
  function structureSites(){const sites=[];for(let z=-48;z<=48;z+=4)for(let x=-48;x<=48;x+=4){if(Math.hypot(x,z)<17||!allowed(x,z,4))continue;const y=terrain.height(x,z);if(Math.abs(terrain.height(x-3,z)-y)<.7&&Math.abs(terrain.height(x+3,z)-y)<.7)sites.push([x,z])}return sites.sort((a,b)=>Math.hypot(...a)-Math.hypot(...b))}
@@ -35,7 +45,7 @@ export function buildStageWorld(terrain){
  // Low marker stones make the traversable ramps readable without covering their surface.
  for(const [a,b] of terrain.routes){const length=Math.hypot(b[0]-a[0],b[1]-a[1]);for(let d=4;d<length;d+=5){const t=d/length,x=T.MathUtils.lerp(a[0],b[0],t),z=T.MathUtils.lerp(a[1],b[1],t),nx=-(b[1]-a[1])/length,nz=(b[0]-a[0])/length;for(const side of [-1,1]){const px=x+nx*3*side,pz=z+nz*3*side;add('box',trail,px,terrain.height(px,pz)+.07,pz,.28,.14,.28,s===5?.5:0)}}}
  const dummy=new T.Object3D(),materials=[];
- for(const {shape,color,glow,items} of batches.values()){const mat=new T.MeshStandardMaterial({color,roughness:.85,emissive:color,emissiveIntensity:glow,flatShading:true});materials.push(mat);const m=new T.InstancedMesh(geometries[shape],mat,items.length);items.forEach((p,i)=>{dummy.position.set(p.x,p.y,p.z);dummy.scale.set(p.sx,p.sy,p.sz);dummy.rotation.set(0,p.rotation,0);dummy.updateMatrix();m.setMatrixAt(i,dummy.matrix)});m.castShadow=true;m.receiveShadow=true;m.computeBoundingSphere();group.add(m)}
+ for(const {shape,color,glow,items} of batches.values()){const mat=retroMaterial(color,shape==='cone'&&s===1?14:shape==='cylinder'&&s===1?7:glow&&s===3?9:[5,6,8,10,11][s-1],{glow});materials.push(mat);const m=new T.InstancedMesh(geometries[shape],mat,items.length);items.forEach((p,i)=>{dummy.position.set(p.x,p.y,p.z);dummy.scale.set(p.sx,p.sy,p.sz);dummy.rotation.set(0,p.rotation,0);dummy.updateMatrix();m.setMatrixAt(i,dummy.matrix)});m.castShadow=true;m.receiveShadow=true;m.computeBoundingSphere();group.add(m)}
  terrain.rebuildNavigation();
- return {group,surface,drawCalls:batches.size+1,dispose(){group.removeFromParent();ground.dispose();groundMat.dispose();Object.values(geometries).forEach(g=>g.dispose());materials.forEach(m=>m.dispose());group.traverse(o=>{if(o.isInstancedMesh)o.dispose()})}};
+ return {group,surface,covers,drawCalls:batches.size+1,dispose(){group.removeFromParent();ground.dispose();groundMat.dispose();Object.values(geometries).forEach(g=>g.dispose());materials.forEach(m=>m.dispose());group.traverse(o=>{if(o.isInstancedMesh)o.dispose()})}};
 }
