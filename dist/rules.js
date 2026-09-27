@@ -1,4 +1,4 @@
-import {MUSIC_TEMPO} from './soundtrack.js?v=11';
+import {MUSIC_TEMPO} from './soundtrack.js?v=12';
 export const WEAPONS = [
  {label:'RIFLE',kind:'ASSAULT',icon:'⌁',color:'#6be7a6',description:'Accurate all-round automatic rifle',damage:20,speed:38,range:32,count:1,spread:.015,cooldown:.22,pierce:0,sound:'rifle'},
  {label:'STINGER',kind:'SMG',icon:'ϟ',color:'#6ad6ff',description:'High fire rate, wide spread',damage:9,speed:34,range:23,count:1,spread:.085,cooldown:.075,pierce:0,sound:'smg'},

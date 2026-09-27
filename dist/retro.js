@@ -1,5 +1,5 @@
 import * as T from 'three';
-import {createMonster} from './monsters.js?v=11';
+import {createMonster} from './monsters.js?v=12';
 
 // Shared PS1 material pipeline: one atlas, affine UVs, snapped vertices and no PBR.
 const pixels=new Uint8Array(64*64*4);

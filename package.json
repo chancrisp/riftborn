@@ -1,7 +1,7 @@
 {
   "type": "module",
   "scripts": {
-    "test": "node tests/music.mjs && node tests/graphics.mjs && node tests/ballistics.mjs && node tests/smoke.mjs && node tests/terrain.mjs && node tests/server.mjs",
+    "test": "node tests/audio-lifecycle.mjs && node tests/music.mjs && node tests/graphics.mjs && node tests/ballistics.mjs && node tests/smoke.mjs && node tests/terrain.mjs && node tests/server.mjs",
     "build": "node build.mjs",
     "db:generate": "drizzle-kit generate",
     "dev": "node server/dev.mjs"

@@ -1,3 +1,4 @@
+import {createStorm} from '../dist/storm.js';
 import {createMusicPlayer,scoreEvents} from '../dist/soundtrack.js';
 import {renderHeight,fogRange,FramePacer} from '../dist/graphics.js';
 import assert from 'node:assert/strict';
@@ -30,11 +31,11 @@ const listeners=new Map();
 const nodes=new Map();const document={body:new Element(),querySelector(s){if(!nodes.has(s))nodes.set(s,new Element());return nodes.get(s)},querySelectorAll(s){return s==='.weapon'?nodes.get('#weapons').children:[]},createElement(){return new Element()},addEventListener(){}};
 class Renderer {constructor(){this.shadowMap={}}setPixelRatio(){}setSize(){}}
 class Composer {addPass(){}render(){}setSize(){}setPixelRatio(){}}
-const context={T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,DEATH_TYPES,RUN_MODES,enemyPool,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console,setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(name,fn){listeners.set(name,fn)},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
-Object.assign(context,{createMusicPlayer,renderHeight,fogRange,FramePacer,traceWorld,hitBody,pointAt,createTerrain,buildStageWorld,retroMaterial,retroCharacter,retroResolution,RetroShader,ShaderPass:class{}});
+const context={T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,DEATH_TYPES,RUN_MODES,enemyPool,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console:{...console,error(...args){if(args[0]!=='Audio startup failed')console.error(...args)}},setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(name,fn){listeners.set(name,fn)},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
+Object.assign(context,{createStorm,createMusicPlayer,renderHeight,fogRange,FramePacer,traceWorld,hitBody,pointAt,createTerrain,buildStageWorld,retroMaterial,retroCharacter,retroResolution,RetroShader,ShaderPass:class{}});
 vm.createContext(context);
 const source=fs.readFileSync(new URL('../dist/game.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
-vm.runInContext(source+`\n globalThis.test={height,start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun,activatePortal,enterStage,hurtEnemy,bossUpdate,updateCombatUI,moveWithCollision,portalBearing,setTimeOfDay,ambient,sun,rim,flora,floraLights,updateFlora, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed,stage,stageKills,stageGoal,portalActive,bossSpawned,victory,gems,portal:stagePortal.position}},setAim(v){aim=v;aimPitch=0},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
+vm.runInContext(source+`\n globalThis.test={height,start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun,activatePortal,enterStage,hurtEnemy,bossUpdate,updateCombatUI,moveWithCollision,portalBearing,setNightmare,ambient,sun,rim,storm, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed,stage,stageKills,stageGoal,portalActive,bossSpawned,victory,gems,portal:stagePortal.position}},setAim(v){aim=v;aimPitch=0},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
 const t=context.test;
 assert.equal(typeof document.querySelector('#deathSkull').onclick,'function','The red skull must enable Death Mode from the menu');
 vm.runInContext(`globalThis.demoTest={updateDemo,start,get state(){return {demoActive,demoAge,runId,pending:pendingScores.size,player,kills,shots,mode}},setPointer(){mouse.moved=true;mouse.x=0;mouse.y=0}}`,context);
@@ -123,9 +124,13 @@ assert.ok(Math.abs(t.portalBearing(0,-1,0)+Math.PI/2)<1e-9);
 assert.ok(Math.abs(t.portalBearing(1,0,0))<1e-9);
 assert.ok(Math.abs(t.portalBearing(0,1,0)-Math.PI/2)<1e-9);
 assert.ok(Math.abs(t.portalBearing(1,0,Math.PI/2)-Math.PI/2)<1e-9);
-const dayAmbient=t.ambient.intensity,daySun=t.sun.intensity,dayRim=t.rim.intensity;t.setTimeOfDay('night');assert.ok(t.ambient.intensity<dayAmbient);assert.ok(t.sun.intensity<daySun);assert.ok(t.rim.intensity<dayRim);assert.ok(t.flora.visible);t.updateFlora(1);assert.ok(t.floraLights.every(l=>l.intensity>0));
-t.setTimeOfDay('day');assert.equal(t.ambient.intensity,dayAmbient);assert.equal(t.flora.visible,false);assert.ok(t.floraLights.every(l=>l.intensity===0));
-console.log('PASS: unobstructed walking and portal activation in stages 1–4, compass cardinal bearings and camera rotation, dark night lighting, flora illumination, day restoration.');
+const dayAmbient=t.ambient.intensity,daySun=t.sun.intensity;t.setNightmare(true);
+assert.ok(t.ambient.intensity>=1&&t.sun.intensity<daySun,'Nightmare keeps useful fill light');assert.ok(t.storm.group.visible);
+assert.ok(t.scene.fog.far<80&&t.scene.fog.near>=36,'Thick fog preserves the nearby play area');
+t.storm.update(.04,1,t.state.player,t.height(t.state.player.x,t.state.player.z));
+assert.ok(Array.from(t.storm.rain.geometry.attributes.position.array).every(Number.isFinite));
+t.setNightmare(false);assert.equal(t.ambient.intensity,dayAmbient);assert.equal(t.storm.group.visible,false);assert.equal(t.storm.light.intensity,0);
+console.log('PASS: portal routes, compass bearings, Nightmare storm/fog, and clean return to normal lighting.');
 
 t.start();const sniper=t.spawnEnemy('sniper');sniper.x=0;sniper.z=18;sniper.cool=-1;
 t.enemyUpdate(sniper,.016);assert.equal(sniper.state,'snipe');assert.ok(sniper.warning);assert.equal(t.state.shots.length,0);
@@ -146,12 +151,12 @@ for(let stage=1;stage<=5;stage++){
  const p=t.state.player,portal=t.state.portal;p.x=portal.x;p.z=portal.z;
  t.setAim(0);t.fire();const shot=t.state.shots.at(-1);
  assert.ok(Math.abs(shot.m.position.y-t.height(shot.x,shot.z)-1.47)<1e-6,'Shot starts above elevated ground');
- assert.ok(t.flora.children.length===3);assert.equal(lightingCount(),initialLights,'Stage rebuild must not leak lights');
+ assert.equal(t.storm.group.children.length,3);assert.equal(lightingCount(),initialLights,'Stage rebuild must not leak lights');
  for(const kind of Object.keys(ENEMY_TYPES)){const e=t.spawnEnemy(kind);assert.ok(Number.isFinite(e.c.g.position.y));assert.ok(Math.abs(e.c.g.position.y-t.height(e.x,e.z))<1e-6)}
  if(stage<5){t.activatePortal();t.enterStage()}
 }
-t.start();assert.equal(lightingCount(),initialLights);assert.equal(t.flora.children.length,3);
-console.log('PASS: elevated projectile/enemy placement, all enemy types in all stages, constant light/foliage counts through stage rebuilds and restart.');
+t.start();assert.equal(lightingCount(),initialLights);assert.equal(t.storm.group.children.length,3);
+console.log('PASS: elevated projectile/enemy placement, all enemy types in all stages, constant light/weather counts through stage rebuilds and restart.');
 
 t.start();t.fire();
 vm.runInContext('globalThis.shotTest={updateShots}',context);
@@ -223,7 +228,7 @@ assert.equal(rows[0].children[0].children[0].src,'assets/death-skull.png');asser
 assert.equal(rows[1].children[0].children.length,0);assert.equal(rows[2].children[0].children.length,0);
 console.log('PASS: immutable Death Mode score on offline retry, shared skull beside player, no skull on normal/unknown runs.');
 
-const notes=[];death.audio.tone=()=>{};death.audio.ctx={state:'running',currentTime:0,resume(){}};death.audio.score={schedule:(step,time,mode,volume)=>notes.push({step,time,mode,volume,events:scoreEvents(step,mode)})};
+const notes=[];death.audio.tone=()=>{};death.audio.ctx={state:'running',currentTime:0,resume(){return Promise.resolve()}};death.audio.score={schedule:(step,time,mode,volume)=>notes.push({step,time,mode,volume,events:scoreEvents(step,mode)})};
 t.setMode('menu');death.setDeathMode(true);t.start();death.audio.tick();const deathNotes=notes.slice(),deathSpacing=death.audio.next/death.audio.step;
 t.setMode('menu');death.setDeathMode(false);t.start();notes.length=0;death.audio.tick();
 assert.ok(deathSpacing<death.audio.next/death.audio.step);assert.notDeepEqual(deathNotes[0].events,notes[0].events);
