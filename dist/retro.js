@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {createMonster} from './monsters.js?v=10';
 
 // Shared PS1 material pipeline: one atlas, affine UVs, snapped vertices and no PBR.
 const pixels=new Uint8Array(64*64*4);
@@ -42,6 +43,7 @@ const cache=new Map();
 function skin(color,tile){const key=color+tile;if(!cache.has(key))cache.set(key,retroMaterial(color,tile));return cache.get(key)}
 const shapes={torso:new T.CylinderGeometry(.82,.6,1,6),limb:new T.CylinderGeometry(.7,.52,1,5),head:new T.SphereGeometry(1,6,4),boot:new T.BoxGeometry(1,1,1),plate:new T.PlaneGeometry(1,1),horn:new T.ConeGeometry(1,1,4)};
 export function retroCharacter(kind,weaponModel){
+ if(kind!=='player')return createMonster(kind,skin);
  const g=new T.Group(),body=new T.Group();g.add(body);
  const colors={player:['#9aaf9d','#d5c3ac'],runner:['#99807c','#afa293'],skitter:['#728363','#a0ac84'],gunner:['#baa17e','#c6b8a0'],charger:['#a97165','#c0a28b'],brute:['#80848e','#acb4ab'],mortar:['#6d829a','#afbdc0'],sniper:['#9c878b','#cab6a6'],leaper:['#aa8d64','#c8b691'],splitter:['#65948b','#94b0a2'],stormer:['#7885aa','#a4b6cb'],warden:['#8d779f','#c0b7cb']}[kind]||['#948879','#b0a18b'];
  function part(shape,color,tile,x,y,z,sx,sy,sz,parent=body){const m=new T.Mesh(shapes[shape],skin(color,tile));m.position.set(x,y,z);m.scale.set(sx,sy,sz);parent.add(m);return m}

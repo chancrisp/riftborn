@@ -18,6 +18,13 @@ export const ENEMY_TYPES = {
  ,stormer:{hp:210,speed:2.35,radius:.72,damage:12,score:440,xp:6,color:'#6d96ff'}
 };
 // Screen-relative input rotated into world space; analog magnitude is preserved.
+export const DEATH_TYPES=Object.freeze({
+ revenant:{hp:100,speed:3.7,radius:.48,damage:16,score:250,xp:3,color:'#cf484e'},
+ hexer:{hp:150,speed:2.3,radius:.6,damage:18,score:330,xp:4,color:'#dc7392'},
+ broodmother:{hp:340,speed:1.5,radius:1.1,damage:22,score:500,xp:6,color:'#b5574e'}
+});
+export const RUN_MODES=Object.freeze({normal:Object.freeze({speed:1,damage:1,bpm:112}),death:Object.freeze({speed:1.35,damage:1.5,bpm:156})});
+export function enemyPool(pool,death,stage){return death?[...pool,'revenant','hexer',...(stage>1?['broodmother']:[])]:pool}
 export function movementVector(x,y,yaw){const length=Math.max(1,Math.hypot(x,y));x/=length;y/=length;return {x:Math.cos(yaw)*x+Math.sin(yaw)*y,z:-Math.sin(yaw)*x+Math.cos(yaw)*y}}
 // Swept collision avoids fast rail rounds tunneling through enemies.
 export function segmentHit(ax,az,bx,bz,x,z,r){const dx=bx-ax,dz=bz-az,l=dx*dx+dz*dz;const t=l?Math.max(0,Math.min(1,((x-ax)*dx+(z-az)*dz)/l)):0;return Math.hypot(ax+t*dx-x,az+t*dz-z)<=r}

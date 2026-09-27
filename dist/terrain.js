@@ -38,7 +38,22 @@ export function createTerrain(stage,seed=7361){
  const obstacles=[];
  function clear(x,z,r=.45){if(Math.hypot(x,z)>PLAY_RADIUS-r)return false;for(const o of obstacles){if(o.sx){if(Math.abs(x-o.x)<o.sx/2+r&&Math.abs(z-o.z)<o.sz/2+r)return false}else if(Math.hypot(x-o.x,z-o.z)<o.r+r)return false}return true}
  function walkable(x,z,r=.45){if(!clear(x,z,r))return false;const y=height(x,z),reach=1.5;return [[reach,0],[-reach,0],[0,reach],[0,-reach]].every(([dx,dz])=>Math.abs(height(x+dx,z+dz)-y)<=reach*.85+.12)}
- function canMove(x,z,nx,nz,r){const d=Math.hypot(nx-x,nz-z);return walkable(nx,nz,r)&&Math.abs(height(nx,nz)-height(x,z))<=d*.85+.00001}
+ function canMove(x,z,nx,nz,r){
+  if(!walkable(nx,nz,r))return false;
+  const dx=nx-x,dz=nz-z,d=Math.hypot(dx,dz);if(d<1e-10)return true;
+  // Never average opposing slopes across a crease: that can admit a step into
+  // a steep facet from which ordinary walking has no exit. The rendered mesh
+  // is affine between integer x, z and x+z triangle boundaries.
+  const cuts=[0,1];
+  for(const [start,delta] of [[x,dx],[z,dz],[x+z,dx+dz]]){
+   if(Math.abs(delta)<1e-12)continue;
+   const end=start+delta,lo=Math.min(start,end),hi=Math.max(start,end);
+   for(let edge=Math.floor(lo)+1;edge<hi;edge++){const t=(edge-start)/delta;if(t>1e-10&&t<1-1e-10)cuts.push(t)}
+  }
+  cuts.sort((a,b)=>a-b);
+  for(let i=1;i<cuts.length;i++){const a=cuts[i-1],b=cuts[i];if(b-a<1e-10)continue;if(Math.abs(height(x+dx*b,z+dz*b)-height(x+dx*a,z+dz*a))>d*(b-a)*.85+.00001)return false}
+  return true;
+ }
  function move(o,dx,dz,r){const n=Math.max(1,Math.ceil(Math.hypot(dx,dz)/.18));dx/=n;dz/=n;for(let i=0;i<n;i++){if(canMove(o.x,o.z,o.x+dx,o.z+dz,r)){o.x+=dx;o.z+=dz}else{if(canMove(o.x,o.z,o.x+dx,o.z,r))o.x+=dx;if(canMove(o.x,o.z,o.x,o.z+dz,r))o.z+=dz}}}
  // Conservative shared navigation clearance supports the largest enemy (Warden).
  const size=65, step=2, offset=64, valid=new Uint8Array(size*size),edges=Array.from({length:size*size},()=>[]),reachable=[],flow=new Int32Array(size*size);let targetCell=-1;

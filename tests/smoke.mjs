@@ -1,3 +1,4 @@
+import {renderHeight,fogRange,FramePacer} from '../dist/graphics.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -8,7 +9,7 @@ import {webcrypto} from 'node:crypto';
 import * as Three from 'three';
 import {traceWorld,hitBody,pointAt} from '../dist/ballistics.js';
 import {retroMaterial,retroCharacter,retroResolution,RetroShader} from '../dist/retro.js';
-import {WEAPONS,ENEMY_TYPES,movementVector,segmentHit} from '../dist/rules.js';
+import {WEAPONS,ENEMY_TYPES,DEATH_TYPES,RUN_MODES,enemyPool,movementVector,segmentHit} from '../dist/rules.js';
 import {DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding} from '../dist/preferences.js';
 
 assert.equal(WEAPONS.length,5);assert.equal(Object.keys(ENEMY_TYPES).length,10);
@@ -24,15 +25,17 @@ class Element {
  appendChild(el){this.children.push(el)} replaceChildren(){this.children=[]} querySelector(){return new Element()}
  addEventListener(){} setAttribute(){} focus(){} remove(){} setPointerCapture(){} getBoundingClientRect(){return {left:0,top:0,width:110,height:110}}
 }
+const listeners=new Map();
 const nodes=new Map();const document={body:new Element(),querySelector(s){if(!nodes.has(s))nodes.set(s,new Element());return nodes.get(s)},querySelectorAll(s){return s==='.weapon'?nodes.get('#weapons').children:[]},createElement(){return new Element()},addEventListener(){}};
 class Renderer {constructor(){this.shadowMap={}}setPixelRatio(){}setSize(){}}
 class Composer {addPass(){}render(){}setSize(){}setPixelRatio(){}}
-const context={T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console,setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(){},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
-Object.assign(context,{traceWorld,hitBody,pointAt,createTerrain,buildStageWorld,retroMaterial,retroCharacter,retroResolution,RetroShader,ShaderPass:class{}});
+const context={T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,DEATH_TYPES,RUN_MODES,enemyPool,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console,setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(name,fn){listeners.set(name,fn)},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
+Object.assign(context,{renderHeight,fogRange,FramePacer,traceWorld,hitBody,pointAt,createTerrain,buildStageWorld,retroMaterial,retroCharacter,retroResolution,RetroShader,ShaderPass:class{}});
 vm.createContext(context);
 const source=fs.readFileSync(new URL('../dist/game.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
 vm.runInContext(source+`\n globalThis.test={height,start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun,activatePortal,enterStage,hurtEnemy,bossUpdate,updateCombatUI,moveWithCollision,portalBearing,setTimeOfDay,ambient,sun,rim,flora,floraLights,updateFlora, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed,stage,stageKills,stageGoal,portalActive,bossSpawned,victory,gems,portal:stagePortal.position}},setAim(v){aim=v;aimPitch=0},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
 const t=context.test;
+assert.equal(typeof document.querySelector('#deathSkull').onclick,'function','The red skull must enable Death Mode from the menu');
 vm.runInContext(`globalThis.demoTest={updateDemo,start,get state(){return {demoActive,demoAge,runId,pending:pendingScores.size,player,kills,shots,mode}},setPointer(){mouse.moved=true;mouse.x=0;mouse.y=0}}`,context);
 const demo=context.demoTest;
 assert.equal(demo.state.demoActive,true);
@@ -176,3 +179,39 @@ nodes.get('#start').onclick();assert.equal(nodes.get('#playerName').value,'','Pl
 await nodes.get('#refreshLeaderboard').onclick();
 assert.deepEqual(nodes.get('#leaderboardRows').children.at(-1).children.map(c=>c.textContent),['Ash Runner','90','3',new Date(Date.UTC(2026,8,26,12)).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})]);
 console.log('PASS: username required every run, trimmed run identity, score submission and Player/Score/Stage/Date rows.');
+
+vm.runInContext('globalThis.deathTest={setDeathMode,hurtPlayer,audio,get state(){return {menuDeath,runDeath,runTuning}}}',context);
+const death=context.deathTest,esc=()=>listeners.get('keydown')({code:'Escape',preventDefault(){}}),skull=nodes.get('#deathSkull');
+t.start(true);skull.onclick();assert.equal(death.state.menuDeath,true);esc();assert.equal(death.state.menuDeath,false);
+skull.onclick();nodes.get('#start').onclick();esc();assert.equal(death.state.menuDeath,false,'Esc during pre-run username entry returns to normal');
+skull.onclick();nodes.get('#start').onclick();nodes.get('#playerName').value='Doom';nodes.get('#runForm').onsubmit({preventDefault(){}});
+assert.equal(death.state.runDeath,true);assert.equal(death.state.runTuning.damage,1.5);
+esc();assert.equal(t.state.mode,'pause');assert.equal(death.state.runDeath,true,'Escape pauses without reducing difficulty');
+assert.equal(death.setDeathMode(false),false,'A live run cannot change difficulty');
+t.openPanel('#settings');esc();assert.equal(t.state.mode,'pause');assert.equal(death.state.runDeath,true);esc();
+t.state.player.inv=0;death.hurtPlayer(10);assert.equal(t.state.player.hp,85,'Death damage is multiplied exactly once');
+const faster=t.spawnEnemy('charger');Object.assign(faster,{x:0,z:3,cool:10});t.enemyUpdate(faster,.05);const fastDistance=Math.hypot(faster.x,faster.z-3);
+t.setMode('menu');death.setDeathMode(false);t.start();t.state.player.inv=0;death.hurtPlayer(10);assert.equal(t.state.player.hp,90);
+const ordinary=t.spawnEnemy('charger');Object.assign(ordinary,{x:0,z:3,cool:10});t.enemyUpdate(ordinary,.05);assert.ok(fastDistance>Math.hypot(ordinary.x,ordinary.z-3)*1.3,'Death enemies move faster on the same surface');
+for(let stage=1;stage<=5;stage++){
+ const normal=enemyPool(['runner','brute'],false,stage),hard=enemyPool(normal,true,stage);
+ assert.ok(normal.every(k=>!DEATH_TYPES[k]));assert.ok(hard.includes('revenant')&&hard.includes('hexer'));assert.equal(hard.includes('broodmother'),stage>1);
+}
+t.setMode('menu');death.setDeathMode(true);
+for(const kind of Object.keys(DEATH_TYPES)){
+ t.start();const e=t.spawnEnemy(kind);Object.assign(e,{x:0,z:6,cool:-1});t.enemyUpdate(e,.016);assert.equal(e.state,'deathWindup');assert.equal(t.state.hazards.length,0);
+ t.enemyUpdate(e,1.3);
+ if(kind==='revenant'){assert.equal(e.state,'deathRush');const before={x:e.x,z:e.z};t.enemyUpdate(e,.1);assert.ok(Math.hypot(e.x-before.x,e.z-before.z)>1,'Revenant rush travels after its warning')}
+ if(kind==='hexer'){assert.equal(t.state.hazards.length,5);assert.ok(t.state.hazards.every(h=>h.kind==='hex'),'Hexer marks a delayed cross attack')}
+ if(kind==='broodmother'){assert.equal(t.state.enemies.filter(m=>m.kind==='skitter').length,3,'Broodmother releases crawlers');for(let i=0;i<8;i++){e.state='approach';e.cool=-1;t.enemyUpdate(e,.016);t.enemyUpdate(e,1.3)}assert.ok(t.state.enemies.filter(m=>m.kind==='skitter').length<=8,'Summons remain bounded')}
+}
+for(const kind of [...Object.keys(ENEMY_TYPES),...Object.keys(DEATH_TYPES),'warden']){
+ const model=retroCharacter(kind,()=>{throw Error('Monsters must not carry player firearms')});assert.equal(model.monster,true);assert.equal(model.gunMount.visible,false);
+ model.g.traverse(o=>{assert.ok(o.position.toArray().every(Number.isFinite));assert.ok(o.scale.toArray().every(Number.isFinite))});
+}
+// Inspect the actual note scheduler, with audio output replaced by note capture.
+const notes=[];death.audio.ctx={state:'running',currentTime:0};death.audio.tone=(...args)=>notes.push(args);
+death.audio.next=0;death.audio.step=0;death.audio.tick();const deathNotes=notes.slice();const deathSpacing=death.audio.next/death.audio.step;
+t.setMode('menu');death.setDeathMode(false);t.start(true);t.start();notes.length=0;death.audio.next=0;death.audio.step=0;death.audio.tick();
+assert.ok(deathSpacing<death.audio.next/death.audio.step,'Death soundtrack runs at a faster tempo');assert.notDeepEqual(deathNotes,notes,'Death soundtrack has a different riff and percussion');
+console.log('PASS: menu skull and Escape, immutable run difficulty, stronger/faster enemies, exclusive pools and telegraphed attacks, bounded summons, monster rigs, and distinct faster music.');

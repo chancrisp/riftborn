@@ -2,6 +2,14 @@ import assert from 'node:assert/strict';
 import * as T from 'three';
 import {createTerrain,randomSource} from '../dist/terrain.js';
 import {buildStageWorld} from '../dist/scenery.js';
+// A longer step once averaged a downhill/uphill crease and entered an inescapable facet.
+{
+ const t=createTerrain(5,23757),world=buildStageWorld(t),p={x:0,z:-32};
+ const dx=-.9393727128473791,dz=.34289780745545084;
+ for(let i=0;i<93;i++)t.move(p,dx*.15,dz*.15,.45);
+ const exits=Array.from({length:8},(_,i)=>{const a=i*Math.PI/4+.35,q={...p};t.move(q,Math.sin(a)*6.4/60,Math.cos(a)*6.4/60,.45);return Math.hypot(q.x-p.x,q.z-p.z)});
+ assert.ok(exits.some(d=>d>.01),'A connected approach must never enter a facet with no walking exit');world.dispose();
+}
 let stages=0,spawns=0,routed=0,maxBuild=0,maxCalls=0;const summaries=[];
 for(let seed=1;seed<=20;seed++){
  let previous=null;

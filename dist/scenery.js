@@ -1,6 +1,6 @@
 import * as T from 'three';
-import {retroMaterial} from './retro.js?v=9';
-import {EXTENT,CELLS,randomSource} from './terrain.js?v=9';
+import {retroMaterial} from './retro.js?v=10';
+import {EXTENT,CELLS,randomSource} from './terrain.js?v=10';
 
 // Static scenery is batched by geometry/material: silhouettes without hundreds of draw calls.
 export function buildStageWorld(terrain){
@@ -22,13 +22,17 @@ export function buildStageWorld(terrain){
  ground.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));ground.setAttribute('position',new T.Float32BufferAttribute(positions,3));ground.setAttribute('color',new T.Float32BufferAttribute(colors,3));ground.setIndex(indices);ground.computeVertexNormals();
  const groundMat=retroMaterial('#d0cab4',[4,5,8,10,11][s-1],{vertexColors:true}),surface=new T.Mesh(ground,groundMat);surface.receiveShadow=true;group.add(surface);
  function add(shape,color,x,y,z,sx,sy,sz,glow=0,rotation=0){if(sy>.35&&Math.hypot(x,z)<75)covers.push({shape,x,y,z,sx,sy,sz,rotation,hull:hulls[shape]});const key=shape+color+glow;if(!batches.has(key))batches.set(key,{shape,color,glow,items:[]});batches.get(key).items.push({x,y,z,sx,sy,sz,rotation})}
- function allowed(x,z,r){return Math.hypot(x,z)>11&&Math.hypot(x,z)<63&&terrain.routeAt(x,z).distance>5.7+r&&Math.hypot(x-terrain.points[0][0],z-terrain.points[0][1])>9+r&&terrain.clear(x,z,r+.8)}
+ function allowed(x,z,r){return Math.hypot(x,z)>11&&Math.hypot(x,z)<63&&terrain.routeAt(x,z).distance>5.7+r&&Math.hypot(x-terrain.points[0][0],z-terrain.points[0][1])>9+r&&terrain.clear(x,z,r+1.4)}
  function block(x,z,sx,sz,h,color){const y=terrain.height(x,z);add('box',color,x,y+h/2,z,sx,h,sz);terrain.obstacles.push({x,z,sx,sz});return y}
  function structureSites(){const sites=[];for(let z=-48;z<=48;z+=4)for(let x=-48;x<=48;x+=4){if(Math.hypot(x,z)<17||!allowed(x,z,4))continue;const y=terrain.height(x,z);if(Math.abs(terrain.height(x-3,z)-y)<.7&&Math.abs(terrain.height(x+3,z)-y)<.7)sites.push([x,z])}return sites.sort((a,b)=>Math.hypot(...a)-Math.hypot(...b))}
  // Each stage owns its terrain, skyline and architectural vocabulary.
  if(s===1){
   let ruins=0;for(const [x,z] of structureSites()){if(!allowed(x,z,4))continue;const y=terrain.height(x,z);for(const d of [-2.2,2.2]){block(x+d,z,1.1,1.6,4.2+y-terrain.height(x+d,z),'#a5aba0');add('box','#bdc5ad',x+d,y+4.5,z,1.6,.4,2)}add('box','#8c9795',x,y+5,z,6,.8,1.6);if(++ruins===3)break}
-  for(let i=0;i<95;i++){const x=rng(-65,65),z=rng(-65,65),k=rng(.8,1.5);if(!allowed(x,z,1.5))continue;const y=terrain.height(x,z);add('cylinder','#66503d',x,y+1.8*k,z,.3*k,3.6*k,.3*k);for(let j=0;j<3;j++)add('cone',['#245c51','#327464','#529076'][j],x,y+(3+j*.95)*k,z,(2-j*.35)*k,2.6*k,(2-j*.35)*k);terrain.obstacles.push({x,z,r:.5*k})}
+  for(let i=0;i<95;i++){const x=rng(-65,65),z=rng(-65,65),k=rng(.8,1.5);if(!allowed(x,z,2))continue;const y=terrain.height(x,z);add('cylinder','#66503d',x,y+1.8*k,z,.3*k,3.6*k,.3*k);
+   if(i%3===0){for(const side of [-1,1])add('ico','#529076',x+side*.9*k,y+4.1*k,z,1.6*k,1.6*k,1.5*k);add('ico','#327464',x,y+5*k,z,1.8*k,1.7*k,1.8*k)}
+   else if(i%3===1){for(let j=0;j<3;j++)add('cone',['#245c51','#327464','#529076'][j],x,y+(3+j*.95)*k,z,(2-j*.35)*k,2.6*k,(2-j*.35)*k)}
+   else{add('box','#66503d',x,y+2.7*k,z,2.5*k,.45*k,.35*k,0,.6);add('ico','#245c51',x+.7*k,y+3.5*k,z,1.6*k,1*k,1.4*k)}
+   terrain.obstacles.push({x,z,r:.5*k})}
  }else if(s===2){
   let gantries=0;for(const [x,z] of structureSites()){if(!allowed(x,z,4))continue;const y=terrain.height(x,z);for(const d of [-3,3])block(x+d,z,1,2,8+y-terrain.height(x+d,z),'#354556');add('box','#c7a66d',x,y+8.3,z,8,.7,1.4);add('box','#506e7d',x+1,y+5.8,z,.25,4,.25);if(++gantries===2)break}
   for(let i=0;i<65;i++){const x=rng(-63,63),z=rng(-63,63),w=rng(2,5);if(!allowed(x,z,w))continue;const h=rng(2,7),y=block(x,z,w,w*.8,h,'#546078');add('box','#8e9baf',x,y+h+.2,z,w+ .3,.4,w*.85)}
@@ -39,6 +43,22 @@ export function buildStageWorld(terrain){
   for(let i=0;i<60;i++){const x=Math.round(rng(-58,58)/8)*8,z=Math.round(rng(-58,58)/8)*8;if(!allowed(x,z,3))continue;const tower=i%3===0,h=tower?rng(8,13):rng(2,4),y=block(x,z,3.5,3.5,h,'#405978');add('box','#b4cddd',x,y+h,z,4.1,.4,4.1);if(tower){for(const d of [-1.4,1.4])add('box','#6e91b0',x+d,y+h+.8,z,.65,1.4,3.5);add('gem','#83e7ff',x,y+h+1.6,z,.35,1,.35,2)}}
  }else{
   for(let i=0;i<58;i++){const x=rng(-65,65),z=rng(-65,65);if(!allowed(x,z,3))continue;const h=rng(3,9),y=terrain.height(x,z);add('gem','#54437a',x,y+h/2,z,2,h,2);terrain.obstacles.push({x,z,r:2});add('gem','#ba80ef',x,y+h+2,z,.7,1.8,.7,2,rng(0,6));if(i%3===0)add('box','#35294e',x,y+h+5,z,5,.8,4,0,rng(0,3))}
+ }
+ // Broken colonnades, quarry stacks and shrines share a small material palette.
+ // Reserve the complete assembly before adding supports, keeping clear exits on all sides.
+ let landmarks=0;for(const [x,z] of structureSites()){
+  if(!allowed(x,z,5.5))continue;const y=terrain.height(x,z),color=s===1?'#a5aba0':high;
+  if(s===1||s===4){for(const side of [-1,1]){const h=side<0?2.8:4.4;block(x+side*2.8,z,1.3,1.3,h+y-terrain.height(x+side*2.8,z),color);add('box',trail,x+side*2.8,y+h+.15,z,1.8,.3,1.8)}add('box',color,x,y+.45,z+2.3,3,.9,1.2);terrain.obstacles.push({x,z:z+2.3,sx:3,sz:1.2})}
+  else if(s===2){block(x-2,z,2.2,2.2,1.5,color);block(x+1,z,2.2,2.2,3.2,color);add('box',trail,x+1,y+3.4,z,2.3,.3,2.3)}
+  else{block(x,z,2.3,2.3,1.1,color);for(const side of [-1,1])add('gem',trail,x+side*.5,y+2,z,.45,2,.45,0,side*.5);add('box',high,x,y+3.9,z,3.5,.5,2.4,0,.4)}
+  if(++landmarks===3)break;
+ }
+ // Small non-solid ferns and ground plants, plus charred trees in volcanic terrain.
+ for(let i=0;i<105;i++){
+  const x=rng(-62,62),z=rng(-62,62);if(!allowed(x,z,1.2))continue;const y=terrain.height(x,z);
+  if(s===3&&i%7===0){add('cylinder',low,x,y+1.8,z,.22,3.6,.22);add('box',low,x,y+2.8,z,2,.45,.35,0,i);terrain.obstacles.push({x,z,r:.4})}
+  else if(s===5&&i%4===0){add('cylinder',high,x,y+.5,z,.12,1,.12);add('ico',trail,x,y+1.1,z,.8,.3,.8)}
+  else for(let j=0;j<3;j++)add(s===2?'ico':'gem',i%2?low:high,x+Math.sin(j*2.1)*.3,y+.13,z+Math.cos(j*2.1)*.3,.45,.25,.28,0,j+i);
  }
  // Stage-specific distant silhouettes; never place collision-free scenery in the arena.
  for(let i=0;i<24;i++){const a=i*Math.PI/12,r=rng(86,113),x=Math.cos(a)*r,z=Math.sin(a)*r,h=rng(14,34);add(s===4?'box':s===5?'gem':s===3?'cone':'ico',low,x,s===5?8:-3,z,rng(7,15),h,rng(7,15),0,a)}

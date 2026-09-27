@@ -32,7 +32,7 @@ assert.equal((await post({...run,id:'33333333-3333-4333-8333-333333333333',name:
 assert.equal((await (await get()).json()).scores[0].name,'Ash Runner');
 for(const path of ['/','/game.js','/terrain.js','/scenery.js','/preferences.js','/menus.css','/vendor/three.module.js'])assert.equal((await worker.fetch(new Request('https://game.test'+path),env)).status,200);
 assert.equal((await worker.fetch(new Request('https://game.test/server/index.js'),env)).status,404);
-for(const path of ['/retro.js','/ballistics.js','/retro.css','/assets/ps1-atlas.png','/assets/weapons.png','/assets/crypt-pixel.ttf']){
+for(const path of ['/monsters.js','/graphics.js','/assets/death-skull.png','/retro.js','/ballistics.js','/retro.css','/assets/ps1-atlas.png','/assets/weapons.png','/assets/crypt-pixel.ttf']){
  const response=await worker.fetch(new Request('https://game.test'+path),env);assert.equal(response.status,200);
  assert.deepEqual(Buffer.from(await response.arrayBuffer()),fs.readFileSync('dist'+path),'Bundled asset must preserve all bytes: '+path);
 }
