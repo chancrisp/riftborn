@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import {loadPreferences} from '../dist/preferences.js';
 const defaults=loadPreferences(null);
+assert.equal(defaults.playerIndicatorsOpacity,100);
+assert.equal(loadPreferences({getItem:()=>JSON.stringify({playerIndicatorsOpacity:35})}).playerIndicatorsOpacity,35);
+assert.equal(loadPreferences({getItem:()=>JSON.stringify({playerIndicatorsOpacity:150})}).playerIndicatorsOpacity,100);
 assert.equal(defaults.pixelation,'auto');assert.equal(defaults.fog,50);assert.equal(defaults.fpsCap,60);
 const stored=loadPreferences({getItem:()=>JSON.stringify({pixelation:160,fog:0,fpsCap:30,timeOfDay:'night',master:25})});
 assert.equal(stored.pixelation,160);assert.equal(stored.fog,0);assert.equal(stored.fpsCap,30);assert.equal(stored.master,25);

@@ -4,6 +4,8 @@ Riftborn is a PS1-era survival shooter across five fractured landscapes. The use
 
 ## Visual system
 
+Player status follows the character in screen space: two 13px white diamond dash charges sit below the feet and fill as each charge recharges; a compact numbered health bar sits above the head and moves from green through yellow and orange to red. A saved Graphics slider controls both cues' opacity from 0 to 100%. These cues use the existing pixel type and solid console colors, stay outside pointer input, and disappear with the gameplay HUD.
+
 `dist/retro.css` owns interface tokens and overrides the legacy layout styles. Ink `#15151e`, cream `#ded6be`, muted olive `#b8c49a`, aged gold `#d4bc78`, and gray `#9c9a8b` form the UI palette. Use the bundled Crypt pixel font for headings, labels, buttons, and data, with Courier New as fallback. Hard beveled borders, square corners, solid fills, and offset pixel shadows are deliberate. No blur, bloom, glass, rounded cards, modern gradients, or smooth UI transitions.
 
 `dist/retro.js` owns the 3D material pipeline: low-poly silhouettes, nearest-filtered atlas textures, affine texture interpolation, snapped vertices, and 5-bit color dithering. Render at 320 vertical pixels (240 on touch/performance fallback), scaling the canvas with nearest-neighbor interpolation. The player retains a low-poly human rig; enemies are zombies and monsters with hunched bodies, claws, jaws, horns, swollen sacs, crawling legs or floating tendrils. Their silhouettes and attacks identify their roles. Palette and textures distinguish terrain and enemy types. Fog is atmosphere, not a substitute for legible nearby terrain: its near plane sits beyond the normal gameplay camera distance in both Normal and Nightmare graphics.

@@ -1,10 +1,10 @@
 // BALANCE REFERENCE: weapon damage uses HP, speed/range use world units, cooldown uses seconds. Enemy pools control when each monster appears.
 import {MUSIC_TEMPO} from './soundtrack.js?v=17';
 export const WEAPONS = [
- {label:'RIFLE',kind:'ASSAULT',icon:'⌁',color:'#6be7a6',description:'Accurate all-round automatic rifle',damage:20,speed:38,range:32,count:1,spread:.015,cooldown:.22,pierce:0,sound:'rifle'},
- {label:'STINGER',kind:'SMG',icon:'ϟ',color:'#6ad6ff',description:'High fire rate, wide spread',damage:9,speed:34,range:23,count:1,spread:.085,cooldown:.075,pierce:0,sound:'smg'},
- {label:'SCATTER',kind:'SHOTGUN',icon:'⋔',color:'#b899ff',description:'Seven close-range pellets',damage:12,speed:32,range:12,count:7,spread:.065,cooldown:.8,pierce:0,sound:'shotgun'},
- {label:'LANCER',kind:'RAILGUN',icon:'➜',color:'#f497ff',description:'Long-range piercing heavy shot',damage:95,speed:90,range:48,count:1,spread:0,cooldown:1.05,pierce:4,sound:'rail'},
+ {label:'RIFLE',kind:'ASSAULT',icon:'⌁',color:'#6be7a6',description:'Accurate all-round automatic rifle',damage:22,speed:38,range:32,count:1,spread:.015,cooldown:.22,pierce:0,sound:'rifle'},
+ {label:'STINGER',kind:'SMG',icon:'ϟ',color:'#6ad6ff',description:'High fire rate, wide spread',damage:11,speed:34,range:23,count:1,spread:.085,cooldown:.075,pierce:0,sound:'smg'},
+ {label:'SCATTER',kind:'SHOTGUN',icon:'⋔',color:'#b899ff',description:'Seven close-range pellets',damage:18,speed:32,range:12,count:7,spread:.065,cooldown:.8,pierce:0,sound:'shotgun'},
+ {label:'LANCER',kind:'RAILGUN',icon:'➜',color:'#f497ff',description:'Long-range piercing heavy shot',damage:95,speed:90,range:48,count:1,spread:0,cooldown:1.50,pierce:4,sound:'rail'},
  {label:'HAVOC',kind:'ROCKET',icon:'◆',color:'#ffca65',description:'Explosive splash damage in a 3.5m radius',damage:72,speed:19,range:30,count:1,spread:0,cooldown:1.3,pierce:0,rocket:true,radius:3.5,sound:'rocket'}
 ];
 export const ENEMY_TYPES = {

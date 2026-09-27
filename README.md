@@ -68,6 +68,10 @@ Nightmare now has heavier rain, a much shorter fog falloff, a dark sky, and a st
 
 ## Development and checks
 
+Dash has two charges. Each spent charge refills in sequence over 1.8 seconds of active play; the two white foot markers show available charges and refill progress. A small overhead health bar shows current HP and shifts from green through yellow and orange to red as health falls. Graphics has a saved **Player indicators opacity** slider (0–100%) for both cues.
+
+For a full campaign test, open **Start Run**, check **Practice Run**, and begin. Practice runs keep normal gameplay and Death Mode selection, but do not submit a score or save Journal and personal-result progress. The run setup keeps the checkbox selection until you change it; uncheck it to record a normal run.
+
 The centered main menu keeps the title, primary actions and secret skull over a live CPU-driven run at 1.5× speed. The CPU targets enemies, changes weapons, navigates terrain and portals, chooses upgrades, and loops through stages. Demo runs never submit scores or profile progress and reset completely when the player starts. Starting or replaying a run always opens username confirmation, now prefilled from the local profile and still editable.
 
 Settings has Graphics, Audio and Controls tabs with keyboard navigation. Graphics offers a Nightmare toggle, automatic or 160/240/320/480/720-pixel internal vertical resolution, a fog slider including Off, and 30/60/120/unlimited FPS caps. The cap limits rendering without slowing simulation. Actual FPS depends on hardware/display; explicit pixelation choices are not overridden by automatic performance fallback. Audio retains separate master/music/effects levels and mute, with Test sound for an audible check. Starting a run explicitly resumes the audio context; later player input can recover an interrupted context. The sound indicator accounts for zero volume, and toggling sound on restores a zeroed master. Controls retains key rebinding and controller help. Preferences save locally under the existing compatibility key.
