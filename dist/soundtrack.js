@@ -1,3 +1,4 @@
+// MUSIC REFERENCE: scoreEvents composes sixteenth-note events; createMusicPlayer synthesizes each voice. Tune BPM in MUSIC_TEMPO and instrument levels in scoreEvents.
 // Original arcade horror score. Each mode has a 16-bar song form, not a single repeating arpeggio.
 export const MUSIC_TEMPO=Object.freeze({normal:140,death:168});
 const pitch=(semitones)=>55*2**(semitones/12);

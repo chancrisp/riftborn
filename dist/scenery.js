@@ -1,13 +1,14 @@
+// SCENERY REFERENCE: covers stop projectiles, obstacles stop walking. Keep both in sync when adding solid structures; reserve space around navigation paths.
 import * as T from 'three';
-import {retroMaterial} from './retro.js?v=12';
-import {EXTENT,CELLS,randomSource} from './terrain.js?v=12';
+import {retroMaterial} from './retro.js?v=13';
+import {EXTENT,CELLS,randomSource} from './terrain.js?v=13';
 
 // Static scenery is batched by geometry/material: silhouettes without hundreds of draw calls.
 export function buildStageWorld(terrain){
  const covers=[];
  const group=new T.Group(),rng=randomSource(terrain.seed+terrain.stage*3571),s=terrain.stage;
  const palettes=[['#497c57','#75915f','#bac1a0'],['#424c66','#687992','#b3b0a1'],['#372d40','#6d3948','#b77561'],['#273958','#546d91','#a5bcd1'],['#241e48','#503b76','#9e83b6']];
- const [low,high,trail]=palettes[s-1],batches=new Map(),geometries={box:new T.BoxGeometry(1,1,1),ico:new T.IcosahedronGeometry(1,0),cone:new T.ConeGeometry(1,1,6),cylinder:new T.CylinderGeometry(1,1,1,8),gem:new T.OctahedronGeometry(1,0)};
+ const [low,high,trail]=terrain.tutorial?['#596976','#839194','#d1c5a6']:palettes[s-1],batches=new Map(),geometries={box:new T.BoxGeometry(1,1,1),ico:new T.IcosahedronGeometry(1,0),cone:new T.ConeGeometry(1,1,6),cylinder:new T.CylinderGeometry(1,1,1,8),gem:new T.OctahedronGeometry(1,0)};
  const hulls=Object.fromEntries(Object.entries(geometries).map(([shape,geometry])=>{
   geometry.computeBoundingBox();const pos=geometry.attributes.position,index=geometry.index,planes=new Map();
   for(let i=0;i<(index?.count??pos.count);i+=3){
@@ -20,13 +21,19 @@ export function buildStageWorld(terrain){
  for(let iz=0;iz<=CELLS;iz++)for(let ix=0;ix<=CELLS;ix++){const x=ix-EXTENT,z=iz-EXTENT,y=terrain.heights[iz*(CELLS+1)+ix],route=terrain.routeAt(x,z);positions.push(x,y,z);uvs.push(x/6,z/6);const c=cLow.clone().lerp(cHigh,T.MathUtils.clamp((y+3)/14,0,1));if(route.distance<2.1)c.lerp(cTrail,.42);c.lerp(new T.Color('#ffffff'),.62).multiplyScalar(rng(.92,1.07));colors.push(c.r,c.g,c.b)}
  for(let z=0;z<CELLS;z++)for(let x=0;x<CELLS;x++){const a=z*(CELLS+1)+x,b=a+1,c=a+CELLS+1,d=c+1;indices.push(a,c,b,b,c,d)}
  ground.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));ground.setAttribute('position',new T.Float32BufferAttribute(positions,3));ground.setAttribute('color',new T.Float32BufferAttribute(colors,3));ground.setIndex(indices);ground.computeVertexNormals();
- const groundMat=retroMaterial('#d0cab4',[4,5,8,10,11][s-1],{vertexColors:true}),surface=new T.Mesh(ground,groundMat);surface.receiveShadow=true;group.add(surface);
+ const groundMat=retroMaterial('#d0cab4',terrain.tutorial?5:[4,5,8,10,11][s-1],{vertexColors:true}),surface=new T.Mesh(ground,groundMat);surface.receiveShadow=true;group.add(surface);
  function add(shape,color,x,y,z,sx,sy,sz,glow=0,rotation=0){if(sy>.35&&Math.hypot(x,z)<75)covers.push({shape,x,y,z,sx,sy,sz,rotation,hull:hulls[shape]});const key=shape+color+glow;if(!batches.has(key))batches.set(key,{shape,color,glow,items:[]});batches.get(key).items.push({x,y,z,sx,sy,sz,rotation})}
- function allowed(x,z,r){return Math.hypot(x,z)>11&&Math.hypot(x,z)<63&&terrain.routeAt(x,z).distance>5.7+r&&Math.hypot(x-terrain.points[0][0],z-terrain.points[0][1])>9+r&&terrain.clear(x,z,r+1.4)}
+ function allowed(x,z,r){return !terrain.tutorial&&Math.hypot(x,z)>11&&Math.hypot(x,z)<63&&terrain.routeAt(x,z).distance>5.7+r&&Math.hypot(x-terrain.points[0][0],z-terrain.points[0][1])>9+r&&terrain.clear(x,z,r+1.4)}
  function block(x,z,sx,sz,h,color){const y=terrain.height(x,z);add('box',color,x,y+h/2,z,sx,h,sz);terrain.obstacles.push({x,z,sx,sz});return y}
  function structureSites(){const sites=[];for(let z=-48;z<=48;z+=4)for(let x=-48;x<=48;x+=4){if(Math.hypot(x,z)<17||!allowed(x,z,4))continue;const y=terrain.height(x,z);if(Math.abs(terrain.height(x-3,z)-y)<.7&&Math.abs(terrain.height(x+3,z)-y)<.7)sites.push([x,z])}return sites.sort((a,b)=>Math.hypot(...a)-Math.hypot(...b))}
  // Each stage owns its terrain, skyline and architectural vocabulary.
- if(s===1){
+ if(terrain.tutorial){
+  // A dedicated practice cloister: clear central floor, perimeter pillars and a broad rift gate.
+  for(let i=0;i<16;i++){const a=i*Math.PI/8,x=Math.cos(a)*26,z=Math.sin(a)*26,y=terrain.height(x,z),h=i%3===0?5:3.4;block(x,z,1.3,1.3,h,'#839194');add('box','#c2c8b7',x,y+h+.2,z,1.8,.4,1.8)}
+  for(const x of [-5,5]){const y=block(x,-21,1.3,1.3,6,'#839194');add('box','#d1c5a6',x,y+6.2,-21,1.8,.4,1.8)}
+  add('box','#839194',0,6.7,-21,12,.7,1.5);
+  for(const z of [-12,-6,0,6,12])for(const x of [-20,20])add('box','#c2c8b7',x,terrain.height(x,z)+.12,z,1.8,.24,3);
+ }else if(s===1){
   let ruins=0;for(const [x,z] of structureSites()){if(!allowed(x,z,4))continue;const y=terrain.height(x,z);for(const d of [-2.2,2.2]){block(x+d,z,1.1,1.6,4.2+y-terrain.height(x+d,z),'#a5aba0');add('box','#bdc5ad',x+d,y+4.5,z,1.6,.4,2)}add('box','#8c9795',x,y+5,z,6,.8,1.6);if(++ruins===3)break}
   for(let i=0;i<95;i++){const x=rng(-65,65),z=rng(-65,65),k=rng(.8,1.5);if(!allowed(x,z,2))continue;const y=terrain.height(x,z);add('cylinder','#66503d',x,y+1.8*k,z,.3*k,3.6*k,.3*k);
    if(i%3===0){for(const side of [-1,1])add('ico','#529076',x+side*.9*k,y+4.1*k,z,1.6*k,1.6*k,1.5*k);add('ico','#327464',x,y+5*k,z,1.8*k,1.7*k,1.8*k)}

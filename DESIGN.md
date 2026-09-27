@@ -1,6 +1,6 @@
 # Riftborn design
 
-Riftborn is a PS1-era survival shooter across five fractured landscapes. The user approved the name and a cohesive period look for every screen, based on low-poly textured character models in the supplied fern video. The main menu is centered over a real CPU run at 1.5× speed; it contains a title and three actions, with controls confined to Settings.
+Riftborn is a PS1-era survival shooter across five fractured landscapes. The user approved the name and a cohesive period look for every screen, based on low-poly textured character models in the supplied fern video. The main menu is centered over a real CPU run at 1.5× speed; it contains a title, Start Run, Tutorial, Settings and Leaderboard. Control reference stays in Settings; guided instruction appears inside the tutorial world.
 
 ## Visual system
 
@@ -24,3 +24,11 @@ Operate mode: change one preference and return to the run. Graphics, Audio and C
 Graphics uses a Nightmare checkbox, a pixelation selector, a single fog slider, and a frame-rate selector. Changes apply immediately and save locally. Automatic resolution can reduce under sustained slow frames; explicit choices stay fixed. FPS is a rendering cap, independent of simulation. Inputs use square native controls, the existing pixel font, cream/olive/gold colors and beveled console borders. Small screens retain two columns for labels and controls; longer labels wrap.
 
 The Impeccable scoped distill workflow informed this surface. Its detector flagged inherited small HUD text and legacy styles outside Settings; Settings labels/controls use 12–16px minimums and were inspected at desktop and 390px width. No new visual world replaces the approved PS1 style. Nightmare adds rain, thick distance fog, soft infrequent lightning and darker moonlight without luminous plants. Nearby geometry stays readable as the camera zooms. Nightmare affects visuals only; Death Mode owns difficulty. Audio settings include Test sound and concise status feedback, and the HUD correctly reports a zero-volume state as Sound Off.
+
+## Tutorial and optional run modifiers
+
+The Rift Cloister is a distinct open stone courtyard. Its centered, beveled guide shows one step at a time: movement, dash, firing, weapon switching, five easy kills, and the exit rift. Enemy spawns wait until weapon switching is learned. Guidance reflects saved keybindings and current input device. Entering the rift ends the tutorial; it never writes a score or changes the regular run state.
+
+Optional skull statues reuse the red skull sprite above stone plinths. A concise proximity prompt names the Interact binding and the +5% consequence before activation. Each statue activates once. The difficulty readout remains hidden until the first use, then starts at 105% and persists through stages. Powerups are small, colored low-poly pickups with brief names on collection and countdowns in the HUD. Durations refresh without stacking; boss-safe Insta Kill and bounded drop counts preserve pressure.
+
+Nightmare uses a pronounced desaturated blue grade, heavier diagonal rain and a shorter distant fog falloff. Ground detail and the player's silhouette remain visible. It adds no luminous flora, modern glow effects, or difficulty changes. The added HUD elements keep square borders, the existing pixel font and restrained spacing.

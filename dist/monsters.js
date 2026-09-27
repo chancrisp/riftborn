@@ -1,3 +1,4 @@
+// MODEL REFERENCE: part() adds a textured low-poly shape. Per-kind branches customize silhouette; arms/legs/appendages are returned for animation in game.js.
 import * as T from 'three';
 
 // Shared low-poly creature meshes; no soldier equipment or per-spawn geometry.

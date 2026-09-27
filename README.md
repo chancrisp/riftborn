@@ -12,11 +12,19 @@ Each run seeds different terrain detail and scenery. Entry plazas, connected pat
 
 Five weapons, stage objectives, portals, XP collection, upgrades, a final boss, input settings, Nightmare graphics, audio and an online leaderboard. Bullets keep their world-space position and velocity, including vertical aim. Swept collisions stop rounds on terrain and structures, distinguish shooting over an enemy from hitting it, and prevent fast shots tunneling through ridges. Explosions respect height and cover.
 
+**Tutorial** on the main menu opens the separate Rift Cloister: an open stone courtyard that guides movement, dash, aim/fire, weapon switching, five slow enemies, and rift entry. The rift opens at exactly five kills and ends the tutorial when entered. The tutorial has forgiving health regeneration, no upgrades or random spawns, and never submits a leaderboard score. Guidance uses saved controls and supports keyboard, controller and touch. Player bullets now accept a standard standing-height hitbox for short/crawling enemies; their actual world-space trajectories, terrain collision and cover still apply.
+
+Regular enemy kills have an 18% chance to drop one temporary powerup: **Speed Boost** (30% movement for 8s), **Rapid Fire** (50% faster firing for 8s), **Insta Kill** (5s; bosses instead take 1.5× damage), **Bone Ward** (30 damage absorption for up to 10s), or **Mend** (+20 health, capped at maximum). Up to four pickups can remain on the ground, expiring after 14s. Repeat pickups refresh rather than stack; their clocks pause with gameplay. Collected effects survive a rift, but a new run clears them.
+
+Each regular stage scatters up to four reachable skull statues away from reserved paths. Approach one and use **Interact** (default **F**, controller **X**, or the touch button). Each statue activates once and adds five percentage points to run difficulty. The HUD appears at **Difficulty: 105%**, then 110%, and so on. This multiplier raises enemy health, speed, damage and spawn cadence, persists across stages, and combines with Death Mode. Starting another run resets it. Interact is rebindable in Settings; older saved keybindings are preserved.
+
 The drifting red skull selects **Death Mode** on the main menu. A subtle red screen tint and label show the selection. Esc cancels it before starting (the skull also toggles it for touch users). After username entry, difficulty is locked for that run; Esc only pauses. Death Mode multiplies enemy movement speed by 1.35 and damage by 1.5, including boss attacks, and plays an original 168 BPM score instead of the normal 140 BPM arrangement. Exclusive Revenants telegraph rapid rushes, Hexers mark delayed cross-shaped blasts, and Broodmothers release bounded crawler packs from stage 2 onward.
 
 Enemies use distinct textured low-poly monster rigs: shamblers, low crawlers, bile spitters, horned chargers, hulking brutes, swollen mortar creatures, needle stalkers, frog-like leapers, splitting egg carriers, floating storm creatures and the crowned Warden. Movement and attack patterns differ; monster ranged attacks no longer come from human firearms.
 
 The PS1 visual pipeline uses textured low-poly models, nearest-filtered textures, affine UV interpolation, snapped vertices, low-resolution rendering, color dithering, and a bundled pixel font. All menus and the HUD share the same retro style. Weapon buttons use generated sprite art. Nightmare replaces the former Night Mode: wind-driven rain, occasional soft lightning and thunder, dense gray-blue fog and readable moonlight. The glowing night plants and their lights are removed. Fog starts beyond the player’s camera distance, including when zoomed out. Reduced motion suppresses lightning.
+
+Nightmare now has heavier rain, a much shorter fog falloff, a dark sky, and a strongly desaturated cold-blue grade. Nearby terrain retains detail; the fog slider and reduced-motion preference still apply. This graphics setting never changes enemy difficulty.
 
 ## Development and checks
 
@@ -41,6 +49,33 @@ Run `npm run dev` (or `node server/dev.mjs`) and open http://127.0.0.1:4173/. Th
 `tests/terrain.mjs` checks 100 seeded stages, 3,000 spawn locations, 400 routed large-enemy journeys, all landmark/portal routes, dash collisions, geography differences and exact agreement between rendered and sampled heights. Ballistics tests cover vertical misses, slopes, narrow ridges and overhead clearance. Audio lifecycle tests cover a suspended first context, interruption/closed-context recovery and zero-volume restoration. `tests/audio-live-probe.js` is a development-only analyser probe that can be loaded before `game.js` in a temporary preview copy to verify the actual output graph; it is never shipped. Graphics tests cover storm cycles, finite geometry, reduced motion and clean disable. The smoke suite simulates combat, controls, progression, lighting, the final boss, independent bullet altitude, username entry and score submission. Server tests cover migration preservation, run dates/stages/mode, ranking, idempotency and exact binary asset serving. Music tests check both arrangements, changing phrases and bounded voices. For Web Audio verification, temporarily copy `tests/music-browser.html` to `dist/music-check.html`, run the preview, and click Render both arrangements; it checks full-song output for finite samples, audible energy and clipping. Remove the temporary copy before packaging.
 
 Static scenery uses instancing; old terrain geometry, materials and instance buffers are disposed at each transition. No new runtime dependencies are introduced. Browser rendering and menus were inspected at desktop and phone widths; simulation and geometry checks cover all five stages. CPU generation timings and draw-call counts are reported by the terrain suite; these do not guarantee a frame rate on every device.
+
+`tests/encounters.mjs` checks pickup odds, refresh/expiry, healing/shield limits, saved Interact migration, 60 reachable statues and portal access across 15 seeded stages. The smoke suite also covers standard-height crawler hits, the full tutorial and its no-score lifecycle, statue activation, difficulty persistence, pickup collection and boss-safe Insta Kill.
+
+## Editing the game manually
+
+The editable game modules live in `dist/`. They are source files despite the folder name. Look for the uppercase section comments in `game.js`; they mark where each system begins. `dist/server/index.js` is generated by `node build.mjs` — edit `server/` for server changes instead. During a Sites editing session the publishing checkout is `.sites-runtime/source`; the project root is synchronized after publication. Avoid editing both copies at the same time.
+
+| What you want to change | File and place to look |
+| --- | --- |
+| Weapon damage, fire rate, pellets, range | `dist/rules.js` → `WEAPONS` |
+| Enemy health, speed, damage; Death Mode multipliers | `dist/rules.js` → `ENEMY_TYPES`, `DEATH_TYPES`, `RUN_MODES` |
+| Enemy attacks and movement patterns | `dist/game.js` → `enemyUpdate`, `deathEnemyUpdate`, `bossUpdate` |
+| Player health, speed, dash; permanent upgrades | `dist/game.js` → `freshPlayer`, `dash`, `UPGRADES` |
+| Powerup chance, duration, colors; statue bonus | `dist/encounters.js` → constants and `POWERUPS` |
+| Powerup speed/fire multipliers and boss exception | `dist/game.js` → `update`, `hurtEnemy` |
+| Tutorial steps, hints, kill goal | `dist/tutorial.js`; `game.js` → `tutorialEvent` for enemy spawning |
+| Key defaults and labels | `dist/preferences.js` → `DEFAULT_BINDINGS`, `ACTION_LABELS` |
+| Hills, paths and movement collision | `dist/terrain.js` → `layouts`, `raw`, `generatedHeight`, `canMove` |
+| Trees, buildings and tutorial courtyard | `dist/scenery.js` → `buildStageWorld` |
+| Monster shapes and animations | `dist/monsters.js` → `createMonster` |
+| Fog / pixelation / FPS | `dist/graphics.js`; `game.js` → `applyLighting` |
+| Nightmare rain and lightning | `dist/storm.js` → `createStorm`; color grade in `dist/retro.js` |
+| Synth music notes, tempo and instruments | `dist/soundtrack.js`; effects in `game.js` → `audio` |
+| Menu/HUD text and layout | `dist/index.html`, `dist/retro.css` |
+| Scores and database rules | `server/`, `db/` |
+
+Distances are world units, durations and cooldowns are seconds, and weapon cooldown is the interval between shots (smaller means faster). Change one system at a time, preview with `node server/dev.mjs`, and run its relevant test before publishing. Keep collision and rendered geometry in agreement when changing terrain or structures.
 
 The soundtrack takes the user’s Megabonk reference as an energy direction: driving bass, punchy drums and catchy synth hooks. The melodies and arrangements are original, with a 16-bar form, breakdown, build, harmonic-minor turns, organ chords and bell echoes. Death Mode adds denser percussion and heavier bass. Music respects the existing volume/mute controls; background scheduling avoids bursts of stale notes. No third-party music or samples are bundled.
 

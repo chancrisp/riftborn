@@ -1,5 +1,5 @@
 import * as T from 'three';
-import {createMonster} from './monsters.js?v=12';
+import {createMonster} from './monsters.js?v=13';
 
 // Shared PS1 material pipeline: one atlas, affine UVs, snapped vertices and no PBR.
 const pixels=new Uint8Array(64*64*4);
@@ -26,10 +26,12 @@ export function retroMaterial(color='#ffffff',tile=3,{glow=0,vertexColors=false}
  return mat;
 }
 export const RetroShader={
- uniforms:{tDiffuse:{value:null}},
+ uniforms:{tDiffuse:{value:null},nightmare:{value:0}},
  vertexShader:'varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
- fragmentShader:`uniform sampler2D tDiffuse; varying vec2 vUv;
+ fragmentShader:`uniform sampler2D tDiffuse; uniform float nightmare; varying vec2 vUv;
  void main(){vec3 c=texture2D(tDiffuse,vUv).rgb;
+  // Nightmare uses a cold, desaturated palette while retaining shadow detail.
+  if(nightmare>.5){float l=dot(c,vec3(.299,.587,.114));c=mix(vec3(l),c,.22)*vec3(.62,.79,1.12);c+=vec3(.016,.023,.037);}
   vec2 p=mod(floor(gl_FragCoord.xy),4.0);
   float a=mod(p.x,2.0)*2.0+mod(p.y,2.0)*3.0;
   float b=mod(floor(p.x/2.0),2.0)*2.0+mod(floor(p.y/2.0),2.0)*3.0;

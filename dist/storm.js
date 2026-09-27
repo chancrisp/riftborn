@@ -1,12 +1,13 @@
+// WEATHER REFERENCE: particle counts control cost; nextStrike controls lightning cadence; the reduced-motion path suppresses flashes.
 import * as T from 'three';
 
 // Bounded weather geometry renders through the same low-resolution PS1 pipeline.
 export function createStorm({mobile=false,reduced=false}={}){
- const group=new T.Group(),count=mobile?280:560,positions=new Float32Array(count*6),drops=new Float32Array(count*3);
+ const group=new T.Group(),count=mobile?360:720,positions=new Float32Array(count*6),drops=new Float32Array(count*3);
  let seed=93127;const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
  for(let i=0;i<count;i++){drops[i*3]=(random()-.5)*64;drops[i*3+1]=random()*34;drops[i*3+2]=(random()-.5)*64}
  const geometry=new T.BufferGeometry(),attribute=new T.BufferAttribute(positions,3);attribute.setUsage(T.DynamicDrawUsage);geometry.setAttribute('position',attribute);
- const material=new T.LineBasicMaterial({color:'#a5b6c3',transparent:true,opacity:.32,depthWrite:false});
+ const material=new T.LineBasicMaterial({color:'#a5b6c3',transparent:true,opacity:.4,depthWrite:false});
  const rain=new T.LineSegments(geometry,material);rain.frustumCulled=false;group.add(rain);
  const light=new T.DirectionalLight('#bcc8d6',0);light.position.set(-20,35,-15);light.target=group;group.add(light);
  const boltGeometry=new T.BufferGeometry();boltGeometry.setAttribute('position',new T.BufferAttribute(new Float32Array(24),3));
@@ -28,7 +29,7 @@ export function createStorm({mobile=false,reduced=false}={}){
    }
    attribute.needsUpdate=true;
    if(age>=nextStrike){
-    nextStrike=age+7+random()*7;flashAge=0;thunderDelay=.5+random()*.7;
+    nextStrike=age+5+random()*6;flashAge=0;thunderDelay=.5+random()*.7;
     const a=random()*Math.PI*2,x=Math.cos(a)*38,z=Math.sin(a)*38,vertices=boltGeometry.attributes.position;
     for(let i=0;i<8;i++)vertices.setXYZ(i,x+(random()-.5)*3,35-i*4,z+(random()-.5)*2);
     vertices.needsUpdate=true;

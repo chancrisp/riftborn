@@ -1,3 +1,4 @@
+// COLLISION REFERENCE: hitBody clips a segment to a vertical cylinder; traceWorld finds the first solid surface along the same segment.
 // World-space swept projectile collisions.
 const lerp=(a,b,t)=>a+(b-a)*t;
 export const pointAt=(a,b,t)=>({x:lerp(a.x,b.x,t),y:lerp(a.y,b.y,t),z:lerp(a.z,b.z,t)});

@@ -1,17 +1,19 @@
-import {createStorm} from './storm.js?v=12';
-import {createMusicPlayer} from './soundtrack.js?v=12';
-import {renderHeight,fogRange,FramePacer} from './graphics.js?v=12';
+import {POWERUPS,DROP_LIFETIME,MAX_DROPS,STATUE_BONUS,rollPowerup,createBoons,collectBoon,tickBoons,absorbDamage,createStatues} from './encounters.js?v=13';
+import {createTutorial,tutorialCopy,TUTORIAL_PORTAL,TUTORIAL_GOAL} from './tutorial.js?v=13';
+import {createStorm} from './storm.js?v=13';
+import {createMusicPlayer} from './soundtrack.js?v=13';
+import {renderHeight,fogRange,FramePacer} from './graphics.js?v=13';
 import * as T from 'three';
-import {traceWorld,hitBody,pointAt} from './ballistics.js?v=12';
-import {retroMaterial,retroCharacter,retroResolution,RetroShader} from './retro.js?v=12';
+import {traceWorld,hitBody,pointAt} from './ballistics.js?v=13';
+import {retroMaterial,retroCharacter,retroResolution,RetroShader} from './retro.js?v=13';
 import {ShaderPass} from './vendor/postprocessing/ShaderPass.js';
-import { createTerrain } from './terrain.js?v=12';
-import { buildStageWorld } from './scenery.js?v=12';
+import { createTerrain } from './terrain.js?v=13';
+import { buildStageWorld } from './scenery.js?v=13';
 import { EffectComposer } from './vendor/postprocessing/EffectComposer.js';
 import { RenderPass } from './vendor/postprocessing/RenderPass.js';
 import { OutputPass } from './vendor/postprocessing/OutputPass.js';
-import { WEAPONS, ENEMY_TYPES, DEATH_TYPES, RUN_MODES, enemyPool, segmentHit, movementVector } from './rules.js?v=12';
-import { DEFAULT_BINDINGS, ACTION_LABELS, keyLabel, loadPreferences, assignBinding } from './preferences.js?v=12';
+import { WEAPONS, ENEMY_TYPES, DEATH_TYPES, RUN_MODES, enemyPool, segmentHit, movementVector } from './rules.js?v=13';
+import { DEFAULT_BINDINGS, ACTION_LABELS, keyLabel, loadPreferences, assignBinding } from './preferences.js?v=13';
 
 const $ = s => document.querySelector(s);
 let prefs;try{prefs=loadPreferences(window.localStorage)}catch{prefs=loadPreferences(null)}
@@ -23,6 +25,7 @@ const reduced = matchMedia('(prefers-reduced-motion:reduce)').matches;
 const canvas = $('#game');
 const renderer = new T.WebGLRenderer({canvas, antialias:false, powerPreference:'high-performance'});
 renderer.setPixelRatio(1);
+// RENDERING — internal pixel resolution. The canvas is enlarged with nearest-neighbor scaling.
 function retroSize(){const h=renderHeight(prefs.pixelation,mobile,qualityReduced),w=Math.round(h*innerWidth/innerHeight);renderer.setSize(w,h,false);retroResolution.set(w,h);return {w,h}}
 let qualityReduced=false;const resolution=retroSize();
 renderer.shadowMap.enabled = false;
@@ -35,7 +38,7 @@ scene.fog = new T.Fog('#89b4e2',65,165);
 const camera = new T.PerspectiveCamera(47,innerWidth/innerHeight,.1,230);
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene,camera));
-composer.addPass(new OutputPass());composer.addPass(new ShaderPass(RetroShader));composer.setSize(resolution.w,resolution.h);
+composer.addPass(new OutputPass());const retroPass=new ShaderPass(RetroShader);composer.addPass(retroPass);composer.setSize(resolution.w,resolution.h);
 const ambient=new T.HemisphereLight('#c9e5ff','#596651',2.6);scene.add(ambient);
 const sun = new T.DirectionalLight('#ffe0ac',3.6);sun.position.set(-24,45,18);sun.castShadow=true;
 sun.shadow.mapSize.set(mobile?1024:2048,mobile?1024:2048);
@@ -45,8 +48,10 @@ const rim = new T.DirectionalLight('#a791ff',1.8);rim.position.set(30,15,-40);sc
 const flashLight = new T.PointLight('#ffcf67',0,11,2);scene.add(flashLight);
 const world = new T.Group(), actors = new T.Group(), effects = new T.Group();scene.add(world,actors,effects);
 const mats = new Map(), geo = {box:new T.BoxGeometry(1,1,1),ico:new T.IcosahedronGeometry(1,0),sphere:new T.SphereGeometry(1,10,7),gem:new T.OctahedronGeometry(1,0),ring:new T.RingGeometry(.9,1,12),torus:new T.TorusGeometry(1,.08,6,32),cylinder:new T.CylinderGeometry(1,1,1,8)};
+// SHARED MESH HELPERS — cache materials/geometry so transient effects do not allocate every frame.
 function material(color,glow=0){let key=color+':'+glow;if(!mats.has(key))mats.set(key,glow>0?new T.MeshBasicMaterial({color}):retroMaterial(color,3));return mats.get(key)}
 function mesh(shape,color,x,y,z,sx=1,sy=sx,sz=sx,parent=world,glow=0){const m = new T.Mesh(geo[shape],material(color,glow));m.position.set(x,y,z);m.scale.set(sx,sy,sz);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m}
+let tutorial=null,statueWorld=null,difficultyBonus=0,powerups=[],boons=createBoons();
 let runSeed=7361, terrain=createTerrain(1,runSeed), stageWorld=null;
 function height(x,z){return terrain.height(x,z)}
 
@@ -73,22 +78,28 @@ function buildWorld(){
 }
 buildWorld();
 
+// LIGHTING — adjust ambient/sun/rim here; Nightmare color grading lives in retro.js.
 function applyLighting(){
  const s=STAGES[stage-1]||STAGES.at(-1),nightmare=prefs.nightmare;
- scene.background=new T.Color(nightmare?'#242d38':s.sky);scene.fog.color.set(nightmare?'#303b46':s.fog);Object.assign(scene.fog,fogRange(prefs.fog,nightmare));
+ if(retroPass.uniforms)retroPass.uniforms.nightmare.value=nightmare?1:0;
+ scene.background=new T.Color(nightmare?'#111927':s.sky);scene.fog.color.set(nightmare?'#344355':s.fog);Object.assign(scene.fog,fogRange(prefs.fog,nightmare));
  ambient.intensity=nightmare?1.16:1.05;ambient.color.set(nightmare?'#b1bfd0':'#c9e5ff');ambient.groundColor.set(nightmare?'#818b95':'#596651');
  sun.color.set(nightmare?'#c0cddd':'#ffe0ac');sun.intensity=nightmare?1.02:1.25;rim.color.set(nightmare?'#869baa':'#a791ff');rim.intensity=nightmare?.5:.4;
  storm.setEnabled(nightmare);flashLight.intensity=0;
 }
 
+// WORLD LIFECYCLE — dispose stage-owned scenery, then rebuild terrain, statues and the portal.
 function setStageDecor(){
- stageWorld?.dispose();terrain=createTerrain(stage,runSeed);stageWorld=buildStageWorld(terrain);world.add(stageWorld.group);
- const [px,pz]=STAGES[stage-1].portal;stagePortal.position.set(px,height(px,pz)+2.7,pz);stagePortal.rotation.set(0,0,0);stagePortal.visible=portalActive;
+ statueWorld?.dispose();statueWorld=null;stageWorld?.dispose();terrain=createTerrain(stage,runSeed,{tutorial:!!tutorial});stageWorld=buildStageWorld(terrain);world.add(stageWorld.group);if(!tutorial){statueWorld=createStatues(terrain,stageWorld,runSeed+stage*107);world.add(statueWorld.group)}
+ const [px,pz]=tutorial?TUTORIAL_PORTAL:STAGES[stage-1].portal;stagePortal.position.set(px,height(px,pz)+2.7,pz);stagePortal.rotation.set(0,0,0);stagePortal.visible=portalActive;
  applyLighting();
 }
-function activatePortal(){if(stage===STAGES.length){summonBoss();return}if(portalActive)return;portalActive=true;stagePortal.visible=true;toast('RIFT PORTAL OPEN · '+STAGES[stage-1].name);for(let i=0;i<90;i++){const [x,z]=STAGES[stage-1].portal;burst(x,rand(.8,6),z,'#b974ff',1,3)}audio.fx('level');updateHUD()}
-function enterStage(){if(!portalActive)return;if(stage>=STAGES.length)return;for(const g of gems)player.xp+=g.v;clearInput();player.vx=player.vz=0;player.dashing=0;player.inv=2;stage=Math.min(stage+1,STAGES.length);stageKills=0;stageGoal=STAGES[stage-1]?.goal||stageGoal+18;portalActive=false;for(const e of enemies)removeEnemy(e);clearObjects(shots);clearObjects(hazards);clearObjects(gems);clearObjects(particles);clearObjects(rings);particles=[];rings=[];numbers.forEach(n=>n.el.remove());numbers=[];enemies=[];shots=[];hazards=[];gems=[];player.x=0;player.z=0;player.hp=Math.min(player.max,player.hp+25);setStageDecor();toast('STAGE '+stage+' · '+STAGES[stage-1].name+' · SHARDS COLLECTED · +25 HEALTH');audio.fx('level');burst(0,1,0,'#d3a0ff',40,5);updateHUD()}
+// PROGRESSION — called when the kill goal is reached; the final stage summons the boss.
+function activatePortal(){if(stage===STAGES.length){summonBoss();return}if(portalActive)return;portalActive=true;stagePortal.visible=true;toast(tutorial?'TRAINING RIFT OPEN':'RIFT PORTAL OPEN · '+STAGES[stage-1].name);for(let i=0;i<90;i++){const [x,z]=tutorial?TUTORIAL_PORTAL:STAGES[stage-1].portal;burst(x,rand(.8,6),z,'#b974ff',1,3)}audio.fx('level');updateHUD()}
+// RIFT ENTRY — tutorials finish here; normal runs retain upgrades and statue difficulty.
+function enterStage(){if(!portalActive)return;if(tutorial){finishTutorial(true);return}if(stage>=STAGES.length)return;for(const g of gems)player.xp+=g.v;for(const p of powerups)effects.remove(p.m);powerups=[];clearInput();player.vx=player.vz=0;player.dashing=0;player.inv=2;stage=Math.min(stage+1,STAGES.length);stageKills=0;stageGoal=STAGES[stage-1]?.goal||stageGoal+18;portalActive=false;for(const e of enemies)removeEnemy(e);clearObjects(shots);clearObjects(hazards);clearObjects(gems);clearObjects(particles);clearObjects(rings);particles=[];rings=[];numbers.forEach(n=>n.el.remove());numbers=[];enemies=[];shots=[];hazards=[];gems=[];player.x=0;player.z=0;player.hp=Math.min(player.max,player.hp+25);setStageDecor();toast('STAGE '+stage+' · '+STAGES[stage-1].name+' · SHARDS COLLECTED · +25 HEALTH');audio.fx('level');burst(0,1,0,'#d3a0ff',40,5);updateHUD()}
 
+// WEAPON VISUALS — builds the low-poly weapon carried by the player.
 function weaponModel(index,parent){
  const w=WEAPONS[index],g=new T.Group();parent.add(g);
  mesh('box','#253549',0,0,.18,.22,.25,.8,g);mesh('box',w.color,0,.04,.27,.25,.17,.46,g,.25);
@@ -123,28 +134,36 @@ let selected=0,cameraYaw=.35,cameraDistance=25,aim=0,aimPitch=0,fireTimer=0,toas
 let touchFire=false,overlay=null,overlayReturn='menu',bindingAction=null,runId=null,runName='Player',pendingScores=new Map(),savingScores=false,padFireLocked=false;
 let keys={},mouse={x:0,y:0,moved:false,down:false,orbit:false},moveStick={x:0,y:0},aimStick={x:0,y:0},gamepadAim={x:0,y:0},gamepadFire=false,prevPad=[];
 const raycaster=new T.Raycaster(),floorPlane=new T.Plane(new T.Vector3(0,1,0),-1),aimPoint=new T.Vector3();
+// PLAYER DEFAULTS — health, movement, weapon bonuses and dash timers reset for each run.
 function freshPlayer(){return {x:0,z:0,vx:0,vz:0,hp:100,max:100,xp:0,next:10,level:1,speed:6.4,damage:1,rate:1,pierce:0,extra:0,crit:.1,magnet:3.8,dashCD:0,dashing:0,inv:0,dx:0,dz:1,regen:0}}
 player=freshPlayer();
 function clearObjects(list){for(const o of list)if(o.m){effects.remove(o.m);if(o.ownMat)o.m.material.dispose()}}
-function start(demo=false){
- runDeath=menuDeath;runTuning=runDeath?RUN_MODES.death:RUN_MODES.normal;
+// RUN RESET — demo and tutorial never receive leaderboard run IDs. Clear temporary bonuses here.
+function start(demo=false,training=false){
+ for(const p of powerups)effects.remove(p.m);powerups=[];boons=createBoons();difficultyBonus=0;
+ tutorial=training?createTutorial():null;document.body.classList.toggle('tutorial-active',training);$('#tutorialGuide').classList.toggle('hidden',!training);$('#endRun').textContent=training?'EXIT TUTORIAL':'END RUN & SAVE SCORE';
+ runDeath=!training&&menuDeath;runTuning=runDeath?RUN_MODES.death:RUN_MODES.normal;
  demoActive=demo===true;demoFinished=false;demoAge=0;demoWeaponTime=0;demoInput={x:0,z:0};demoFiring=false;
- clearInput();runId=demoActive?null:crypto.randomUUID();runName=demoActive?'CPU':($('#playerName').value||'').trim().slice(0,16)||'Player';
+ clearInput();runId=demoActive||tutorial?null:crypto.randomUUID();runName=demoActive?'CPU':($('#playerName').value||'').trim().slice(0,16)||'Player';
  for(const e of enemies)removeEnemy(e);clearObjects(shots);clearObjects(particles);clearObjects(gems);clearObjects(hazards);clearObjects(rings);numbers.forEach(n=>n.el.remove());
- enemies=[];shots=[];particles=[];gems=[];hazards=[];rings=[];numbers=[];runSeed=(Math.random()*4294967296)>>>0;player=freshPlayer();elapsed=0;wave=1;score=0;kills=0;bossSpawned=false;victory=false;hitMarker=0;stage=1;stageKills=0;stageGoal=STAGES[0].goal;portalActive=false;spawnTimer=.8;fireTimer=0;selected=0;aimPitch=0;mode='play';cameraYaw=.35;cameraDistance=25;shake=hit=recoil=0;if(demoActive){stage=demoStage;stageGoal=STAGES[stage-1].goal;mode='menu';player.damage=1.6;player.rate=1.25;player.regen=3;player.hp=player.max=160}setStageDecor();
+ enemies=[];shots=[];particles=[];gems=[];hazards=[];rings=[];numbers=[];runSeed=(Math.random()*4294967296)>>>0;player=freshPlayer();elapsed=0;wave=1;score=0;kills=0;bossSpawned=false;victory=false;hitMarker=0;stage=1;stageKills=0;stageGoal=tutorial?TUTORIAL_GOAL:STAGES[0].goal;portalActive=false;spawnTimer=.8;fireTimer=0;selected=0;aimPitch=0;mode='play';cameraYaw=.35;cameraDistance=25;shake=hit=recoil=0;if(demoActive){stage=demoStage;stageGoal=STAGES[stage-1].goal;mode='menu';player.damage=1.6;player.rate=1.25;player.regen=3;player.hp=player.max=160}setStageDecor();if(tutorial)player.regen=20;
  if(demoActive){hero.g.visible=true;equip(0);for(let i=0;i<8;i++){const a=i*Math.PI/4;spawnEnemy(null,{x:Math.sin(a)*14,z:Math.cos(a)*14})}return}
  $('#menu').classList.add('hidden');$('#choice').classList.add('hidden');$('#pauseMenu').classList.add('hidden');hero.g.visible=true;
  document.body.classList.add('in-run');document.body.classList.remove('menu-open');
- equip(0);audio.start();toast('STAGE 1 · MEADOWS');updateHUD();
+ equip(0);audio.start();if(!tutorial)toast('STAGE 1 · MEADOWS');updateHUD();
 }
-function equip(i){selected=(i+WEAPONS.length)%WEAPONS.length;hero.gunMount.remove(hero.weapon);hero.weapon=weaponModel(selected,hero.gunMount);document.querySelectorAll('.weapon').forEach((b,n)=>{b.classList.toggle('active',n===selected);b.setAttribute('aria-pressed',String(n===selected))});fireTimer=Math.min(fireTimer,.16);if(mode==='play')audio.fx('switch')}
+// WEAPON SELECTION — changes the model, highlighted slot and tutorial progress.
+function equip(i){selected=(i+WEAPONS.length)%WEAPONS.length;hero.gunMount.remove(hero.weapon);hero.weapon=weaponModel(selected,hero.gunMount);document.querySelectorAll('.weapon').forEach((b,n)=>{b.classList.toggle('active',n===selected);b.setAttribute('aria-pressed',String(n===selected))});fireTimer=Math.min(fireTimer,.16);if(mode==='play')audio.fx('switch');tutorialEvent('weapon',selected)}
 WEAPONS.forEach((w,i)=>{const b=document.createElement('button');b.className='weapon';b.style.setProperty('--rarity',w.color);b.title=`${i+1}: ${w.label} — ${w.description}`;b.setAttribute('aria-label',b.title);b.innerHTML=`<span class="num">${i+1}</span><span class="weapon-sprite sprite-${i}" aria-hidden="true"></span><span class="name">${w.label}</span><span class="kind">${w.kind}</span>`;b.onclick=()=>equip(i);$('#weapons').appendChild(b)});equip(0);
 function clearInput(){keys={};mouse.down=false;mouse.orbit=false;touchFire=false;gamepadFire=false;padFireLocked=true;moveStick.x=moveStick.y=aimStick.x=aimStick.y=0;for(const id of ['#moveStick','#aimStick'])$(id).querySelector('span').style.transform='none'}
 function held(action){return !!keys[prefs.bindings[action]]}
+// PAUSE — clear held inputs so resume cannot accidentally fire or keep moving.
 function pause(){if(overlay){closePanel();return}if(mode==='play'){clearInput();mode='pause';document.body.classList.add('menu-open');$('#pauseStats').textContent=`STAGE ${stage} · ${score.toLocaleString()} SCORE · ${formatTime(elapsed)}`;$('#pauseMenu').classList.remove('hidden');$('#resume').focus()}else if(mode==='pause'){clearInput();mode='play';document.body.classList.remove('menu-open');$('#pauseMenu').classList.add('hidden')}}
-function dash(){if((mode!=='play'&&!demoActive)||player.dashCD>0)return;const v=inputMovement();let l=Math.hypot(v.x,v.z);player.dx=l>.1?v.x/l:Math.sin(aim);player.dz=l>.1?v.z/l:Math.cos(aim);player.dashing=.22;player.dashCD=1.8;player.inv=.35;burst(player.x,1,player.z,'#98ffff',25,5);audio.fx('dash')}
-$('#start').onclick=()=>openPanel('#runSetup');$('#pause').onclick=pause;$('#resume').onclick=pause;$('#dashTouch').onclick=dash;
-function trigger(code){if(code===prefs.bindings.pause){pause();return}if(mode!=='play'||overlay)return;if(code===prefs.bindings.dash)dash();for(let i=1;i<=5;i++)if(code===prefs.bindings['weapon'+i])equip(i-1)}
+// DASH — duration, cooldown and invulnerability are in seconds; movement still checks collision.
+function dash(){if((mode!=='play'&&!demoActive)||player.dashCD>0)return;const v=inputMovement();let l=Math.hypot(v.x,v.z);player.dx=l>.1?v.x/l:Math.sin(aim);player.dz=l>.1?v.z/l:Math.cos(aim);player.dashing=.22;player.dashCD=1.8;player.inv=.35;tutorialEvent('dash');burst(player.x,1,player.z,'#98ffff',25,5);audio.fx('dash')}
+$('#start').onclick=()=>openPanel('#runSetup');$('#tutorial').onclick=()=>{setDeathMode(false);start(false,true)};$('#pause').onclick=pause;$('#resume').onclick=pause;$('#dashTouch').onclick=dash;$('#interactTouch').onclick=interact;
+// INPUT DISPATCH — keyboard/mouse bindings from preferences.js enter gameplay here.
+function trigger(code){if(code===prefs.bindings.pause){pause();return}if(mode!=='play'||overlay)return;if(code===prefs.bindings.dash)dash();if(code===prefs.bindings.interact)interact();for(let i=1;i<=5;i++)if(code===prefs.bindings['weapon'+i])equip(i-1)}
 addEventListener('keydown',e=>{if(bindingAction){e.preventDefault();if(e.code==='Escape'){bindingAction=null;renderBindings();$('#bindStatus').textContent='Rebinding cancelled.'}else if(!e.repeat)captureBinding(e.code);return}if(e.code==='Escape'){e.preventDefault();escapeMenu();return}if(e.target?.matches?.('input,textarea,select'))return;if(mode!=='play'&&mode!=='pause')return;if(Object.values(prefs.bindings).includes(e.code))e.preventDefault();if(mode==='play')keys[e.code]=true;if(!e.repeat)trigger(e.code)});
 addEventListener('keyup',e=>keys[e.code]=false);
 addEventListener('blur',()=>{clearInput();if(mode==='play')pause()});
@@ -157,15 +176,17 @@ canvas.addEventListener('wheel',e=>{e.preventDefault();cameraDistance=clamp(came
 function bindStick(id,value){let el=$(id),pid=null;const update=e=>{let r=el.getBoundingClientRect(),x=(e.clientX-r.left-r.width/2)/40,y=(e.clientY-r.top-r.height/2)/40,l=Math.max(1,Math.hypot(x,y));value.x=x/l;value.y=y/l;el.querySelector('span').style.transform=`translate(${value.x*28}px,${value.y*28}px)`};el.onpointerdown=e=>{pid=e.pointerId;el.setPointerCapture(pid);update(e)};el.onpointermove=e=>{if(pid===e.pointerId)update(e)};el.onpointerup=el.onpointercancel=()=>{pid=null;value.x=value.y=0;el.querySelector('span').style.transform='none'}}
 bindStick('#moveStick',moveStick);bindStick('#aimStick',aimStick);
 $('#fireTouch').onpointerdown=e=>{if((mode!=='play'&&!demoActive)||demoFinished)return;touchFire=true;$('#fireTouch').setPointerCapture(e.pointerId);e.preventDefault()};$('#fireTouch').onpointerup=$('#fireTouch').onpointercancel=()=>touchFire=false;
-function pollPad(){const p=navigator.getGamepads?.()[0];gamepadAim={x:0,y:0};gamepadFire=false;if(!p)return;const dead=v=>Math.abs(v)>.16?v:0;gamepadAim={x:dead(p.axes[2]||0),y:dead(p.axes[3]||0)};if(!p.buttons[7]?.pressed)padFireLocked=false;gamepadFire=!padFireLocked&&!!p.buttons[7]?.pressed;const rising=i=>p.buttons[i]?.pressed&&!prevPad[i];if(mode==='play'&&!overlay){if(rising(0))dash();if(rising(4))equip(selected-1);if(rising(5))equip(selected+1)}if(rising(9))pause();prevPad=p.buttons.map(b=>b.pressed)}
+// CONTROLLER INPUT — button indices: A=0, X=2, bumpers=4/5, trigger=7, menu=9.
+function pollPad(){const p=navigator.getGamepads?.()[0];gamepadAim={x:0,y:0};gamepadFire=false;if(!p)return;const dead=v=>Math.abs(v)>.16?v:0;gamepadAim={x:dead(p.axes[2]||0),y:dead(p.axes[3]||0)};if(!p.buttons[7]?.pressed)padFireLocked=false;gamepadFire=!padFireLocked&&!!p.buttons[7]?.pressed;const rising=i=>p.buttons[i]?.pressed&&!prevPad[i];if(mode==='play'&&!overlay){if(rising(0))dash();if(rising(2))interact();if(rising(4))equip(selected-1);if(rising(5))equip(selected+1)}if(rising(9))pause();prevPad=p.buttons.map(b=>b.pressed)}
 function inputMovement(){if(demoActive)return demoInput;let x=(held('right')?1:0)-(held('left')?1:0),y=(held('back')?1:0)-(held('forward')?1:0);if(Math.hypot(moveStick.x,moveStick.y)>.05){x=moveStick.x;y=moveStick.y}const p=navigator.getGamepads?.()[0];if(p&&Math.hypot(p.axes[0],p.axes[1])>.17){x=p.axes[0];y=p.axes[1]}return movementVector(x,y,cameraYaw)}
 function moveWithCollision(o,dx,dz,r){terrain.move(o,dx,dz,r)}
+// ENEMY SPAWNING — base stats come from rules.js; training and run difficulty apply here.
 function spawnEnemy(kind,near=null){
  const unlocked=enemyPool(STAGES[stage-1]?.pool||Object.keys(ENEMY_TYPES),runDeath,stage);
- kind=kind||unlocked[Math.floor(rand(0,unlocked.length))];const def=kind==='warden'?{hp:1300,speed:1.8,radius:1.35,damage:24,score:5000,xp:0,color:'#c78dff'}:(ENEMY_TYPES[kind]||DEATH_TYPES[kind]),a=rand(0,Math.PI*2),r=rand(17,23);
+ kind=kind||unlocked[Math.floor(rand(0,unlocked.length))];const def=tutorial?{...ENEMY_TYPES[kind],hp:24,speed:1,damage:3,score:0,xp:0}:kind==='warden'?{hp:1300,speed:1.8,radius:1.35,damage:24,score:5000,xp:0,color:'#c78dff'}:(ENEMY_TYPES[kind]||DEATH_TYPES[kind]),a=rand(0,Math.PI*2),r=rand(17,23);
  const location=near?terrain.safeNear(near.x,near.z,def.radius):terrain.spawn(player.x,player.z,def.radius);let {x,z}=location;
  const c=character(kind);actors.add(c.g);c.g.position.set(x,height(x,z),z);
- const difficulty=1+(stage-1)*.22+Math.min(wave-1,20)*.05;
+ const difficulty=(1+(stage-1)*.22+Math.min(wave-1,20)*.05)*difficultyScale();
  const bar=document.createElement('div'),fill=document.createElement('i');bar.className='enemy-health';bar.appendChild(fill);$('#damageNumbers').appendChild(bar);
  enemies.push({bar,fill,warning:null,attackIndex:0,enraged:false,id:crypto.randomUUID(),kind,def,c,x,z,hp:def.hp*difficulty,max:def.hp*difficulty,cool:rand(1,2.5),state:'approach',timer:0,ax:0,az:1,hit:0,spawn:.4,phase:rand(0,10)});
  ring(x,z,'#bda3ff',1.5,.45);return enemies.at(-1);
@@ -181,6 +202,7 @@ function summonBoss(){
  for(const e of enemies)removeEnemy(e);enemies=[];clearObjects(shots);clearObjects(hazards);shots=[];hazards=[];
  const boss=spawnEnemy('warden');boss.cool=2.5;player.inv=2;toast('THE RIFT WARDEN · FINAL ENCOUNTER');audio.fx('level');
 }
+// FINAL BOSS — alternate warned projectile rings and ground blasts; below half health, shorten recovery.
 function bossUpdate(e,dt){
  const dx=player.x-e.x,dz=player.z-e.z,d=Math.hypot(dx,dz)||1;
  if(e.hp<e.max*.5&&!e.enraged){e.enraged=true;toast('WARDEN ENRAGED · KEEP MOVING');ring(e.x,e.z,'#ff7979',6,1)}
@@ -192,7 +214,7 @@ function bossUpdate(e,dt){
    e.attackIndex++;e.state='approach';e.cool=e.enraged?1.5:2.4;clearWarning(e);
   }
  }else{
-  if(d>8){const v=terrain.steer(e.x,e.z,player.x,player.z,e);moveWithCollision(e,v.x*e.def.speed*runTuning.speed*dt,v.z*e.def.speed*runTuning.speed*dt,e.def.radius)}
+  if(d>8){const v=terrain.steer(e.x,e.z,player.x,player.z,e);moveWithCollision(e,v.x*e.def.speed*runTuning.speed*difficultyScale()*dt,v.z*e.def.speed*runTuning.speed*difficultyScale()*dt,e.def.radius)}
   if(e.cool<=0){e.state='bossWindup';e.timer=e.enraged?.75:1.1;e.tx=player.x;e.tz=player.z;e.ax=dx/d;e.az=dz/d;
    if(e.attackIndex%2===0)ring(e.x,e.z,'#d18aff',4,1.1);else warnLine(e,d,'#ffab74');
   }
@@ -200,6 +222,7 @@ function bossUpdate(e,dt){
  if(d<e.def.radius+.45)hurtPlayer(e.def.damage);
  e.c.g.position.set(e.x,height(e.x,e.z),e.z);e.c.g.rotation.y=Math.atan2(dx,dz);animateCharacter(e.c,elapsed,.4);
 }
+// COMBAT HUD — position enemy health bars in screen space and update boss health/phase.
 function updateCombatUI(dt){
  hitMarker=Math.max(0,hitMarker-dt);$('#crosshair').classList.toggle('confirmed',hitMarker>0);
  for(const e of enemies){
@@ -213,10 +236,13 @@ function updateCombatUI(dt){
 }
 function burst(x,y,z,color,count=12,speed=4){y+=height(x,z);for(let i=0;i<count;i++){if(particles.length>360)break;const m=mesh('box',color,x,y,z,rand(.055,.17),undefined,undefined,effects,.8);m.castShadow=false;particles.push({m,vx:rand(-1,1)*speed,vy:rand(.3,1.7)*speed,vz:rand(-1,1)*speed,life:rand(.25,.65),max:.65})}}
 function ring(x,z,color,size=3,life=.4){const mat=new T.MeshBasicMaterial({color,transparent:true,opacity:.7,side:T.DoubleSide,depthWrite:false});const m=new T.Mesh(geo.ring,mat);m.rotation.x=-Math.PI/2;m.position.set(x,height(x,z)+.12,z);effects.add(m);rings.push({m,life,max:life,size,ownMat:true})}
-function bodyBounds(e){const base=e?e.c.g.position.y:height(player.x,player.z),scale=e?e.c.g.scale.y:1;return {x:e?e.x:player.x,z:e?e.z:player.z,radius:e?e.def.radius:.45,bottom:base+.08,top:base+2.3*scale}}
+// ACTOR HITBOXES — player bullets use at least standing height; terrain/cover stays fully 3D.
+function bodyBounds(e,bullet=false){const base=e?e.c.g.position.y:height(player.x,player.z),scale=e?e.c.g.scale.y:1;return {x:e?e.x:player.x,z:e?e.z:player.z,radius:e?e.def.radius:.45,bottom:base+.08,top:base+2.3*(bullet?Math.max(1,scale):scale)}}
 function shotWorld(){return {height,covers:stageWorld.covers}}
 function pitchTo(x,y,z,tx,ty,tz){return Math.atan2(ty-y,Math.hypot(tx-x,tz-z))}
+// STICK AIM — choose vertical aim from a nearby target without curving bullets in flight.
 function assistedPitch(angle){let best=null,distance=Infinity;for(const e of enemies){const dx=e.x-player.x,dz=e.z-player.z,d=Math.hypot(dx,dz),delta=Math.atan2(Math.sin(Math.atan2(dx,dz)-angle),Math.cos(Math.atan2(dx,dz)-angle));if(e.hp>0&&Math.abs(delta)<.18&&d<distance){best=e;distance=d}}return best?pitchTo(player.x,height(player.x,player.z)+1.47,player.z,best.x,best.c.g.position.y+1.25*best.c.g.scale.y,best.z):0}
+// PROJECTILE CREATION — save world position and velocity once. Never resample bullet altitude.
 function projectile(x,z,a,w,enemy=false){
  const emitter=enemy?enemies.find(e=>Math.hypot(e.x-x,e.z-z)<.1):null;
  const y=enemy?height(x,z)+1.47*(emitter?.c.g.scale.y||1):height(player.x,player.z)+1.47;
@@ -225,16 +251,18 @@ function projectile(x,z,a,w,enemy=false){
  m.rotation.set(-pitch,a,0,'YXZ');m.castShadow=false;
  shots.push({m,x,y,z,px:x,py:y,pz:z,vx:Math.sin(a)*horizontal,vy:Math.sin(pitch)*speed,vz:Math.cos(a)*horizontal,life:w.range/speed,damage:w.damage*(enemy?1:player.damage),pierce:w.pierce+(enemy?0:player.pierce),hitIds:new Set(),enemy,rocket:w.rocket||false,radius:w.radius||0,color:w.color});
 }
-function fire(){const w=WEAPONS[selected],originX=player.x,originZ=player.z;const count=w.count+player.extra;
+// PLAYER FIRING — weapon spread, pellets and feedback. Cadence is controlled in update().
+function fire(){tutorialEvent('shoot',selected);const w=WEAPONS[selected],originX=player.x,originZ=player.z;const count=w.count+player.extra;
  for(let i=0;i<count;i++){const offset=count===1?rand(-w.spread,w.spread):(i-(count-1)/2)*w.spread;projectile(originX,originZ,aim+offset,w)}
  recoil=1;flashLight.position.set(originX,height(originX,originZ)+1.47,originZ);flashLight.color.set(w.color);flashLight.intensity=9;burst(originX,1.47,originZ,'#ffeca6',w.rocket?10:4,2);audio.fx(w.sound);if(w.rocket||selected===2)shake=.08;
 }
+// PROJECTILE UPDATE — sweep the full segment; hit actors only before the nearest terrain/cover impact.
 function updateShots(dt){
  for(const b of shots){
   const from={x:b.x,y:b.y,z:b.z},to={x:b.x+b.vx*dt,y:b.y+b.vy*dt,z:b.z+b.vz*dt};b.px=b.x;b.py=b.y;b.pz=b.z;b.life-=dt;
   const wall=traceWorld(from,to,shotWorld()),limit=wall?.t??1,hits=[];
   if(b.enemy){const t=hitBody(from,to,bodyBounds());if(t!==null&&t<limit)hits.push({t,e:null})}
-  else for(const e of enemies){if(e.hp<=0||b.hitIds.has(e.id))continue;const t=hitBody(from,to,bodyBounds(e));if(t!==null&&t<limit)hits.push({t,e})}
+  else for(const e of enemies){if(e.hp<=0||b.hitIds.has(e.id))continue;const t=hitBody(from,to,bodyBounds(e,true));if(t!==null&&t<limit)hits.push({t,e})}
   hits.sort((a,b)=>a.t-b.t);let stop=null;
   for(const {t,e} of hits){const p=pointAt(from,to,t);if(b.enemy){hurtPlayer(b.damage);stop=p;b.life=0;break}b.hitIds.add(e.id);
    if(b.rocket){explode(p.x,p.z,b.radius,b.damage,false,p.y);stop=p;b.life=0;break}
@@ -248,11 +276,16 @@ function updateShots(dt){
  shots=shots.filter(b=>b.life>0);
 }
 function damageText(x,z,damage,critical){if(numbers.length>25)return;const el=document.createElement('span');el.className='damage'+(critical?' critical':'');el.textContent=Math.round(damage);$('#damageNumbers').appendChild(el);numbers.push({el,x,z,y:height(x,z)+2.2,life:.7})}
-function hurtEnemy(e,damage,critical=false){if(e.hp<=0||victory)return;hitMarker=.12;e.hp-=damage;e.hit=.1;burst(e.x,1.2,e.z,critical?'#ffe668':'#c9fffe',5,2);damageText(e.x,e.z,damage,critical);if(e.hp<=0){score+=e.def.score;kills++;stageKills++;burst(e.x,1.2,e.z,e.def.color,e.kind==='brute'?32:18,4);ring(e.x,e.z,e.def.color,1.4,.3);audio.fx('kill');removeEnemy(e);if(e.kind==='warden'){victory=true;finishRun(false);return}const m=mesh('gem','#80ffde',e.x,height(e.x,e.z)+.4,e.z,.16,.26,.16,effects,1.5);gems.push({m,x:e.x,z:e.z,v:e.def.xp});if(e.kind==='splitter'&&stage>=3){for(let i=0;i<2;i++){const child=spawnEnemy('skitter',{x:e.x+rand(-2,2),z:e.z+rand(-2,2)});child.hp*=.45;child.max=child.hp}}if(kills%12===0){player.hp=Math.min(player.max,player.hp+5)}if(stageKills>=stageGoal)activatePortal()}}
-function hurtPlayer(amount){if(player.inv>0||(mode!=='play'&&!demoActive))return;player.hp=Math.max(0,player.hp-amount*runTuning.damage);player.inv=.6;hit=1;shake=.22;burst(player.x,1,player.z,'#ff7193',15,3);audio.fx('hurt');if(player.hp<=0)finishRun(true)}
+// ENEMY DAMAGE — apply temporary execution bonus, count kills, drop rewards and open the rift.
+function hurtEnemy(e,damage,critical=false){if(e.hp<=0||victory)return;if(boons.execution>0)damage=e.kind==='warden'?damage*1.5:Math.max(damage,e.hp);hitMarker=.12;e.hp-=damage;e.hit=.1;burst(e.x,1.2,e.z,critical?'#ffe668':'#c9fffe',5,2);damageText(e.x,e.z,damage,critical);if(e.hp<=0){score+=e.def.score;kills++;stageKills++;tutorialEvent('kill');burst(e.x,1.2,e.z,e.def.color,e.kind==='brute'?32:18,4);ring(e.x,e.z,e.def.color,1.4,.3);audio.fx('kill');removeEnemy(e);if(!tutorial&&e.kind!=='warden'&&e.def.xp>0)dropPowerup(e.x,e.z);if(e.kind==='warden'){victory=true;finishRun(false);return}const m=mesh('gem','#80ffde',e.x,height(e.x,e.z)+.4,e.z,.16,.26,.16,effects,1.5);gems.push({m,x:e.x,z:e.z,v:e.def.xp});if(e.kind==='splitter'&&stage>=3){for(let i=0;i<2;i++){const child=spawnEnemy('skitter',{x:e.x+rand(-2,2),z:e.z+rand(-2,2)});child.hp*=.45;child.max=child.hp}}if(kills%12===0){player.hp=Math.min(player.max,player.hp+5)}if(stageKills>=stageGoal)activatePortal()}}
+// PLAYER DAMAGE — apply mode/statue multipliers, then absorb damage with Bone Ward.
+function hurtPlayer(amount){if(player.inv>0||(mode!=='play'&&!demoActive))return;player.hp=Math.max(0,player.hp-absorbDamage(boons,amount*runTuning.damage*difficultyScale()));player.inv=.6;hit=1;shake=.22;burst(player.x,1,player.z,'#ff7193',15,3);audio.fx('hurt');if(player.hp<=0)finishRun(true)}
+// EXPLOSIONS — use real vertical distance and cover; a blast cannot pass through a ridge.
 function explode(x,z,radius,damage,enemy=false,y=height(x,z)+.5){burst(x,y-height(x,z),z,enemy?'#ff855f':'#ffd774',38,7);ring(x,z,'#ffe7ad',radius,.45);shake=.23;audio.fx('explosion');const affects=e=>{const bounds=bodyBounds(e),ty=clamp(y,bounds.bottom,bounds.top),target={x:bounds.x,y:ty,z:bounds.z};return Math.hypot(target.x-x,target.y-y,target.z-z)<radius+bounds.radius&&!traceWorld({x,y:y+.08,z},target,shotWorld(),0)};if(enemy){if(affects(null))hurtPlayer(damage)}else for(const e of enemies)if(e.hp>0&&affects(e))hurtEnemy(e,damage)}
 
+// ATTACK TELEGRAPHS — a delayed ground marker resolves into an explosion when its timer expires.
 function hazard(x,z,radius,damage,delay,kind){const mat=new T.MeshBasicMaterial({color:'#ff6257',transparent:true,opacity:.45,side:T.DoubleSide,depthWrite:false});const m=new T.Mesh(new T.CircleGeometry(1,40),mat);m.rotation.x=-Math.PI/2;m.position.set(x,height(x,z)+.09,z);m.scale.setScalar(radius);effects.add(m);hazards.push({m,x,z,radius,damage,life:delay,max:delay,kind,ownMat:true});ring(x,z,'#ffad55',radius,delay)}
+// DEATH MONSTERS — Revenant rush, Hexer cross-blast and Broodmother crawler summons.
 function deathEnemyUpdate(e,dt,dx,dz,d,speed){
  const nx=dx/d,nz=dz/d;
  if(e.state==='deathWindup'){
@@ -262,7 +295,7 @@ function deathEnemyUpdate(e,dt,dx,dz,d,speed){
    else{const children=enemies.filter(m=>m.kind==='skitter'&&m.hp>0).length;for(let i=0;i<Math.min(3,8-children)&&enemies.length<55;i++)spawnEnemy('skitter',{x:e.x+(i-1)*2,z:e.z+2});e.state='approach';e.cool=6;clearWarning(e)}
   }
  }else if(e.state==='deathRush'){
-  moveWithCollision(e,e.ax*16*runTuning.speed*dt,e.az*16*runTuning.speed*dt,e.def.radius);e.timer-=dt;if(e.timer<=0){e.state='approach';e.cool=1.6}
+  moveWithCollision(e,e.ax*16*runTuning.speed*difficultyScale()*dt,e.az*16*runTuning.speed*difficultyScale()*dt,e.def.radius);e.timer-=dt;if(e.timer<=0){e.state='approach';e.cool=1.6}
  }else if(e.cool<=0&&(e.kind!=='revenant'||d<13)){
   e.state='deathWindup';e.timer=e.kind==='revenant'?.55:e.kind==='hexer'?1:1.2;e.ax=nx;e.az=nz;e.tx=player.x+player.vx*.3;e.tz=player.z+player.vz*.3;
   if(e.kind==='revenant')warnLine(e,9,'#e76464');else ring(e.x,e.z,'#d75b76',e.kind==='hexer'?2:3,e.timer);
@@ -275,16 +308,17 @@ function deathEnemyUpdate(e,dt,dx,dz,d,speed){
  e.c.g.position.set(e.x,height(e.x,e.z),e.z);e.c.g.rotation.y=Math.atan2(dx,dz);animateCharacter(e.c,elapsed+e.phase,e.state==='deathWindup'?0:1);
  e.c.body.scale.setScalar(e.hit>0?1.08:1);e.c.g.visible=e.spawn<=0||Math.floor(elapsed*20)%2===0;
 }
+// ENEMY AI — each state machine owns telegraphs, movement and attacks for its monster type.
 function enemyUpdate(e,dt){
  if(e.hp<=0)return;e.cool-=dt;e.hit=Math.max(0,e.hit-dt);e.spawn=Math.max(0,e.spawn-dt);
  if(e.kind==='warden'){bossUpdate(e,dt);return}
- const dx=player.x-e.x,dz=player.z-e.z,d=Math.hypot(dx,dz)||1,nx=dx/d,nz=dz/d;let speed=e.def.speed*runTuning.speed*(1+Math.min(wave-1,10)*.025),moving=0;
+ const dx=player.x-e.x,dz=player.z-e.z,d=Math.hypot(dx,dz)||1,nx=dx/d,nz=dz/d;let speed=e.def.speed*runTuning.speed*difficultyScale()*(1+Math.min(wave-1,10)*.025),moving=0;
  if(e.kind==='runner')speed*=.8+.2*Math.sin(elapsed*5+e.phase);
  if(DEATH_TYPES[e.kind]){deathEnemyUpdate(e,dt,dx,dz,d,speed);return}
  if(e.state==='snipe'){e.timer-=dt;if(e.timer<=0){projectile(e.x,e.z,Math.atan2(e.ax,e.az),{color:'#cd85a8',damage:29,speed:24,range:42,pierce:0},true);e.state='approach';e.cool=2.6;clearWarning(e)}}
  else if(e.state==='windup'){e.timer-=dt;e.c.body.rotation.z=Math.sin(elapsed*40)*.035;if(e.kind==='leaper')e.c.g.position.y=height(e.x,e.z)+1+Math.max(0,1-e.timer)*2;if(e.timer<=0){clearWarning(e);e.state=e.kind==='leaper'?'leap':'charge';e.timer=e.kind==='leaper'?.6:.68;audio.fx('charge')}}
- else if(e.state==='charge'){moveWithCollision(e,e.ax*18*runTuning.speed*dt,e.az*18*runTuning.speed*dt,e.def.radius);moving=2;e.timer-=dt;if(Math.random()<.4)burst(e.x,.5,e.z,'#ffb171',2,1);if(e.timer<=0){e.state='approach';e.cool=3.5;e.c.body.rotation.z=0}}
- else if(e.state==='leap'){moveWithCollision(e,e.ax*25*runTuning.speed*dt,e.az*25*runTuning.speed*dt,e.def.radius);moving=2;e.timer-=dt;if(e.timer<=0){hazard(e.x,e.z,3.6,e.def.damage*1.3,.2,'leap');e.state='approach';e.cool=3.5}}
+ else if(e.state==='charge'){moveWithCollision(e,e.ax*18*runTuning.speed*difficultyScale()*dt,e.az*18*runTuning.speed*difficultyScale()*dt,e.def.radius);moving=2;e.timer-=dt;if(Math.random()<.4)burst(e.x,.5,e.z,'#ffb171',2,1);if(e.timer<=0){e.state='approach';e.cool=3.5;e.c.body.rotation.z=0}}
+ else if(e.state==='leap'){moveWithCollision(e,e.ax*25*runTuning.speed*difficultyScale()*dt,e.az*25*runTuning.speed*difficultyScale()*dt,e.def.radius);moving=2;e.timer-=dt;if(e.timer<=0){hazard(e.x,e.z,3.6,e.def.damage*1.3,.2,'leap');e.state='approach';e.cool=3.5}}
  else{
   if(e.kind==='charger'&&d<12&&d>3&&e.cool<0){e.state='windup';e.timer=.85;e.ax=nx;e.az=nz;e.c.g.rotation.y=Math.atan2(nx,nz);ring(e.x,e.z,'#ff5656',2,.85);warnLine(e,12,'#ff6d63');}
   else if(e.kind==='brute'&&d<3.8&&e.cool<0){hazard(e.x,e.z,4.2,25,.95,'slam');e.cool=3.5;e.timer=.95;}
@@ -299,6 +333,7 @@ function enemyUpdate(e,dt){
  if(d<e.def.radius+.48)hurtPlayer(e.state==='charge'?24:e.def.damage);
  e.c.g.position.set(e.x,height(e.x,e.z)+(e.state==='leap'?Math.sin(clamp(e.timer/.6,0,1)*Math.PI)*3:0),e.z);animateCharacter(e.c,elapsed+e.phase,moving);e.c.body.scale.setScalar(e.hit>0?1.08:1);e.c.g.visible=e.spawn<=0||Math.floor(elapsed*20)%2===0;
 }
+// LEVEL-UP REWARDS — permanent bonuses for this run; freshPlayer() clears them on restart.
 const UPGRADES=[
  ['Overclock','ϟ','Fire every weapon 18% faster.',()=>player.rate*=1.18],
  ['Heavy rounds','✦','Deal 25% more weapon damage.',()=>player.damage*=1.25],
@@ -310,20 +345,24 @@ const UPGRADES=[
  ['Deadeye','◇','Add 15% chance for double damage.',()=>player.crit=Math.min(.9,player.crit+.15)],
  ['Repair field','✚','Recover 1 integrity each second.',()=>player.regen+=1]
 ];
+// PERMANENT RUN UPGRADES — distinct from short-lived powerups in encounters.js.
 function levelUp(){if(demoActive){player.xp-=player.next;player.level++;player.next=Math.floor(player.next*1.3+3);UPGRADES[Math.floor(Math.random()*UPGRADES.length)][3]();return}player.xp-=player.next;player.level++;player.next=Math.floor(player.next*1.3+3);mode='upgrade';$('#cards').replaceChildren();const pool=[...UPGRADES];for(let i=pool.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]]}pool.slice(0,3).forEach((u,i)=>{const b=document.createElement('button');b.className='card';b.innerHTML=`<span class="symbol">${i+1}</span><strong>${u[0].toUpperCase()}</strong><p>${u[2]}</p>`;b.onclick=()=>{u[3]();mode='play';$('#choice').classList.add('hidden');toast(u[0].toUpperCase());updateHUD()};$('#cards').appendChild(b)});$('#choice').classList.remove('hidden');$('#cards button').focus();audio.fx('level')}
 function toast(text){if(demoActive)return;$('#waveToast').textContent=text;$('#waveToast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#waveToast').classList.remove('show'),2200)}
+// HUD — reflects game state only; tutorial hints and optional difficulty/powerup rows update last.
 function updateHUD(){if(demoActive)return;
  $('#healthText').textContent=`${Math.ceil(player.hp)} / ${player.max}`;$('#healthBar').style.width=100*player.hp/player.max+'%';$('#xpBar').style.width=Math.min(100,100*player.xp/player.next)+'%';$('#level').textContent=player.level;$('#score').textContent=score.toLocaleString()+' SCORE';
- $('#sector').textContent=`STAGE ${stage} · ${STAGES[stage-1]?.name||'VOID'}`;$('#clock').textContent=String(Math.floor(elapsed/60)).padStart(2,'0')+':'+String(Math.floor(elapsed%60)).padStart(2,'0');$('#hostiles').textContent=enemies.filter(e=>e.hp>0).length+' HOSTILES';$('#dashStatus').textContent=player.dashCD>0?'DASH '+player.dashCD.toFixed(1)+'s':'PHASE DASH READY';$('#crosshair').style.display=mode==='play'&&mouse.moved?'block':'none';
- const c=$('#portalCompass');if(mode==='play'&&stage<STAGES.length){c.classList.remove('hidden');const {x:px,z:pz}=stagePortal.position,dx=px-player.x,dz=pz-player.z;const distance=Math.hypot(dx,dz);const viewYaw=Math.atan2(camera.position.x-player.x,camera.position.z-player.z),delta=portalBearing(dx,dz,viewYaw);$('.compass-arrow').style.transform=`rotate(${delta*180/Math.PI}deg)`;$('#portalLabel').textContent=portalActive?'RIFT PORTAL OPEN':'RIFT PORTAL LOCKED';$('#portalDistance').textContent=portalActive?`${Math.round(distance)}m · ENTER TO DESCEND`:`${stageKills} / ${stageGoal} KILLS TO OPEN`}else c.classList.add('hidden');
+ $('#sector').textContent=tutorial?'TUTORIAL · RIFT CLOISTER':`STAGE ${stage} · ${STAGES[stage-1]?.name||'VOID'}`;$('#clock').textContent=String(Math.floor(elapsed/60)).padStart(2,'0')+':'+String(Math.floor(elapsed%60)).padStart(2,'0');$('#hostiles').textContent=enemies.filter(e=>e.hp>0).length+' HOSTILES';$('#dashStatus').textContent=player.dashCD>0?'DASH '+player.dashCD.toFixed(1)+'s':'PHASE DASH READY';$('#crosshair').style.display=mode==='play'&&mouse.moved?'block':'none';
+ const c=$('#portalCompass');if(mode==='play'&&stage<STAGES.length&&(!tutorial||tutorial.step==='rift')){c.classList.remove('hidden');const {x:px,z:pz}=stagePortal.position,dx=px-player.x,dz=pz-player.z;const distance=Math.hypot(dx,dz);const viewYaw=Math.atan2(camera.position.x-player.x,camera.position.z-player.z),delta=portalBearing(dx,dz,viewYaw);$('.compass-arrow').style.transform=`rotate(${delta*180/Math.PI}deg)`;$('#portalLabel').textContent=portalActive?'RIFT PORTAL OPEN':'RIFT PORTAL LOCKED';$('#portalDistance').textContent=portalActive?`${Math.round(distance)}m · ${tutorial?'ENTER TO FINISH':'ENTER TO DESCEND'}`:`${stageKills} / ${stageGoal} KILLS TO OPEN`}else c.classList.add('hidden');renderTutorial();updateEncounterHUD();
 }
 
+// SIMULATION — dt is seconds. Pausing stops combat, powerup timers and tutorial progress.
 function update(dt){
  if((mode!=='play'&&!demoActive)||overlay||demoFinished)return;
- elapsed+=dt;player.inv=Math.max(0,player.inv-dt);player.dashCD=Math.max(0,player.dashCD-dt);player.dashing=Math.max(0,player.dashing-dt);player.hp=Math.min(player.max,player.hp+player.regen*dt);
+ elapsed+=dt;tickBoons(boons,dt);player.inv=Math.max(0,player.inv-dt);player.dashCD=Math.max(0,player.dashCD-dt);player.dashing=Math.max(0,player.dashing-dt);player.hp=Math.min(player.max,player.hp+player.regen*dt);
  if(!demoActive&&held('orbitLeft'))cameraYaw+=dt*1.6;if(!demoActive&&held('orbitRight'))cameraYaw-=dt*1.6;
- const input=inputMovement(),smooth=1-Math.exp(-dt*16);player.vx=lerp(player.vx,input.x*player.speed,smooth);player.vz=lerp(player.vz,input.z*player.speed,smooth);
+ const beforeX=player.x,beforeZ=player.z;const input=inputMovement(),smooth=1-Math.exp(-dt*16);player.vx=lerp(player.vx,input.x*player.speed*(boons.speed?1.3:1),smooth);player.vz=lerp(player.vz,input.z*player.speed*(boons.speed?1.3:1),smooth);
  if(player.dashing>0){moveWithCollision(player,player.dx*27*dt,player.dz*27*dt,.45);burst(player.x,.6,player.z,'#81ffff',3,1)}else moveWithCollision(player,player.vx*dt,player.vz*dt,.45);
+ tutorialEvent('move',Math.hypot(player.x-beforeX,player.z-beforeZ));
  let manual=demoActive,shooting=demoActive?demoFiring:held('fire')||touchFire||gamepadFire;
  const stick=Math.hypot(aimStick.x,aimStick.y)>.15?aimStick:gamepadAim;
  if(!demoActive&&Math.hypot(stick.x,stick.y)>.18){const v=movementVector(stick.x,stick.y,cameraYaw);aim=Math.atan2(v.x,v.z);aimPitch=assistedPitch(aim);manual=true}
@@ -336,24 +375,26 @@ function update(dt){
 
  if(!manual&&!shooting&&Math.hypot(input.x,input.z)>.1)aim=Math.atan2(input.x,input.z);
  hero.gunMount.rotation.x=-aimPitch;hero.g.rotation.y=aim;hero.g.position.set(player.x,height(player.x,player.z),player.z);animateCharacter(hero,elapsed,Math.min(1,Math.hypot(player.vx,player.vz)/5),recoil);hero.g.visible=player.inv<=0||Math.floor(elapsed*24)%2===0;
- fireTimer-=dt;if(shooting&&fireTimer<=0){fire();fireTimer=WEAPONS[selected].cooldown/player.rate}
+ fireTimer-=dt;if(shooting&&fireTimer<=0){fire();fireTimer=WEAPONS[selected].cooldown/player.rate/(boons.rapid?1.5:1)}
  if(portalActive&&Math.hypot(player.x-stagePortal.position.x,player.z-stagePortal.position.z)<PORTAL_RADIUS){enterStage();return}
- spawnTimer-=dt;if(!bossSpawned&&spawnTimer<=0&&enemies.length<55){spawnEnemy();spawnTimer=Math.max(.3,1.5-wave*.12)}
- const nextWave=1+Math.floor(elapsed/30);if(nextWave>wave){wave=nextWave;if(!bossSpawned){toast('RIFT SURGE · STAY MOVING');audio.fx('level');player.hp=Math.min(player.max,player.hp+12);for(let i=0;i<Math.min(wave,6);i++)spawnEnemy()}}
+ spawnTimer-=dt;if(!tutorial&&!bossSpawned&&spawnTimer<=0&&enemies.length<55){spawnEnemy();spawnTimer=Math.max(.3,1.5-wave*.12)/difficultyScale()}
+ const nextWave=1+Math.floor(elapsed/30);if(!tutorial&&nextWave>wave){wave=nextWave;if(!bossSpawned){toast('RIFT SURGE · STAY MOVING');audio.fx('level');player.hp=Math.min(player.max,player.hp+12);for(let i=0;i<Math.min(wave,6);i++)spawnEnemy()}}
  for(const e of enemies)enemyUpdate(e,dt);
  if((mode!=='play'&&!demoActive)||demoFinished)return;
  updateShots(dt);enemies=enemies.filter(e=>e.hp>0);if((mode!=='play'&&!demoActive)||demoFinished)return;
  for(const h of hazards){h.life-=dt;h.m.material.opacity=.2+(1-h.life/h.max)*.5;h.m.scale.setScalar(h.radius*(.9+.1*Math.sin(elapsed*18)));if(h.life<=0){explode(h.x,h.z,h.radius,h.damage,true);effects.remove(h.m);h.m.material.dispose()}}
  hazards=hazards.filter(h=>h.life>0);if((mode!=='play'&&!demoActive)||demoFinished)return;
  for(const g of gems){const dx=player.x-g.x,dz=player.z-g.z,d=Math.hypot(dx,dz);if(d<player.magnet){const speed=Math.min(d,dt*(4+16/(d+.2)));g.x+=dx/(d||1)*speed;g.z+=dz/(d||1)*speed}g.m.position.set(g.x,height(g.x,g.z)+.45+Math.sin(elapsed*4+g.x)*.12,g.z);g.m.rotation.y+=dt*2;if(d<.65){player.xp+=g.v;g.dead=true;effects.remove(g.m);audio.fx('gem')}}gems=gems.filter(g=>!g.dead);
- if(player.xp>=player.next){clearInput();levelUp()}updateHUD();
+ updatePowerups(dt);if(!tutorial&&player.xp>=player.next){clearInput();levelUp()}updateHUD();
 }
+// EFFECTS — animate bounded particles, rift sparks, hit flashes and floating damage numbers.
 function updateEffects(dt){for(const p of particles){p.life-=dt;p.vy-=12*dt;p.m.position.x+=p.vx*dt;p.m.position.y+=p.vy*dt;p.m.position.z+=p.vz*dt;p.m.rotation.x+=dt*5;p.m.rotation.z+=dt*3;p.m.scale.multiplyScalar(Math.exp(-dt*1.5));if(p.life<=0)effects.remove(p.m)}particles=particles.filter(p=>p.life>0);
- if(stagePortal){stagePortal.children[1].rotation.z+=dt*.72;stagePortal.scale.setScalar(1+Math.sin(elapsed*4)*.08);if(portalLight){portalLight.intensity=portalActive?19+Math.sin(elapsed*9)*6:0;portalLight.color.set('#9e5cff')}if(portalActive&&Math.random()<dt*9){const [x,z]=STAGES[stage-1].portal;burst(x+rand(-2.5,2.5),rand(1,6),z+rand(-2.5,2.5),'#b974ff',1,1.8)}}
+ if(stagePortal){stagePortal.children[1].rotation.z+=dt*.72;stagePortal.scale.setScalar(1+Math.sin(elapsed*4)*.08);if(portalLight){portalLight.intensity=portalActive?19+Math.sin(elapsed*9)*6:0;portalLight.color.set('#9e5cff')}if(portalActive&&Math.random()<dt*9){const [x,z]=tutorial?TUTORIAL_PORTAL:STAGES[stage-1].portal;burst(x+rand(-2.5,2.5),rand(1,6),z+rand(-2.5,2.5),'#b974ff',1,1.8)}}
  for(const r of rings){r.life-=dt;r.m.scale.setScalar(r.size*(1-r.life/r.max));r.m.material.opacity=Math.max(0,r.life/r.max)*.7;if(r.life<=0){effects.remove(r.m);r.m.material.dispose()}}rings=rings.filter(r=>r.life>0);
  for(const n of numbers){n.life-=dt;n.y+=dt*1.7;const v=new T.Vector3(n.x,n.y,n.z).project(camera);n.el.style.left=(v.x*.5+.5)*innerWidth+'px';n.el.style.top=(-v.y*.5+.5)*innerHeight+'px';n.el.style.opacity=Math.min(1,n.life*3);if(n.life<=0)n.el.remove()}numbers=numbers.filter(n=>n.life>0);
  recoil=Math.max(0,recoil-dt*9);flashLight.intensity*=Math.exp(-dt*22);shake*=Math.exp(-dt*14);hit=Math.max(0,hit-dt*4);$('#hitflash').style.opacity=hit*.6;
 }
+// CAMERA — screen-relative movement uses the same yaw; geometry supplies the target elevation.
 function cameraUpdate(dt,time){const target=new T.Vector3(player.x,height(player.x,player.z)+1,player.z);let yaw=cameraYaw,dist=cameraDistance;
  if(demoActive){yaw=.4;dist=29;target.x+=Math.cos(yaw)*7;target.z-=Math.sin(yaw)*7}
  const desired=target.clone().add(new T.Vector3(Math.sin(yaw)*dist,dist*.85,Math.cos(yaw)*dist));camera.position.lerp(desired,1-Math.exp(-dt*7));camera.lookAt(target);if(!reduced){camera.position.x+=rand(-shake,shake);camera.position.y+=rand(-shake,shake)}
@@ -363,10 +404,55 @@ function cameraUpdate(dt,time){const target=new T.Vector3(player.x,height(player
 camera.position.set(10,22,25);camera.lookAt(0,1,0);
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();const r=retroSize();composer.setSize(r.w,r.h)});
 
+// RUN MODIFIERS — statue difficulty persists across stages, then resets in start().
+function difficultyScale(){return 1+difficultyBonus/100}
+function interact(){
+ if(mode!=='play'||overlay||tutorial||demoActive)return;
+ const statue=statueWorld?.nearby(player);if(!statueWorld?.activate(statue))return;
+ const previous=difficultyScale();difficultyBonus+=STATUE_BONUS;const ratio=difficultyScale()/previous;
+ for(const e of enemies){e.hp*=ratio;e.max*=ratio}
+ ring(statue.x,statue.z,'#bc565a',3,.7);audio.fx('charge');toast('DIFFICULTY '+(100+difficultyBonus)+'%');updateEncounterHUD();
+}
+// Pickups are separate from XP gems. Their clocks stop while the game is paused.
+function dropPowerup(x,z,kind=rollPowerup()){
+ if(!kind||powerups.length>=MAX_DROPS||tutorial)return;const spec=POWERUPS[kind],m=mesh(spec.shape,spec.color,x,height(x,z)+.6,z,.36,.5,.36,effects,1);
+ powerups.push({kind,x,z,m,life:DROP_LIFETIME});
+}
+function updatePowerups(dt){
+ for(const p of powerups){p.life-=dt;p.m.position.y=height(p.x,p.z)+.6+Math.sin(elapsed*4)*.12;p.m.rotation.y+=dt*1.5;
+  if(Math.hypot(player.x-p.x,player.z-p.z)<1.35){collectBoon(boons,p.kind,player);p.life=0;toast(POWERUPS[p.kind].label+(p.kind==='execution'?' · '+POWERUPS.execution.duration+' SECONDS':''));audio.fx('level')}
+  if(p.life<=0)effects.remove(p.m);
+ }powerups=powerups.filter(p=>p.life>0);
+}
+function updateEncounterHUD(){
+ $('#difficultyMeter').classList.toggle('hidden',difficultyBonus===0||demoActive);$('#difficultyMeter').textContent='Difficulty: '+(100+difficultyBonus)+'%';
+ const active=Object.keys(POWERUPS).filter(k=>boons[k]>0);$('#powerupStatus').textContent=active.map(k=>POWERUPS[k].label+' '+Math.ceil(boons[k])+'s').join(' · ');
+ const nearby=mode==='play'&&!tutorial?statueWorld?.nearby(player):null;$('#interactPrompt').classList.toggle('hidden',!nearby);$('#interactTouch').classList.toggle('hidden',!nearby);
+ $('#interactPrompt').textContent=nearby?(mobile?'INTERACT':navigator.getGamepads?.()[0]?'X':keyLabel(prefs.bindings.interact))+' · SKULL STATUE · DIFFICULTY +'+STATUE_BONUS+'%':'';
+}
+
+// TUTORIAL EVENTS — only the expected action advances a step; the combat step spawns five weak enemies.
+function tutorialEvent(action,value){
+ if(!tutorial||mode!=='play')return;
+ if(tutorial.advance(action,value)&&tutorial.step==='combat')for(let i=0;i<TUTORIAL_GOAL;i++){const a=i*Math.PI*2/TUTORIAL_GOAL;spawnEnemy(i===2?'skitter':'runner',{x:player.x+Math.sin(a)*11,z:player.z+Math.cos(a)*11})}
+}
+// TUTORIAL GUIDE — reflects current keybindings, input device and selected weapon.
+function renderTutorial(){
+ if(!tutorial)return;const input=navigator.getGamepads?.()[0]?'pad':mobile?'touch':'keyboard',copy=tutorialCopy(tutorial,{bindings:prefs.bindings,keyLabel,input,weapon:WEAPONS[selected]});
+ for(const [id,text] of [['tutorialStep',tutorial.number+' / 6'],['tutorialTitle',copy.title],['tutorialHint',copy.hint],['tutorialWeapon',copy.weapon]])if($('#'+id).textContent!==text)$('#'+id).textContent=text;
+}
+// TUTORIAL EXIT — return to the demo without submitting a score or carrying practice bonuses.
+function finishTutorial(completed){
+ clearInput();mode='menu';document.body.classList.remove('in-run','tutorial-active');document.body.classList.add('menu-open');$('#pauseMenu').classList.add('hidden');$('#menu').classList.remove('hidden');$('#portalCompass').classList.add('hidden');$('#tutorialGuide').classList.add('hidden');$('#stageObjective').textContent='';$('#waveToast').classList.remove('show');
+ $('.menu-card h1').classList.add('brand-title');$('.menu-card h1').innerHTML='RIFT<span>BORN</span>';$('.menu-card .edition').textContent='';$('#runSummary').textContent=completed?'TUTORIAL COMPLETE':'';$('#scoreSave').textContent='';$('#retryScore').classList.add('hidden');$('#start').textContent='START RUN';start(true);$('#start').focus();
+}
+
 function formatTime(seconds){return Math.floor(seconds/60)+':'+String(Math.floor(seconds%60)).padStart(2,'0')}
+// DIALOGS — settings, leaderboard and username entry own focus and pause active gameplay.
 function openPanel(id){if(mode==='play')pause();overlayReturn=mode;overlay=id;clearInput();document.body.classList.add('menu-open');$(id).classList.remove('hidden');$('#menu').inert=true;$('#pauseMenu').inert=true;if(id==='#runSetup'){$('#playerName').value='';$('#usernameError').textContent='';$('#playerName').setAttribute('aria-invalid','false');$('#playerName').focus()}else if(id==='#settings'){renderBindings();syncSettings();$('#closeSettings').focus()}else{loadLeaderboard();$('#closeLeaderboard').focus()}}
 function closePanel(){if(!overlay)return;$(overlay).classList.add('hidden');overlay=null;bindingAction=null;$('#menu').inert=false;$('#pauseMenu').inert=false;clearInput();if(overlayReturn==='pause')$('#resume').focus();else $('#start').focus()}
 function captureBinding(code){if(!bindingAction)return;if(['Escape','MetaLeft','MetaRight','F5','F11','F12'].includes(code)){ $('#bindStatus').textContent='That key is reserved. Choose another key.';return}const action=bindingAction;const swap=assignBinding(prefs.bindings,action,code);bindingAction=null;savePrefs();renderBindings();refreshHelp();$('#bindStatus').textContent=ACTION_LABELS[action]+' → '+keyLabel(code)+(swap?' · Swapped with '+ACTION_LABELS[swap]:'')}
+// REBINDING UI — labels and defaults live in preferences.js, including Interact.
 function renderBindings(){$('#bindings').replaceChildren();for(const [action,label] of Object.entries(ACTION_LABELS)){const row=document.createElement('div');row.className='bind-row';const name=document.createElement('span');name.textContent=label;const b=document.createElement('button');b.textContent=bindingAction===action?'PRESS A KEY…':keyLabel(prefs.bindings[action]);b.classList.toggle('listening',bindingAction===action);b.setAttribute('aria-label','Change '+label+' binding');b.onclick=()=>{bindingAction=action;renderBindings();$('#bindStatus').textContent='Press a key or mouse button. Escape cancels.'};row.appendChild(name);row.appendChild(b);$('#bindings').appendChild(row)}}
 document.addEventListener('pointerdown',e=>{if(!bindingAction||e.pointerType==='touch')return;e.preventDefault();e.stopImmediatePropagation();captureBinding('Mouse'+e.button)},true);
 document.addEventListener('contextmenu',e=>{if(overlay==='#settings')e.preventDefault()});
@@ -391,11 +477,15 @@ $('#cancelRun').onclick=closePanel;
 $('#runForm').onsubmit=e=>{e.preventDefault();if(!$('#playerName').value.trim()){$('#usernameError').textContent='Enter a username.';$('#playerName').setAttribute('aria-invalid','true');$('#playerName').focus();return}closePanel();start()};
 function setNightmare(value){prefs.nightmare=!!value;savePrefs();$('#nightmare').checked=prefs.nightmare;applyLighting()}
 $('#nightmare').onchange=e=>setNightmare(e.target.checked);
-function finishRun(defeated){if(demoActive){demoFinished=true;return}if(!['play','pause'].includes(mode))return;clearInput();mode='dead';hero.g.visible=!defeated;document.body.classList.remove('in-run');document.body.classList.add('menu-open');$('#pauseMenu').classList.add('hidden');$('#menu').classList.remove('hidden');$('#bossHUD').classList.add('hidden');$('#portalCompass').classList.add('hidden');$('#stageObjective').textContent='';$('.menu-card h1').classList.remove('brand-title');$('.menu-card h1').innerHTML=victory?'RIFT<br><span>CONQUERED</span>':defeated?'RUN<br><span>SEVERED</span>':'RUN<br><span>COMPLETE</span>';$('.menu-card .edition').textContent=`STAGE ${stage} · ${score.toLocaleString()} SCORE`;$('#runSummary').textContent=`${kills} KILLS · ${formatTime(elapsed)}`;$('#start').textContent='PLAY AGAIN';$('#start').focus();if(runId&&elapsed>=1){pendingScores.set(runId,{id:runId,name:runName,score,kills,wave,seconds:Math.floor(elapsed),stage,played_at:Date.now(),death_mode:runDeath});runId=null;saveScores()}else $('#scoreSave').textContent=''}
+// RUN COMPLETION — capture immutable name/mode/date for retryable score submission.
+function finishRun(defeated){if(demoActive){demoFinished=true;return}if(tutorial){finishTutorial(false);return}if(!['play','pause'].includes(mode))return;clearInput();mode='dead';hero.g.visible=!defeated;document.body.classList.remove('in-run');document.body.classList.add('menu-open');$('#pauseMenu').classList.add('hidden');$('#menu').classList.remove('hidden');$('#bossHUD').classList.add('hidden');$('#portalCompass').classList.add('hidden');$('#stageObjective').textContent='';$('.menu-card h1').classList.remove('brand-title');$('.menu-card h1').innerHTML=victory?'RIFT<br><span>CONQUERED</span>':defeated?'RUN<br><span>SEVERED</span>':'RUN<br><span>COMPLETE</span>';$('.menu-card .edition').textContent=`STAGE ${stage} · ${score.toLocaleString()} SCORE`;$('#runSummary').textContent=`${kills} KILLS · ${formatTime(elapsed)}`;$('#start').textContent='PLAY AGAIN';$('#start').focus();if(runId&&elapsed>=1){pendingScores.set(runId,{id:runId,name:runName,score,kills,wave,seconds:Math.floor(elapsed),stage,played_at:Date.now(),death_mode:runDeath});runId=null;saveScores()}else $('#scoreSave').textContent=''}
+// LEADERBOARD WRITE — retries reuse the same run ID so failed saves cannot duplicate rows.
 async function saveScores(){if(savingScores||!pendingScores.size)return;savingScores=true;$('#scoreSave').textContent='Saving your score…';$('#retryScore').classList.add('hidden');try{for(const [id,run] of pendingScores){const r=await fetch('/api/scores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(run)});if(!r.ok)throw new Error('Save unavailable');pendingScores.delete(id)}$('#scoreSave').textContent='Score saved.'}catch{$('#scoreSave').textContent='Score not saved. Retry when connected.';$('#retryScore').classList.remove('hidden')}finally{savingScores=false}}
+// LEADERBOARD READ — render names as text and only mark explicitly recorded Death Mode scores.
 async function loadLeaderboard(){$('#leaderboardRows').replaceChildren();$('#leaderboardStatus').textContent='Loading scores…';try{const r=await fetch('/api/scores',{cache:'no-store'});if(!r.ok)throw new Error('Unavailable');const data=await r.json();if(!Array.isArray(data.scores))throw new Error('Invalid scores');$('#leaderboardStatus').textContent=data.scores.length?'':'No scores yet.';data.scores.forEach((s,i)=>{const tr=document.createElement('tr');for(const value of [s.name,s.score.toLocaleString(),Number.isInteger(s.stage)?s.stage:'—',Number.isFinite(s.played_at)?new Date(s.played_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'—']){const td=document.createElement('td');td.textContent=String(value);tr.appendChild(td)}if(s.death_mode===true){const skull=document.createElement('img');skull.src='assets/death-skull.png';skull.alt='Death Mode';skull.title='Death Mode run';skull.className='death-run-mark';skull.width=24;skull.height=24;tr.firstElementChild.appendChild(skull)}$('#leaderboardRows').appendChild(tr)})}catch{$('#leaderboardStatus').textContent='Leaderboard unavailable right now. Press Refresh to try again.'}}
 
 // Original horror-synth arrangements; effects retain their independent volume bus.
+// AUDIO LIFECYCLE — create/resume from a user gesture; music and effects have separate gain buses.
 const audio={ctx:null,master:null,music:null,sfx:null,bus:null,score:null,step:0,next:0,timer:null,
  apply(){if(!this.master)return;this.master.gain.value=prefs.muted?0:.22*prefs.master/100;this.music.gain.value=prefs.music/100;this.sfx.gain.value=prefs.effects/100},
  start(){this.step=0;this.unlock();if(this.ctx)this.next=this.ctx.currentTime+.02},
@@ -427,6 +517,7 @@ for(const event of ['pointerdown','keydown'])document.addEventListener(event,()=
 
 // Attract mode uses the same simulation as a run; only its input comes from a CPU.
 // It never starts audio, creates a score submission, or reads the user's controls.
+// ATTRACT DEMO — CPU input drives real gameplay while the main menu is open.
 function updateDemo(dt){
  if(document.hidden||overlay)return;
  if(!demoActive||demoFinished||demoAge>80){demoStage=demoActive?demoStage%STAGES.length+1:1;start(true)}
@@ -449,6 +540,7 @@ function updateDemo(dt){
 }
 
 let last=performance.now(),slowFrames=0;const framePacer=new FramePacer();
-function frame(now){requestAnimationFrame(frame);const raw=(now-last)/1000,dt=Math.min(raw,.04);last=now;updateSkull(dt);if(mode==='menu'||mode==='dead')updateDemo(dt);else{pollPad();if(mode==='play')update(dt);if(mode!=='pause'&&mode!=='upgrade')updateEffects(dt)}cameraUpdate(dt,now/1000);if(prefs.nightmare){Object.assign(scene.fog,fogRange(prefs.fog,true,camera.position.distanceTo(hero.g.position)));if(storm.update(dt,now/1000,player,height(player.x,player.z)))audio.thunder()}updateCombatUI(dt);if(mode==='play')updateHUD();
+// MAIN LOOP — simulate every animation tick; the FPS cap only gates rendering.
+function frame(now){requestAnimationFrame(frame);const raw=(now-last)/1000,dt=Math.min(raw,.04);last=now;updateSkull(dt);if(mode==='menu'||mode==='dead')updateDemo(dt);else{pollPad();if(mode==='play')update(dt);if(mode!=='pause'&&mode!=='upgrade')updateEffects(dt)}cameraUpdate(dt,now/1000);statueWorld?.face(camera);if(prefs.nightmare){Object.assign(scene.fog,fogRange(prefs.fog,true,camera.position.distanceTo(hero.g.position)));if(storm.update(dt,now/1000,player,height(player.x,player.z)))audio.thunder()}updateCombatUI(dt);if(mode==='play')updateHUD();
  if(framePacer.ready(now,prefs.fpsCap))composer.render();if(raw>.045)slowFrames++;else slowFrames=Math.max(0,slowFrames-1);if(slowFrames>100&&!qualityReduced&&prefs.pixelation==='auto'){qualityReduced=true;const r=retroSize();composer.setSize(r.w,r.h)}}
-window.gameReady=true;$('#start').disabled=false;$('#start').textContent='START RUN';$('#loadNote').textContent='';refreshHelp();syncSettings();start(true);requestAnimationFrame(frame);
+window.gameReady=true;$('#tutorial').disabled=false;$('#start').disabled=false;$('#start').textContent='START RUN';$('#loadNote').textContent='';refreshHelp();syncSettings();start(true);requestAnimationFrame(frame);

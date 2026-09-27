@@ -1,3 +1,5 @@
+import {POWERUPS,DROP_LIFETIME,MAX_DROPS,STATUE_BONUS,rollPowerup,createBoons,collectBoon,tickBoons,absorbDamage,createStatues} from '../dist/encounters.js';
+import {createTutorial,tutorialCopy,TUTORIAL_PORTAL,TUTORIAL_GOAL} from '../dist/tutorial.js';
 import {createStorm} from '../dist/storm.js';
 import {createMusicPlayer,scoreEvents} from '../dist/soundtrack.js';
 import {renderHeight,fogRange,FramePacer} from '../dist/graphics.js';
@@ -32,7 +34,7 @@ const nodes=new Map();const document={body:new Element(),querySelector(s){if(!no
 class Renderer {constructor(){this.shadowMap={}}setPixelRatio(){}setSize(){}}
 class Composer {addPass(){}render(){}setSize(){}setPixelRatio(){}}
 const context={T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,DEATH_TYPES,RUN_MODES,enemyPool,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console:{...console,error(...args){if(args[0]!=='Audio startup failed')console.error(...args)}},setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(name,fn){listeners.set(name,fn)},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
-Object.assign(context,{createStorm,createMusicPlayer,renderHeight,fogRange,FramePacer,traceWorld,hitBody,pointAt,createTerrain,buildStageWorld,retroMaterial,retroCharacter,retroResolution,RetroShader,ShaderPass:class{}});
+Object.assign(context,{POWERUPS,DROP_LIFETIME,MAX_DROPS,STATUE_BONUS,rollPowerup,createBoons,collectBoon,tickBoons,absorbDamage,createStatues,createTutorial,tutorialCopy,TUTORIAL_PORTAL,TUTORIAL_GOAL,createStorm,createMusicPlayer,renderHeight,fogRange,FramePacer,traceWorld,hitBody,pointAt,createTerrain,buildStageWorld,retroMaterial,retroCharacter,retroResolution,RetroShader,ShaderPass:class{}});
 vm.createContext(context);
 const source=fs.readFileSync(new URL('../dist/game.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
 vm.runInContext(source+`\n globalThis.test={height,start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun,activatePortal,enterStage,hurtEnemy,bossUpdate,updateCombatUI,moveWithCollision,portalBearing,setNightmare,ambient,sun,rim,storm, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed,stage,stageKills,stageGoal,portalActive,bossSpawned,victory,gems,portal:stagePortal.position}},setAim(v){aim=v;aimPitch=0},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
@@ -167,6 +169,8 @@ assert.ok(Math.abs(freeShot.x-32.4)<1e-9&&Math.abs(freeShot.z-21.2)<1e-9);
 assert.notEqual(t.height(freeShot.x,freeShot.z),previousGround,'Trajectory test crosses changing terrain');
 assert.equal(freeShot.m.position.y,freeShot.y,'Rendered tracer matches physical bullet height');
 console.log('PASS: integrated projectile flight crosses changing terrain without resampling its altitude.');
+// Short creatures should accept a normal-height shot on level ground.
+t.start();const crawler=t.spawnEnemy('skitter',{x:0,z:4});t.setAim(0);const crawlerHp=crawler.hp;t.fire();for(let i=0;i<10;i++)context.shotTest.updateShots(.016);assert.ok(crawler.hp<crawlerHp,'A level rifle shot must hit the crawler standard-height hitbox');
 
 // The public entry path must collect a fresh username, including after a retry.
 t.start(true);nodes.get('#start').onclick();
@@ -237,3 +241,19 @@ assert.ok(notes.every(n=>n.time>=600));
 notes.length=0;t.prefs.muted=true;death.audio.tick();assert.equal(notes.length,0);t.prefs.muted=false;
 t.start(true);death.audio.tick();assert.equal(notes.length,0,'Attract demo never schedules music');
 console.log('PASS: distinct mode arrangements and tempos, bounded audio catchup, mute and silent demo.');
+
+vm.runInContext('globalThis.trainingTest={get state(){return {tutorial,terrain,runId,runDeath,pending:pendingScores.size}}}',context);
+const training=context.trainingTest;let tutorialPosts=0;context.fetch=async()=>{tutorialPosts++;return {ok:true,json:async()=>({scores:[]})}};
+t.setMode('menu');death.setDeathMode(true);nodes.get('#tutorial').onclick();assert.equal(training.state.runDeath,false);assert.equal(training.state.runId,null);assert.equal(training.state.terrain.tutorial,true);assert.equal(t.state.stageGoal,5);assert.equal(t.state.enemies.length,0);
+t.setKeys({KeyW:true});for(let i=0;i<100;i++)t.update(.016);t.setKeys({});assert.equal(training.state.tutorial.step,'dash');t.dash();assert.equal(training.state.tutorial.step,'shoot');t.fire();assert.equal(training.state.tutorial.step,'weapon');t.equip(1);assert.equal(training.state.tutorial.step,'combat');assert.equal(t.state.enemies.length,5);assert.ok(t.state.enemies.every(e=>['runner','skitter'].includes(e.kind)&&e.def.speed===1&&e.def.damage===3));
+for(let i=0;i<4;i++)t.hurtEnemy(t.state.enemies[i],1000);assert.equal(t.state.portalActive,false);t.hurtEnemy(t.state.enemies[4],1000);assert.equal(t.state.portalActive,true);assert.equal(training.state.tutorial.step,'rift');
+const trainingPortal=t.state.portal;for(let i=0;i<1000&&Math.hypot(t.state.player.x-trainingPortal.x,t.state.player.z-trainingPortal.z)>2.5;i++){const dx=trainingPortal.x-t.state.player.x,dz=trainingPortal.z-t.state.player.z,d=Math.hypot(dx,dz);t.moveWithCollision(t.state.player,dx/d*.12,dz/d*.12,.45)}t.update(.016);assert.equal(t.state.mode,'menu');assert.equal(training.state.tutorial,null);assert.equal(tutorialPosts,0);assert.equal(nodes.get('#runSummary').textContent,'TUTORIAL COMPLETE');
+nodes.get('#tutorial').onclick();assert.equal(training.state.tutorial.step,'move');t.pause();nodes.get('#endRun').onclick();assert.equal(t.state.mode,'menu');assert.equal(tutorialPosts,0);nodes.get('#start').onclick();assert.equal(nodes.get('#playerName').value,'');t.closePanel();t.start();assert.equal(training.state.terrain.tutorial,false);assert.equal(t.state.stageGoal,12);
+console.log('PASS: tutorial controls, unique walkable courtyard, five easy enemies, exact five-kill rift, completion/abort/replay, no leaderboard submission and clean normal restart.');
+
+vm.runInContext('globalThis.encounterTest={interact,dropPowerup,updatePowerups,get state(){return {boons,powerups,statueWorld,difficultyBonus}}}',context);
+const encounter=context.encounterTest;t.start();const statue=encounter.state.statueWorld.statues[0];assert.ok(statue,'A run must have an optional statue');const tough=t.spawnEnemy('runner');const maxBefore=tough.max;t.state.player.x=statue.x+2;t.state.player.z=statue.z;listeners.get('keydown')({code:t.prefs.bindings.interact,preventDefault(){}});assert.equal(encounter.state.difficultyBonus,5);assert.equal(tough.max,maxBefore*1.05);encounter.interact();assert.equal(encounter.state.difficultyBonus,5,'A statue activates once');assert.equal(nodes.get('#difficultyMeter').textContent,'Difficulty: 105%');
+for(const kind of Object.keys(POWERUPS)){encounter.dropPowerup(t.state.player.x,t.state.player.z,kind);encounter.updatePowerups(.016);if(kind!=='heal')assert.ok(encounter.state.boons[kind]>0)}assert.equal(encounter.state.powerups.length,0);assert.ok(encounter.state.boons.shield>0);
+const doomed=t.spawnEnemy('brute');t.hurtEnemy(doomed,1);assert.ok(doomed.hp<=0);const warden=t.spawnEnemy('warden'),bossHp=warden.hp;t.hurtEnemy(warden,1);assert.equal(warden.hp,bossHp-1.5,'Insta kill cannot bypass a boss');
+t.state.player.inv=0;const protectedHp=t.state.player.hp;death.hurtPlayer(10);assert.equal(t.state.player.hp,protectedHp);t.activatePortal();t.enterStage();assert.equal(encounter.state.difficultyBonus,5,'Statue difficulty persists through the rift');t.start();assert.equal(encounter.state.difficultyBonus,0);assert.ok(Object.values(encounter.state.boons).every(v=>v===0));assert.equal(encounter.state.powerups.length,0);
+console.log('PASS: F interaction, one-use statues, additive difficulty, pickups, shield, boss-safe insta kill, stage persistence and clean reset.');
