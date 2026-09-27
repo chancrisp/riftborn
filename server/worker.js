@@ -8,8 +8,8 @@ export default {
    try{
     const db=database(env);
     if(request.method==='GET'){
-     const result=await db.prepare('SELECT name, score, stage, played_at, kills, wave, seconds FROM scores ORDER BY score DESC, wave DESC, seconds DESC LIMIT 25').all();
-     return json({scores:result.results});
+     const result=await db.prepare('SELECT name, score, stage, played_at, kills, wave, seconds, death_mode FROM scores ORDER BY score DESC, wave DESC, seconds DESC LIMIT 25').all();
+     return json({scores:result.results.map(row=>({...row,death_mode:row.death_mode==null?null:row.death_mode===1}))});
     }
     if(request.method!=='POST')return json({error:'Method not allowed'},405);
     if(request.headers.get('Sec-Fetch-Site')==='cross-site')return json({error:'Forbidden'},403);
@@ -20,8 +20,9 @@ export default {
     if(!p||typeof p.id!=='string'||!(/^[0-9a-f-]{36}$/i).test(p.id)||typeof p.name!=='string'||!p.name.trim()||p.name.trim().length>16||!integer(p.score,100000000)||!integer(p.kills,1000000)||!integer(p.seconds,86400)||p.seconds<1||!integer(p.wave,2881)||p.wave!==1+Math.floor(p.seconds/30))return json({error:'Invalid run'},400);
     if(p.stage!==undefined&&(!integer(p.stage,5)||p.stage<1))return json({error:'Invalid stage'},400);
     if(p.played_at!==undefined&&(!Number.isSafeInteger(p.played_at)||p.played_at<0||p.played_at>Date.now()+300000))return json({error:'Invalid run date'},400);
+    if(p.death_mode!==undefined&&typeof p.death_mode!=='boolean')return json({error:'Invalid run mode'},400);
     const now=Date.now();
-    await db.prepare('INSERT INTO scores (id,name,score,kills,wave,seconds,created_at,stage,played_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING').bind(p.id,p.name.trim(),p.score,p.kills,p.wave,p.seconds,now,p.stage??null,p.played_at??now).run();
+    await db.prepare('INSERT INTO scores (id,name,score,kills,wave,seconds,created_at,stage,played_at,death_mode) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING').bind(p.id,p.name.trim(),p.score,p.kills,p.wave,p.seconds,now,p.stage??null,p.played_at??now,p.death_mode===undefined?null:Number(p.death_mode)).run();
     return json({saved:true});
    }catch(error){console.error('Leaderboard request failed',error);return json({error:'Leaderboard temporarily unavailable'},503)}
   }

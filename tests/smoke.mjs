@@ -1,3 +1,4 @@
+import {createMusicPlayer,scoreEvents} from '../dist/soundtrack.js';
 import {renderHeight,fogRange,FramePacer} from '../dist/graphics.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -22,7 +23,7 @@ assert.ok(segmentHit(0,0,10,0,5,.2,.4));assert.ok(!segmentHit(0,0,10,0,5,2,.4));
 
 class Element {
  constructor(){this.children=[];this.textContent='';this.style={setProperty(){}};this.classList={add(){},remove(){},toggle(){}};this.disabled=false}
- appendChild(el){this.children.push(el)} replaceChildren(){this.children=[]} querySelector(){return new Element()}
+ get firstElementChild(){return this.children[0]} appendChild(el){this.children.push(el)} replaceChildren(){this.children=[]} querySelector(){return new Element()}
  addEventListener(){} setAttribute(){} focus(){} remove(){} setPointerCapture(){} getBoundingClientRect(){return {left:0,top:0,width:110,height:110}}
 }
 const listeners=new Map();
@@ -30,7 +31,7 @@ const nodes=new Map();const document={body:new Element(),querySelector(s){if(!no
 class Renderer {constructor(){this.shadowMap={}}setPixelRatio(){}setSize(){}}
 class Composer {addPass(){}render(){}setSize(){}setPixelRatio(){}}
 const context={T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,DEATH_TYPES,RUN_MODES,enemyPool,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console,setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(name,fn){listeners.set(name,fn)},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
-Object.assign(context,{renderHeight,fogRange,FramePacer,traceWorld,hitBody,pointAt,createTerrain,buildStageWorld,retroMaterial,retroCharacter,retroResolution,RetroShader,ShaderPass:class{}});
+Object.assign(context,{createMusicPlayer,renderHeight,fogRange,FramePacer,traceWorld,hitBody,pointAt,createTerrain,buildStageWorld,retroMaterial,retroCharacter,retroResolution,RetroShader,ShaderPass:class{}});
 vm.createContext(context);
 const source=fs.readFileSync(new URL('../dist/game.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
 vm.runInContext(source+`\n globalThis.test={height,start,update,equip,spawnEnemy,dash,fire,enemyUpdate,levelUp,hero,scene,updateEffects,pause,openPanel,closePanel,prefs,finishRun,activatePortal,enterStage,hurtEnemy,bossUpdate,updateCombatUI,moveWithCollision,portalBearing,setTimeOfDay,ambient,sun,rim,flora,floraLights,updateFlora, get state(){return {player,mode,enemies,shots,hazards,kills,score,elapsed,stage,stageKills,stageGoal,portalActive,bossSpawned,victory,gems,portal:stagePortal.position}},setAim(v){aim=v;aimPitch=0},setKeys(v){keys=v},setStick(v){aimStick=v},setMode(v){mode=v}}`,context);
@@ -174,7 +175,7 @@ const sent=[];context.fetch=async(url,options)=>{if(options?.method==='POST')sen
 t.update(1.2);nodes.get('#playerName').value='Changed later';t.finishRun(false);
 await new Promise(resolve=>setImmediate(resolve));
 assert.equal(sent.at(-1).name,'Ash Runner','Saved name belongs to the run, not a mutable input');
-assert.ok(sent.at(-1).seconds>=1);assert.equal(sent.at(-1).stage,1);assert.ok(Math.abs(sent.at(-1).played_at-Date.now())<2000);
+assert.equal(sent.at(-1).death_mode,false);assert.ok(sent.at(-1).seconds>=1);assert.equal(sent.at(-1).stage,1);assert.ok(Math.abs(sent.at(-1).played_at-Date.now())<2000);
 nodes.get('#start').onclick();assert.equal(nodes.get('#playerName').value,'','Play Again also clears the username');t.closePanel();
 await nodes.get('#refreshLeaderboard').onclick();
 assert.deepEqual(nodes.get('#leaderboardRows').children.at(-1).children.map(c=>c.textContent),['Ash Runner','90','3',new Date(Date.UTC(2026,8,26,12)).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})]);
@@ -210,8 +211,24 @@ for(const kind of [...Object.keys(ENEMY_TYPES),...Object.keys(DEATH_TYPES),'ward
  model.g.traverse(o=>{assert.ok(o.position.toArray().every(Number.isFinite));assert.ok(o.scale.toArray().every(Number.isFinite))});
 }
 // Inspect the actual note scheduler, with audio output replaced by note capture.
-const notes=[];death.audio.ctx={state:'running',currentTime:0};death.audio.tone=(...args)=>notes.push(args);
-death.audio.next=0;death.audio.step=0;death.audio.tick();const deathNotes=notes.slice();const deathSpacing=death.audio.next/death.audio.step;
-t.setMode('menu');death.setDeathMode(false);t.start(true);t.start();notes.length=0;death.audio.next=0;death.audio.step=0;death.audio.tick();
-assert.ok(deathSpacing<death.audio.next/death.audio.step,'Death soundtrack runs at a faster tempo');assert.notDeepEqual(deathNotes,notes,'Death soundtrack has a different riff and percussion');
-console.log('PASS: menu skull and Escape, immutable run difficulty, stronger/faster enemies, exclusive pools and telegraphed attacks, bounded summons, monster rigs, and distinct faster music.');
+// A failed score save keeps its original run mode, even after a different menu selection.
+t.start();t.update(1.2);const attempts=[];let failSave=true;
+context.fetch=async(url,options)=>{if(options?.method==='POST'){attempts.push(JSON.parse(options.body));if(failSave)throw new Error('offline')}return {ok:true,json:async()=>({scores:[{name:'Doom',score:200,stage:1,death_mode:true},{name:'Normal',score:100,stage:1,death_mode:false},{name:'Legacy',score:90,stage:null,death_mode:null}]})}};
+t.finishRun(false);await new Promise(resolve=>setImmediate(resolve));
+assert.equal(attempts[0].death_mode,true);death.setDeathMode(false);t.start(true);failSave=false;
+await nodes.get('#retryScore').onclick();assert.deepEqual(attempts[1],attempts[0],'Retry preserves the complete Death Mode run');
+await nodes.get('#refreshLeaderboard').onclick();const rows=nodes.get('#leaderboardRows').children;
+assert.equal(rows.length,3);assert.ok(rows.every(r=>r.children.length===4));
+assert.equal(rows[0].children[0].children[0].src,'assets/death-skull.png');assert.equal(rows[0].children[0].children[0].alt,'Death Mode');
+assert.equal(rows[1].children[0].children.length,0);assert.equal(rows[2].children[0].children.length,0);
+console.log('PASS: immutable Death Mode score on offline retry, shared skull beside player, no skull on normal/unknown runs.');
+
+const notes=[];death.audio.tone=()=>{};death.audio.ctx={state:'running',currentTime:0,resume(){}};death.audio.score={schedule:(step,time,mode,volume)=>notes.push({step,time,mode,volume,events:scoreEvents(step,mode)})};
+t.setMode('menu');death.setDeathMode(true);t.start();death.audio.tick();const deathNotes=notes.slice(),deathSpacing=death.audio.next/death.audio.step;
+t.setMode('menu');death.setDeathMode(false);t.start();notes.length=0;death.audio.tick();
+assert.ok(deathSpacing<death.audio.next/death.audio.step);assert.notDeepEqual(deathNotes[0].events,notes[0].events);
+notes.length=0;death.audio.ctx.currentTime=600;death.audio.tick();assert.ok(notes.length<=2,'Background catchup must not schedule a burst of stale notes');
+assert.ok(notes.every(n=>n.time>=600));
+notes.length=0;t.prefs.muted=true;death.audio.tick();assert.equal(notes.length,0);t.prefs.muted=false;
+t.start(true);death.audio.tick();assert.equal(notes.length,0,'Attract demo never schedules music');
+console.log('PASS: distinct mode arrangements and tempos, bounded audio catchup, mute and silent demo.');

@@ -1,0 +1,23 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Riftborn audio verification</title>
+<button id="render">Render both arrangements</button><pre id="result">Ready</pre>
+<script type="module">
+import {createMusicPlayer,MUSIC_TEMPO} from '../soundtrack.js';
+document.querySelector('#render').onclick=async()=>{
+ const result=document.querySelector('#result');result.textContent='Rendering';
+ try{
+  const results=[];
+  for(const death of [false,true]){
+   const tick=60/(death?MUSIC_TEMPO.death:MUSIC_TEMPO.normal)/4,length=256*tick+4;
+   const ctx=new OfflineAudioContext(2,Math.ceil(length*44100),44100),master=ctx.createGain();
+   master.gain.value=.22;master.connect(ctx.destination);const player=createMusicPlayer(ctx,master);
+   for(let step=0;step<256;step++)player.schedule(step,.02+step*tick,death);
+   const rendered=await ctx.startRendering();let peak=0,energy=0,finite=true;
+   for(let c=0;c<2;c++)for(const x of rendered.getChannelData(c)){peak=Math.max(peak,Math.abs(x));energy+=x*x;finite&&=Number.isFinite(x)}
+   const rms=Math.sqrt(energy/rendered.length/2);
+   if(!finite||peak>=1||rms<.005)throw new Error('Invalid audio signal');
+   results.push({mode:death?'Death':'Normal',seconds:length,peak,rms,finite});
+  }
+  result.textContent='PASS '+JSON.stringify(results,null,2);
+ }catch(e){result.textContent='FAIL '+e.stack}
+};
+</script></html>

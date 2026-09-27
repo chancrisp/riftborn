@@ -1,6 +1,6 @@
 import * as T from 'three';
-import {retroMaterial} from './retro.js?v=10';
-import {EXTENT,CELLS,randomSource} from './terrain.js?v=10';
+import {retroMaterial} from './retro.js?v=11';
+import {EXTENT,CELLS,randomSource} from './terrain.js?v=11';
 
 // Static scenery is batched by geometry/material: silhouettes without hundreds of draw calls.
 export function buildStageWorld(terrain){

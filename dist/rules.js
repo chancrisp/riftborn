@@ -1,3 +1,4 @@
+import {MUSIC_TEMPO} from './soundtrack.js?v=11';
 export const WEAPONS = [
  {label:'RIFLE',kind:'ASSAULT',icon:'⌁',color:'#6be7a6',description:'Accurate all-round automatic rifle',damage:20,speed:38,range:32,count:1,spread:.015,cooldown:.22,pierce:0,sound:'rifle'},
  {label:'STINGER',kind:'SMG',icon:'ϟ',color:'#6ad6ff',description:'High fire rate, wide spread',damage:9,speed:34,range:23,count:1,spread:.085,cooldown:.075,pierce:0,sound:'smg'},
@@ -23,7 +24,7 @@ export const DEATH_TYPES=Object.freeze({
  hexer:{hp:150,speed:2.3,radius:.6,damage:18,score:330,xp:4,color:'#dc7392'},
  broodmother:{hp:340,speed:1.5,radius:1.1,damage:22,score:500,xp:6,color:'#b5574e'}
 });
-export const RUN_MODES=Object.freeze({normal:Object.freeze({speed:1,damage:1,bpm:112}),death:Object.freeze({speed:1.35,damage:1.5,bpm:156})});
+export const RUN_MODES=Object.freeze({normal:Object.freeze({speed:1,damage:1,bpm:MUSIC_TEMPO.normal}),death:Object.freeze({speed:1.35,damage:1.5,bpm:MUSIC_TEMPO.death})});
 export function enemyPool(pool,death,stage){return death?[...pool,'revenant','hexer',...(stage>1?['broodmother']:[])]:pool}
 export function movementVector(x,y,yaw){const length=Math.max(1,Math.hypot(x,y));x/=length;y/=length;return {x:Math.cos(yaw)*x+Math.sin(yaw)*y,z:-Math.sin(yaw)*x+Math.cos(yaw)*y}}
 // Swept collision avoids fast rail rounds tunneling through enemies.

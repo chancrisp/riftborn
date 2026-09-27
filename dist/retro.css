@@ -59,3 +59,5 @@ th{background:#252b30;color:#c7b77b;font-size:12px}td{font-size:14px}td,th{borde
 *{scrollbar-color:#8e9180 #1a1e24;scrollbar-width:thin}button:disabled{cursor:default;opacity:.5}
 .weapon-sprite{width:52px;height:26px;background-size:282px 94px}.sprite-0{background-position:0 -32px}.sprite-1{background-position:-57px -32px}.sprite-2{background-position:-107px -32px}.sprite-3{background-position:-169px -32px}.sprite-4{background-position:-230px -32px}
 @media(max-width:700px){.leaderboard-panel table{table-layout:fixed;white-space:normal}.leaderboard-panel .table-scroll td{font-size:11px;padding:12px 5px;overflow-wrap:anywhere}.leaderboard-panel .table-scroll th{font-size:10px;padding:12px 5px}.leaderboard-panel th:nth-child(1){width:32%}.leaderboard-panel th:nth-child(2){width:19%}.leaderboard-panel th:nth-child(3){width:17%}.leaderboard-panel th:nth-child(4){width:32%}}
+
+.death-run-mark{display:inline-block;width:24px;height:24px;object-fit:contain;vertical-align:middle;margin-left:6px;image-rendering:pixelated}
