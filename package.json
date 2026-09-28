@@ -3,6 +3,7 @@
   "scripts": {
     "test": "node build.mjs && node tests/audio-lifecycle.mjs && node tests/audio-effects.mjs && node tests/music.mjs && node tests/campaign-flow.mjs && node tests/campaign-runs.mjs && node tests/campaign-quality.mjs && node tests/mastery.mjs && node tests/build-previews.mjs && node tests/landmarks.mjs && node tests/refinement.mjs && node tests/outbox.mjs && node tests/occlusion.mjs && node tests/graphics.mjs && node tests/ballistics.mjs && node tests/encounters.mjs && node tests/progression.mjs && node tests/mods.mjs && node tests/trials.mjs && node tests/dash-traits.mjs && node tests/dash-health.mjs && node tests/challenges.mjs && node tests/profile.mjs && node tests/builds.mjs && node tests/campaign.mjs && node tests/polish-pacing.mjs && node tests/inputs.mjs && node tests/stress.mjs && node tests/smoke.mjs && node tests/practice.mjs && node tests/terrain-readability.mjs && node tests/terrain-traversal.mjs && node tests/terrain.mjs && node tests/server.mjs",
     "build": "node build.mjs",
+    "build:pages": "node scripts/build-pages.mjs",
     "db:generate": "drizzle-kit generate",
     "dev": "node server/dev.mjs"
   },

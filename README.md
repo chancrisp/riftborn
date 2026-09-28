@@ -68,6 +68,10 @@ Nightmare now has heavier rain, a much shorter fog falloff, a dark sky, and a st
 
 ## Development and checks
 
+### GitHub Pages and Cloudflare transition
+
+The current ChatGPT Site remains live while a separate GitHub Pages + Cloudflare Worker/D1 deployment is prepared. See [the full deployment guide](docs/GITHUB-CLOUDFLARE-DEPLOYMENT.md) for repository variables, the Worker token, migration/deploy order, historical-score limits and rollback. `npm run build:pages` creates a curated `_site/` static package; the existing `npm run build` still produces the Sites Worker package. Pages and Worker deploy workflows are separate, and production D1 migrations require manually running their dedicated workflow.
+
 Dash has two charges. Each spent charge refills in sequence over 1.8 seconds of active play; the two white foot markers show available charges and refill progress. A small overhead health bar shows current HP and shifts from green through yellow and orange to red as health falls. Graphics has a saved **Player indicators opacity** slider (0–100%) for both cues.
 
 For a full campaign test, open **Start Run**, check **Practice Run**, and begin. Practice runs keep normal gameplay and Death Mode selection, but do not submit a score or save Journal and personal-result progress. The run setup keeps the checkbox selection until you change it; uncheck it to record a normal run.

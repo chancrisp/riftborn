@@ -31,6 +31,7 @@ import { RenderPass } from './vendor/postprocessing/RenderPass.js';
 import { OutputPass } from './vendor/postprocessing/OutputPass.js';
 import { WEAPONS, ENEMY_TYPES, DEATH_TYPES, RUN_MODES, enemyPool, segmentHit, movementVector } from './rules.js?v=17';
 import { DEFAULT_BINDINGS, ACTION_LABELS, keyLabel, loadPreferences, assignBinding } from './preferences.js?v=20';
+import { scoreApiUrl } from './score-api.js?v=21';
 
 const $ = s => document.querySelector(s);
 let encounterObjects=[],vents=[],nodeCharge=null,quarryState='dormant';
@@ -697,7 +698,7 @@ $('#nightmare').onchange=e=>setNightmare(e.target.checked);
 // RUN COMPLETION — capture immutable name/mode/date for retryable score submission.
 function finishRun(defeated){if(demoActive){demoFinished=true;return}if(tutorial){finishTutorial(false);return}if(!['play','pause'].includes(mode))return;if(completeMasteryRun(profile,{id:runId,victory,damage:runDamage,statues:statueCount,mawDefeated,mawUntouched},realProgress()))persistProfile();captureSummary(defeated);abandonTrial();clearChallenges();combatEffects?.clear();dashEffects?.clear();buildFeedback.clear();clearInput();mode='dead';hero.g.visible=!defeated;document.body.classList.remove('in-run');document.body.classList.add('menu-open');$('#pauseMenu').classList.add('hidden');$('#menu').classList.remove('hidden');$('#bossHUD').classList.add('hidden');$('#portalCompass').classList.add('hidden');$('#stageObjective').textContent='';$('.menu-card h1').classList.remove('brand-title');$('.menu-card h1').innerHTML=victory?'RIFT<br><span>CONQUERED</span>':defeated?'RUN<br><span>SEVERED</span>':'RUN<br><span>COMPLETE</span>';$('.menu-card .edition').textContent=`STAGE ${stage} · ${score.toLocaleString()} SCORE`;$('#runSummary').textContent=`${kills} KILLS · ${formatTime(elapsed)}`;renderRunSummary();$('#start').textContent='PLAY AGAIN';$('#start').focus();if(runId&&elapsed>=1){pendingScores.set(runId,{id:runId,name:runName,score,kills,wave,seconds:Math.floor(elapsed),stage,played_at:Date.now(),death_mode:runDeath,statue_count:statueCount,statue_modifier:100+difficultyBonus,outcome:victory?'victory':defeated?'defeat':'ended',gameplay_version:GAMEPLAY_VERSION});if(realProgress()){rememberRun(profile,pendingScores.get(runId));persistProfile()}runId=null;saveScores()}else $('#scoreSave').textContent=practiceRun?'Practice run · score and Journal progress not saved.':''}
 // Durable outbox is disabled in tutorial/practice/test flows; tests use the mock API.
-const scoreOutbox=debugScenario||window.__RIFTBORN_TEST__?null:new ScoreOutbox({send:run=>fetch('/api/scores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(run),signal:AbortSignal.timeout(8000)})});
+const scoreOutbox=debugScenario||window.__RIFTBORN_TEST__?null:new ScoreOutbox({send:run=>fetch(scoreApiUrl(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(run),signal:AbortSignal.timeout(8000)})});
 async function saveScores(manual=false){
  if(savingScores)return;savingScores=true;
  try{
@@ -709,7 +710,7 @@ async function saveScores(manual=false){
    $('#retryScore').classList.toggle('hidden',!rows.length);return;
   }
   if(!pendingScores.size)return;
-  for(const [id,run] of pendingScores){const r=await fetch('/api/scores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(run)});if(!r.ok)throw Error('Save unavailable');pendingScores.delete(id)}
+  for(const [id,run] of pendingScores){const r=await fetch(scoreApiUrl(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(run)});if(!r.ok)throw Error('Save unavailable');pendingScores.delete(id)}
   $('#scoreSave').textContent='Score saved.';$('#retryScore').classList.add('hidden');
  }catch{$('#scoreSave').textContent='Score not saved. Retry when connected.';$('#retryScore').classList.remove('hidden')}finally{savingScores=false}
 }
@@ -726,9 +727,9 @@ async function loadLeaderboard(){
  const request=++boardRequest;$('#leaderboardRows').replaceChildren();$('#leaderboardStatus').textContent='Loading scores…';
  for(const key of ['normal','death','unknown'])$('#board'+key).setAttribute('aria-pressed',String(key===boardMode));
  scoreRows($('#personalRows'),localRanking());$('#personalStatus').textContent=localRanking().length?'':'No personal results for this filter.';
- try{let r=await fetch('/api/scores?mode='+boardMode+'&version='+(boardVersion==='all'?'all':GAMEPLAY_VERSION),{cache:'no-store'});if(!r.ok)throw new Error('Unavailable');let data=await r.json();if(request!==boardRequest)return;if(!Array.isArray(data.scores))throw new Error('Invalid scores');
+ try{let r=await fetch(scoreApiUrl('?mode='+boardMode+'&version='+(boardVersion==='all'?'all':GAMEPLAY_VERSION)),{cache:'no-store'});if(!r.ok)throw new Error('Unavailable');let data=await r.json();if(request!==boardRequest)return;if(!Array.isArray(data.scores))throw new Error('Invalid scores');
   const supported=data.capabilities?.modeFilter===true&&data.capabilities?.versionFilter===true;
-  if(!supported){r=await fetch('/api/scores',{cache:'no-store'});if(!r.ok)throw new Error('Unavailable');data=await r.json();if(request!==boardRequest)return;if(!Array.isArray(data.scores))throw new Error('Invalid scores')}
+  if(!supported){r=await fetch(scoreApiUrl(),{cache:'no-store'});if(!r.ok)throw new Error('Unavailable');data=await r.json();if(request!==boardRequest)return;if(!Array.isArray(data.scores))throw new Error('Invalid scores')}
   $('#leaderboardStatus').textContent=supported?(data.scores.length?'Unverified player-reported scores. Versions may not be comparable.':'No scores for this mode/version yet.'):'Legacy combined top 25 · server does not support mode/version filtering. Separated personal results below.';
   scoreRows($('#leaderboardRows'),data.scores);
  }catch{if(request===boardRequest)$('#leaderboardStatus').textContent='Remote leaderboard unavailable. Personal results below; Refresh to retry.'}

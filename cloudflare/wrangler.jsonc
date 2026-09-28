@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "riftborn-leaderboard",
+  "main": "worker.js",
+  "compatibility_date": "2026-09-28",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "ALLOWED_ORIGINS": "https://SET-GITHUB-PAGES-ORIGIN"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "riftborn-leaderboard",
+      "database_id": "__D1_DATABASE_ID__",
+      "migrations_dir": "../drizzle"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "SCORE_RATE_LIMITER",
+      "namespace_id": "9280928",
+      "simple": { "limit": 30, "period": 60 }
+    }
+  ]
+}
