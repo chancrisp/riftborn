@@ -10,7 +10,8 @@ const metadata = JSON.parse(await payload.get('metadata').text());
 
 assert.equal(metadata.main_module, 'riftborn-worker.mjs');
 assert.equal(metadata.workers_dev, true);
-assert.ok(metadata.bindings.some(binding => binding.type === 'd1' && binding.name === 'DB' && binding.database_id === databaseId));
+assert.ok(metadata.bindings.some(binding => binding.type === 'inherit' && binding.name === 'DB'));
+assert.ok(!JSON.stringify(metadata.bindings).includes(databaseId), 'The broken D1 ID is not resubmitted during deployment');
 assert.ok(metadata.bindings.some(binding => binding.type === 'plain_text' && binding.name === 'ENVIRONMENT' && binding.text === 'production'));
 assert.ok(metadata.bindings.some(binding => binding.type === 'plain_text' && binding.name === 'ALLOWED_ORIGINS' && binding.text === siteOrigin));
 assert.ok(metadata.bindings.some(binding => binding.type === 'ratelimit' && binding.name === 'SCORE_RATE_LIMITER' && binding.namespace_id === '9280928'));
@@ -28,7 +29,7 @@ const deployed = await uploadModule.deployWorker({
   },
 });
 assert.equal(deployed.id, 'test-version');
-assert.equal(uploadRequest.url, 'https://api.cloudflare.com/client/v4/accounts/11b52fbbac31279b554fa9490c667017/workers/scripts/riftborn-leaderboard');
+assert.equal(uploadRequest.url, 'https://api.cloudflare.com/client/v4/accounts/11b52fbbac31279b554fa9490c667017/workers/scripts/riftborn-leaderboard?bindings_inherit=strict');
 assert.equal(uploadRequest.method, 'PUT');
 assert.equal(uploadRequest.headers.Authorization, 'Bearer test-token');
 assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\/scores/);

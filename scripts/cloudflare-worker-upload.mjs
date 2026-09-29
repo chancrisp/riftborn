@@ -19,7 +19,9 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin }) {
     workers_dev: true,
     observability: { enabled: true },
     bindings: [
-      { type: 'd1', name: 'DB', database_id: databaseId },
+      // The dashboard bootstraps DB once; inheriting its binding avoids Cloudflare's
+      // current API bug that rejects this visible D1 ID on script uploads.
+      { type: 'inherit', name: 'DB' },
       { type: 'plain_text', name: 'ENVIRONMENT', text: 'production' },
       { type: 'plain_text', name: 'ALLOWED_ORIGINS', text: origin.origin },
       {
@@ -50,7 +52,7 @@ export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin
     minify: true,
   });
   const form = createWorkerUpload(result.outputFiles[0].text, { databaseId, siteOrigin });
-  const response = await fetchImpl(`${ACCOUNT_API}/${accountId}/workers/scripts/${WORKER_NAME}`, {
+  const response = await fetchImpl(`${ACCOUNT_API}/${accountId}/workers/scripts/${WORKER_NAME}?bindings_inherit=strict`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${apiToken}` },
     body: form,
