@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Riftborn</title>
+<meta name="description" content="A PS1-style survival shooter. Cross five fractured worlds and defeat the Rift Warden.">
+<meta name="theme-color" content="#10141e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23161c42'/%3E%3Cpath d='m18 2-12 17h9l-2 11 13-18h-9z' fill='%238effd1'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/riftborn.css">
+<link rel="stylesheet" href="css/hud.css">
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
+</head>
+<body class="menu-open">
+<canvas id="game" aria-label="3D survival arena"></canvas>
+<div id="deathTint" aria-hidden="true"></div>
+<div id="modeBadge" role="status"></div>
+<div id="hitflash" aria-hidden="true"></div>
+<div id="buildCue" aria-live="off"></div>
+<div id="crosshair" aria-hidden="true"><i></i></div>
+
+<header>
+  <div class="wordmark">RIFTBORN<img id="profileBadge" class="hidden" src="assets/death-skull.png" width="24" height="24" alt="Trial veteran badge"><span id="earnedBadge"></span></div>
+  <div class="world-state"><b id="sector">SECTOR 01</b><span id="clock">00:00</span><span id="hostiles">0 HOSTILES</span></div>
+  <div class="actions"><button id="sound" type="button" aria-label="Toggle sound">SOUND ON</button><button id="pause" type="button" aria-label="Pause game">PAUSE</button></div>
+</header>
+
+<div id="waveToast" role="status"></div>
+<div id="damageNumbers" aria-hidden="true"></div>
+<div id="portalCompass" class="portal-compass hidden" aria-live="polite"><span class="compass-arrow">➤</span><div><b id="portalLabel">RIFT PORTAL</b><small id="portalDistance">LOCKED · 12 KILLS</small></div></div>
+<aside id="tutorialGuide" class="hidden" aria-label="Tutorial guide"><div class="tutorial-heading"><strong id="tutorialTitle"></strong><span id="tutorialStep"></span></div><p id="tutorialHint" role="status" aria-live="polite"></p><p id="tutorialWeapon"></p></aside>
+<div id="trackedGoal" class="hidden"></div>
+<div id="difficultyMeter" class="hidden"></div>
+<div id="trialStatus" role="status"></div>
+<div id="modStatus"></div>
+<div id="powerupStatus" role="status"></div>
+<div id="interactPrompt" class="hidden"></div>
+<div id="stageObjective" role="status"></div>
+<div id="bossHUD" class="hidden"><b id="bossPhase">RIFT WARDEN</b><div><i id="bossChip"></i><i id="bossFill"></i></div></div>
+
+<section id="status" aria-label="Player status">
+  <div class="level"><strong id="level">1</strong><span>LEVEL</span></div>
+  <div class="vitals">
+    <div class="health-label"><span>INTEGRITY</span><b id="healthText">100 / 100</b></div>
+    <div class="track"><div id="healthBar"></div><div id="shieldBar"></div></div>
+    <div class="xp-track"><div id="xpBar"></div></div>
+    <div class="substats"><span id="score">0 SCORE</span><span id="dashStatus">PHASE DASH READY</span></div>
+  </div>
+</section>
+<div id="playerVitals" aria-hidden="true"><span id="playerHealthNumber">100</span><div class="player-health-track"><div id="playerHealthFill"></div></div></div>
+<div id="dashPips" aria-hidden="true"><span class="dash-pip"><i id="dashFill1"></i></span><span class="dash-pip"><i id="dashFill2"></i></span></div>
+<nav id="weapons" aria-label="Switch weapon"></nav>
+
+<div id="touch">
+  <div class="stick" id="moveStick" aria-label="Movement joystick"><span></span><small>MOVE</small></div>
+  <div class="stick" id="aimStick" aria-label="Aim joystick"><span></span><small>AIM</small></div>
+  <button id="fireTouch" type="button" aria-label="Hold to fire">FIRE</button>
+  <button id="dashTouch" type="button">DASH</button>
+  <button id="interactTouch" type="button" class="hidden">INTERACT</button>
+  <button id="pauseTouch" type="button" aria-label="Pause game">II</button>
+</div>
+
+<section id="sequence" class="hidden" role="dialog" aria-modal="true" aria-labelledby="sequenceTitle">
+  <div class="sequence-caption"><h2 id="sequenceTitle"></h2><p id="sequenceText"></p><button id="sequenceSkip" type="button" class="secondary">SKIP</button></div>
+</section>
+
+<div id="stageCard" class="stage-card hidden" aria-live="polite"><small id="stageCardSmall"></small><strong id="stageCardBig"></strong><i class="stage-card-rule" aria-hidden="true"></i></div>
+
+<main id="menu">
+  <button id="deathSkull" type="button" aria-label="Enter Death Mode" aria-pressed="false"><img src="assets/death-skull.png" width="80" height="98" alt="" draggable="false"></button>
+  <div class="menu-card">
+    <h1 class="brand-title">RIFT<span>BORN</span></h1>
+    <div class="edition"></div>
+    <p id="runSummary"></p>
+    <details id="runReport" class="hidden"><summary>RUN REPORT</summary><div id="runDetails"></div></details>
+    <button id="start" type="button" class="primary" disabled>LOADING THE RIFT…</button>
+    <button id="mainMenu" type="button" class="secondary main-menu hidden">MAIN MENU</button>
+    <div class="menu-grid"><button id="tutorial" type="button" class="secondary tutorial-start" disabled>TUTORIAL</button><button id="menuProfile" type="button" class="secondary journal-button">JOURNAL</button><button id="menuSettings" type="button" class="secondary">SETTINGS</button><button id="menuLeaderboard" type="button" class="secondary">LEADERBOARD</button></div>
+    <p id="scoreSave" role="status"></p>
+    <button id="retryScore" type="button" class="secondary hidden">RETRY SAVING SCORE</button>
+    <small id="loadNote">Building your world…</small>
+  </div>
+</main>
+
+<section id="runSetup" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="usernameTitle">
+  <div class="run-panel ui-scaled">
+    <form id="runForm" autocomplete="off">
+      <h2 id="usernameTitle">NEW RUN</h2>
+      <label class="username" for="playerName">Username</label>
+      <input id="playerName" name="username" maxlength="16" required autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="usernameError">
+      <details><summary>ON-SCREEN KEYBOARD</summary><div id="nameKeyboard" aria-label="Username characters"></div></details>
+      <div id="rulesetRow" class="ruleset-row" role="group" aria-label="Ruleset"><span class="ruleset-label">RULESET</span><button id="rulesetKeepers" type="button" class="secondary" aria-pressed="true">KEEPERS</button><button id="rulesetOriginal" type="button" class="secondary" aria-pressed="false">ORIGINAL</button><small id="rulesetHint"></small></div>
+      <label class="practice-option" for="practiceRun"><input id="practiceRun" type="checkbox"><span><strong>PRACTICE RUN</strong><small>Play the full game without saving scores or Journal progress.</small></span></label>
+      <p id="usernameError" role="alert"></p>
+      <p id="assistNote" class="assist-note hidden" role="status"></p>
+      <button id="beginRun" type="submit" class="primary">BEGIN RUN</button>
+      <button id="cancelRun" type="button" class="secondary">CANCEL</button>
+    </form>
+  </div>
+</section>
+
+<section id="choice" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="choiceTitle">
+  <div class="ui-scaled"><h2 id="choiceTitle">CHOOSE AN UPGRADE</h2><p id="choiceContext"></p><div id="cards"></div></div>
+</section>
+
+<section id="pauseMenu" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+  <div class="pause-card ui-scaled">
+    <h2 id="pauseTitle">RUN PAUSED</h2>
+    <p id="pauseStats" class="muted"></p>
+    <p id="buildSummary"></p>
+    <button id="resume" type="button" class="primary">RESUME RUN</button>
+    <div class="menu-grid pause-grid"><button id="pauseSettings" type="button" class="secondary">SETTINGS</button><button id="pauseLeaderboard" type="button" class="secondary">LEADERBOARD</button><button id="pauseProfile" type="button" class="secondary">JOURNAL</button></div>
+    <button id="abandonTrial" type="button" class="secondary hidden">ABANDON TRIAL · KEEP CURSE</button>
+    <div class="exit-group"><button id="endRun" type="button" class="secondary exit-run">END RUN &amp; SAVE SCORE</button><button id="quitRun" type="button" class="secondary exit-run">QUIT TO MENU</button></div>
+  </div>
+</section>
+
+<section id="settings" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <div class="settings-panel ui-scaled">
+    <div class="panel-head"><h2 id="settingsTitle">SETTINGS</h2><button id="closeSettings" type="button" class="secondary">DONE</button></div>
+    <div class="settings-tabs" role="tablist" aria-label="Settings category">
+      <button id="tabGraphics" type="button" role="tab" aria-selected="true" aria-controls="panelGraphics">GRAPHICS</button>
+      <button id="tabAudio" type="button" role="tab" aria-selected="false" aria-controls="panelAudio" tabindex="-1">AUDIO</button>
+      <button id="tabControls" type="button" role="tab" aria-selected="false" aria-controls="panelControls" tabindex="-1">CONTROLS</button>
+      <button id="tabAccess" type="button" role="tab" aria-selected="false" aria-controls="panelAccess" tabindex="-1">ACCESS</button>
+    </div>
+    <div id="panelGraphics" role="tabpanel" aria-labelledby="tabGraphics"></div>
+    <div id="panelAudio" role="tabpanel" aria-labelledby="tabAudio" hidden></div>
+    <div id="panelControls" role="tabpanel" aria-labelledby="tabControls" hidden></div>
+    <div id="panelAccess" role="tabpanel" aria-labelledby="tabAccess" hidden></div>
+  </div>
+</section>
+
+<section id="leaderboard" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="leaderboardTitle">
+  <div class="leaderboard-panel ui-scaled">
+    <div class="panel-head"><h2 id="leaderboardTitle">LEADERBOARD</h2><div class="head-actions"><button id="refreshLeaderboard" type="button" class="secondary">REFRESH</button><button id="closeLeaderboard" type="button" class="secondary">BACK</button></div></div>
+    <div class="ranking-tabs" role="group" aria-label="Ranking mode"></div>
+    <p id="leaderboardStatus" role="status">Loading scores…</p>
+    <div class="table-scroll"><table aria-label="Leaderboard"><thead><tr><th scope="col">#</th><th scope="col">Player</th><th scope="col">Score</th><th scope="col">Stage</th><th scope="col">Date</th></tr></thead><tbody id="leaderboardRows"></tbody></table></div>
+    <details><summary>PERSONAL RESULTS · THIS DEVICE</summary><p id="personalStatus"></p><div class="table-scroll"><table aria-label="Personal results"><thead><tr><th scope="col">#</th><th scope="col">Player</th><th scope="col">Score</th><th scope="col">Stage</th><th scope="col">Date</th></tr></thead><tbody id="personalRows"></tbody></table></div></details>
+  </div>
+</section>
+
+<section id="profile" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="profileTitle">
+  <div class="settings-panel ui-scaled">
+    <div class="panel-head"><h2 id="profileTitle">JOURNAL</h2><button id="closeProfile" type="button" class="secondary">BACK</button></div>
+    <div id="journalBody"></div>
+  </div>
+</section>
+
+<aside id="devTools" class="hidden" aria-label="Practice tools"></aside>
+
+<noscript><p class="noscript">Riftborn needs JavaScript and WebGL.</p></noscript>
+<script type="module" src="src/main.js"></script>
+<script>window.addEventListener("error",function(){if(!window.gameReady){var n=document.querySelector("#loadNote");if(n)n.textContent="The 3D game could not load. Enable WebGL / hardware acceleration and reload.";}});</script>
+<script>/* The live D1 board only for the real site; the /next/ preview keeps scores on the device. */window.RIFTBORN_SCORE_API_BASE = window.RIFTBORN_SCORE_API_BASE || (location.hostname === "chancrisp.github.io" && !location.pathname.includes("/next/") ? "https://riftborn-leaderboard.chanmanc10.workers.dev" : "");</script>
+</body>
+</html>

@@ -1,0 +1,2854 @@
+/* RIFTBORN — the single retro stylesheet: HUD, menus, modals, panels and touch controls.
+   Values reproduce the original's final cascaded look (spec ui.md §3); Wave-1 additions reuse
+   the same palette, bevels and pixel type. Breakpoints live at the end of the file. */
+
+@font-face {
+  font-family: "Crypt Pixel";
+  src: url("../assets/crypt-pixel.ttf") format("truetype");
+  font-display: swap;
+}
+
+/* ---- tokens ------------------------------------------------------------------------- */
+
+:root {
+  /* palette: desaturated greys, olive and parchment with old-gold highlights */
+  --mint: #b8c49a;
+  --yellow: #d4bc78;
+  --ink: #15151e;
+  --white: #ded6be;
+  --muted: #9c9a8b;
+  --gold-hover: #ede0a3;
+  --gold-selected: #ebdda7;
+  --hint: #b9b7a7;
+  --shadow: #000;
+
+  /* type: the pixel face only covers ASCII + · …, so symbols fall back to Courier */
+  --font-pixel: "Crypt Pixel", "Courier New", monospace;
+
+  /* surfaces */
+  --button: #292c31;
+  --button-hover: #434b48;
+  --button-selected: #454b40;
+  --panel: #23262b;
+  --hud-box: #23282d;
+  --field: #11151b;
+  --rule: #565b51;
+
+  /* bevels: light top/left, dark bottom/right; "sunken" inverts them */
+  --edge-light: #8e9180;
+  --edge-dark: #111318;
+  --bevel-raised: var(--edge-light) var(--edge-dark) var(--edge-dark) var(--edge-light);
+  --bevel-sunken: var(--edge-dark) var(--edge-light) var(--edge-light) var(--edge-dark);
+  --bevel-panel: #888879 var(--edge-dark) var(--edge-dark) #888879;
+  --bevel-card: #919780 var(--edge-dark) var(--edge-dark) #919780;
+  --focus-ring: 2px solid var(--yellow);
+}
+
+/* ---- base --------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  border-radius: 0;
+  transition: none;
+  scrollbar-color: var(--edge-light) #1a1e24;
+  scrollbar-width: thin;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  touch-action: none;
+  background: var(--ink);
+  color: var(--white);
+  font: 400 16px var(--font-pixel);
+}
+
+button,
+input,
+select,
+output,
+table {
+  font-family: var(--font-pixel);
+  font-weight: 400;
+  font-style: normal;
+  letter-spacing: 0;
+}
+
+h1,
+h2,
+h3,
+.level strong,
+.world-state b,
+#bossHUD > b,
+.card strong {
+  font-weight: 400;
+}
+
+h2 {
+  font-size: 28px;
+  line-height: 1.3;
+  margin: 12px 0 22px;
+}
+
+::selection {
+  background: var(--mint);
+  color: var(--ink);
+}
+
+input {
+  caret-color: var(--yellow);
+}
+
+.hidden,
+[hidden] {
+  display: none !important;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.settings-hint {
+  margin: 16px 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--hint);
+}
+
+.noscript {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+}
+
+#game {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+/* ---- buttons ------------------------------------------------------------------------ */
+
+button {
+  padding: 1px 6px;
+  font-size: 16px;
+  line-height: normal;
+  color: var(--white);
+  text-shadow: 2px 2px #111;
+  background: var(--button);
+  border: 2px solid;
+  border-color: var(--bevel-raised);
+  box-shadow: 2px 2px 0 var(--shadow);
+  cursor: pointer;
+}
+
+button:hover,
+button:focus-visible {
+  color: var(--gold-hover);
+  background: var(--button-hover);
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+button:active {
+  border-color: var(--bevel-sunken);
+  transform: translate(1px, 1px);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.primary {
+  min-width: 250px;
+  margin-top: 16px;
+  padding: 16px 40px;
+}
+
+.secondary {
+  padding: 12px 20px;
+}
+
+/* Confirm buttons for irreversible actions carry a dried-blood tint until hovered. */
+.danger {
+  background: #4a302d;
+}
+
+.menu-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+/* ---- HUD: header -------------------------------------------------------------------- */
+
+header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 15px;
+  padding: 18px;
+  pointer-events: none;
+}
+
+.wordmark {
+  font-size: 18px;
+  line-height: 1.2;
+  text-shadow: 2px 2px var(--shadow);
+}
+
+.wordmark span {
+  display: block;
+  margin: 3px 0 0 8px;
+  font-size: 10px;
+  line-height: normal;
+  letter-spacing: 2px;
+  color: var(--mint);
+}
+
+#earnedBadge:empty {
+  display: none;
+}
+
+#profileBadge {
+  width: 24px;
+  height: 24px;
+  margin-left: 8px;
+  object-fit: contain;
+  vertical-align: middle;
+  image-rendering: pixelated;
+}
+
+.world-state {
+  padding: 8px 16px;
+  text-align: center;
+  background: #151a21e8;
+  border: 2px solid #858779;
+  box-shadow: 3px 3px var(--shadow);
+}
+
+.world-state b {
+  display: block;
+  font-size: 16px;
+  color: var(--yellow);
+}
+
+.world-state span {
+  display: inline-block;
+  margin: 6px 8px 0;
+  font-size: 11px;
+  color: #ced9ed;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.actions button {
+  padding: 10px 12px;
+  font-size: 11px;
+}
+
+#modeBadge {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  z-index: 25;
+  max-width: 90vw;
+  transform: translateX(-50%);
+  font-size: 16px;
+  text-align: center;
+  color: #eb9b87;
+  text-shadow: 2px 2px #280b0b;
+  pointer-events: none;
+}
+
+.in-run #modeBadge {
+  top: 70px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* ---- HUD: status block -------------------------------------------------------------- */
+
+#status {
+  position: fixed;
+  left: 28px;
+  bottom: 28px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.level {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 58px;
+  background: #20262d;
+  border: 2px solid #898a7b;
+}
+
+.level strong {
+  font-size: 23px;
+}
+
+.level span {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.vitals {
+  width: 255px;
+}
+
+.health-label,
+.substats {
+  display: flex;
+  justify-content: space-between;
+  margin: 5px 0;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.health-label b {
+  font-size: 12px;
+}
+
+.substats {
+  color: #e0ecff;
+  letter-spacing: 0.03em;
+}
+
+/* Health and the Bone Ward share one cell: the ward (points as a share of max integrity)
+   rides along the top of the fill as a hatched bone band, leaving the health readable. */
+.track {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  height: 16px;
+  padding: 2px;
+  background: var(--field);
+  border: 2px solid var(--edge-light);
+}
+
+#healthBar,
+#shieldBar {
+  grid-area: 1 / 1;
+}
+
+#healthBar {
+  width: 100%;
+  height: 100%;
+  background: #819c72;
+}
+
+#shieldBar {
+  align-self: start;
+  justify-self: start;
+  width: 0;
+  height: 4px;
+  background: repeating-linear-gradient(90deg, #d3d7ba 0 3px, #8f927c 3px 4px);
+  box-shadow: 0 1px #11151b;
+}
+
+.xp-track {
+  height: 6px;
+  margin-top: 5px;
+  background: var(--field);
+  border: 1px solid #858779;
+}
+
+#xpBar {
+  width: 0;
+  height: 100%;
+  background: #c8b574;
+}
+
+/* ---- HUD: weapon bar ---------------------------------------------------------------- */
+
+#weapons {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  display: flex;
+  gap: 5px;
+  transform: translateX(-50%);
+}
+
+.weapon {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 74px;
+  height: 68px;
+  border-bottom-color: var(--rarity);
+}
+
+.weapon.active {
+  background: #424a41;
+  outline: var(--focus-ring);
+}
+
+.weapon .num {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  font-size: 9px;
+  opacity: 0.6;
+}
+
+.weapon .name {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.weapon .kind {
+  display: none;
+}
+
+.weapon-sprite {
+  display: block;
+  width: 52px;
+  height: 26px;
+  object-fit: contain;
+  background-position: center;
+  background-size: contain;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.sprite-0 {
+  background-image: url("../assets/weapon-0.png");
+}
+.sprite-1 {
+  background-image: url("../assets/weapon-1.png");
+}
+.sprite-2 {
+  background-image: url("../assets/weapon-2.png");
+}
+.sprite-3 {
+  background-image: url("../assets/weapon-3.png");
+}
+.sprite-4 {
+  background-image: url("../assets/weapon-4.png");
+}
+
+/* ---- HUD: player-anchored indicators ------------------------------------------------ */
+
+#playerVitals,
+#dashPips {
+  position: fixed;
+  z-index: 18;
+  display: none;
+  filter: drop-shadow(2px 2px #101216);
+  pointer-events: none;
+}
+
+.in-run #playerVitals,
+.in-run #dashPips {
+  display: flex;
+}
+
+#playerVitals {
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  transform: translate(-50%, -100%);
+}
+
+#playerHealthNumber {
+  font-size: 14px;
+  line-height: 1;
+  color: #f2edd8;
+}
+
+.player-health-track {
+  width: 82px;
+  height: 10px;
+  padding: 1px;
+  background: #141a1a;
+  border: 1px solid #d1c7a3;
+  box-shadow: 2px 2px #101216;
+}
+
+#playerHealthFill {
+  width: 100%;
+  height: 100%;
+  background: #7bdc8f;
+}
+
+#dashPips {
+  align-items: center;
+  gap: 9px;
+  transform: translate(-50%, 8px);
+}
+
+.dash-pip {
+  position: relative;
+  display: block;
+  width: 13px;
+  height: 13px;
+  overflow: hidden;
+  background: #263238;
+  border: 2px solid #f5f5ef;
+  transform: rotate(45deg);
+}
+
+.dash-pip i {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  background: #f5f5ef;
+}
+
+#crosshair {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  display: none;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--yellow);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+#crosshair i {
+  position: absolute;
+  top: 6.5px;
+  left: 6.5px;
+  width: 3px;
+  height: 3px;
+  background: #fff;
+}
+
+#crosshair.confirmed {
+  border-color: #c89f70;
+  transform: translate(-50%, -50%) scale(1.25);
+}
+
+/* ---- HUD: world-anchored layer (damage numbers, enemy bars) ------------------------- */
+
+#damageNumbers {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.damage {
+  position: absolute;
+  font-size: 18px;
+  text-shadow: 0 2px 1px #112640;
+}
+
+.damage.critical {
+  font-size: 22px;
+  color: var(--yellow);
+}
+
+.enemy-health {
+  position: absolute;
+  width: 42px;
+  height: 5px;
+  background: #172135db;
+  border: 1px solid #0006;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.enemy-health i {
+  display: block;
+  height: 100%;
+  background: #ffbe82;
+}
+
+/* ---- HUD: boss, objective, compass, toast ------------------------------------------- */
+
+#bossHUD {
+  position: fixed;
+  top: 160px;
+  left: 50%;
+  width: min(440px, 72vw);
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+}
+
+#bossHUD > b {
+  font-size: 16px;
+  color: #dfb3ff;
+  text-shadow: 0 2px 5px var(--shadow);
+}
+
+/* The chip bar trails behind the fill, showing recent damage before it catches up. */
+#bossHUD > div {
+  position: relative;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  height: 12px;
+  margin-top: 7px;
+  padding: 2px;
+  background: #1e1829;
+  border: 2px solid #b1a1b1;
+}
+
+/* The Warden's 50% enrage threshold, marked until it is crossed (hud.js sets .phase-tick). */
+#bossHUD.phase-tick > div::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: calc(50% - 1px);
+  width: 2px;
+  background: var(--gold-hover);
+  box-shadow: 1px 0 #1e1829;
+}
+
+#bossChip,
+#bossFill {
+  grid-area: 1 / 1;
+  height: 100%;
+}
+
+#bossChip {
+  width: 0;
+  background: #d9c3a5;
+}
+
+#bossFill {
+  width: 100%;
+  background: #967191;
+}
+
+#stageObjective {
+  position: fixed;
+  top: 151px;
+  width: 100%;
+  font-size: 13px;
+  text-align: center;
+  color: #e3d6ff;
+  text-shadow: 0 2px 4px var(--shadow);
+  pointer-events: none;
+}
+
+.portal-compass {
+  position: fixed;
+  top: 92px;
+  left: 50%;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 12px;
+  transform: translateX(-50%);
+  background: #252330ec;
+  border: 2px solid #8e8498;
+  box-shadow: 2px 2px var(--shadow);
+  pointer-events: none;
+}
+
+.compass-arrow {
+  display: inline-block;
+  font: 26px "Courier New", monospace;
+  color: #b7a0c8;
+}
+
+#portalLabel {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: #e6cfff;
+}
+
+#portalDistance {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: #b5abbf;
+}
+
+#waveToast {
+  position: fixed;
+  top: 21%;
+  left: 50%;
+  font-size: 24px;
+  text-align: center;
+  color: var(--yellow);
+  text-shadow: 2px 2px #111;
+  opacity: 0;
+  transform: translate(-50%, -15px);
+  pointer-events: none;
+}
+
+/* Stepped slide-in instead of a smooth tween, in keeping with the 15 fps world. */
+#waveToast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  animation: toast-drop 0.2s steps(3, end);
+}
+
+#hitflash {
+  position: fixed;
+  inset: 0;
+  box-shadow: inset 0 0 0 8px #8b393e;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#deathTint {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: none;
+  background: #a0161619;
+  pointer-events: none;
+}
+
+.death-mode #deathTint {
+  display: block;
+}
+
+#buildCue {
+  position: fixed;
+  left: 50%;
+  bottom: 140px;
+  z-index: 4;
+  max-width: 90%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  letter-spacing: 1px;
+  text-align: center;
+  color: #ded3b4;
+  text-shadow: 2px 2px #14181d;
+  pointer-events: none;
+}
+
+/* The prompt and the cue share the bottom-centre slot; the cue steps up while both show. */
+body:has(#interactPrompt:not(.hidden)) #buildCue {
+  bottom: 180px;
+}
+
+/* ---- HUD: encounter rows ------------------------------------------------------------ */
+
+#difficultyMeter,
+#powerupStatus,
+#interactPrompt {
+  position: fixed;
+  z-index: 16;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--white);
+  background: var(--hud-box);
+  pointer-events: none;
+}
+
+#difficultyMeter {
+  top: 84px;
+  left: 18px;
+  color: #e0aa91;
+}
+
+#powerupStatus {
+  top: 122px;
+  left: 18px;
+  max-width: 300px;
+  color: var(--yellow);
+}
+
+#powerupStatus:empty,
+#trialStatus:empty {
+  display: none;
+}
+
+#interactPrompt {
+  left: 50%;
+  bottom: 136px;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  transform: translateX(-50%);
+  text-align: center;
+  border: 1px solid #9b9785;
+}
+
+#trialStatus {
+  position: fixed;
+  top: 156px;
+  left: 50%;
+  width: min(560px, 90vw);
+  max-width: 90vw;
+  padding: 6px 10px;
+  transform: translateX(-50%);
+  font-size: 14px;
+  line-height: 1.45;
+  text-align: center;
+  color: #e8be91;
+  background: #23282ddd;
+  pointer-events: none;
+}
+
+#modStatus {
+  position: fixed;
+  left: 20px;
+  bottom: 196px;
+  font-size: 14px;
+  color: var(--white);
+  pointer-events: none;
+}
+
+/* Mirrored to the right so it no longer overlaps the curse meter in the top-left. */
+#trackedGoal {
+  position: fixed;
+  top: 86px;
+  right: 20px;
+  max-width: 45vw;
+  padding: 6px 8px;
+  font-size: 11px;
+  text-align: right;
+  color: var(--mint);
+  background: #171923db;
+  pointer-events: none;
+}
+
+#tutorialGuide {
+  position: fixed;
+  top: 92px;
+  left: 50%;
+  z-index: 15;
+  width: min(480px, calc(100vw - 24px));
+  padding: 16px 20px;
+  transform: translateX(-50%);
+  color: var(--white);
+  background: var(--hud-box);
+  border: 2px solid;
+  border-color: #929586 #101216 #101216 #929586;
+  pointer-events: none;
+}
+
+.tutorial-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.tutorial-heading strong {
+  color: var(--yellow);
+}
+
+#tutorialStep {
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+#tutorialHint {
+  margin: 12px 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+#tutorialWeapon {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--mint);
+}
+
+/* ---- touch controls ----------------------------------------------------------------- */
+
+#touch {
+  display: none;
+}
+
+.stick {
+  position: fixed;
+  bottom: 140px;
+  display: grid;
+  place-items: center;
+  width: 110px;
+  height: 110px;
+  background: #1d2638aa;
+  border: 2px solid #aaa98c;
+}
+
+/* Floating sticks: input.js moves the base under the thumb and marks it active. */
+.stick.active {
+  border-color: #c6c2a3;
+}
+
+.stick span {
+  width: 44px;
+  height: 44px;
+  background: #747c6b;
+  border: 2px solid #c6c2a3;
+  pointer-events: none;
+}
+
+.stick small {
+  position: absolute;
+  bottom: -25px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: #fff8;
+}
+
+#moveStick {
+  left: 22px;
+}
+
+#aimStick {
+  right: 22px;
+}
+
+#fireTouch {
+  position: fixed;
+  right: 28px;
+  bottom: 305px;
+  width: 75px;
+  height: 65px;
+  touch-action: none;
+}
+
+#dashTouch {
+  position: fixed;
+  right: 115px;
+  bottom: 295px;
+  width: 70px;
+  height: 40px;
+}
+
+/* Sits between the aim stick and FIRE instead of overlapping the stick's top edge. */
+#interactTouch {
+  position: fixed;
+  right: 28px;
+  bottom: 254px;
+  min-height: 40px;
+  padding: 8px 10px;
+  touch-action: manipulation;
+}
+
+#pauseTouch {
+  position: fixed;
+  left: 22px;
+  bottom: 262px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  touch-action: manipulation;
+}
+
+#touch button:active {
+  filter: brightness(1.3);
+}
+
+/* ---- cinematic letterbox ------------------------------------------------------------ */
+
+#sequence {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 18px;
+  border-top: clamp(24px, 7vh, 70px) solid #101019;
+  border-bottom: clamp(24px, 5vh, 48px) solid #101019;
+  pointer-events: auto;
+}
+
+.sequence-caption {
+  width: 100%;
+  max-width: 660px;
+  padding: 18px 24px;
+  text-align: center;
+  background: #171923ed;
+  border: 2px solid #787d77;
+}
+
+#sequenceTitle {
+  margin: 0 0 12px;
+  line-height: 1.2;
+  color: var(--yellow);
+}
+
+#sequenceText {
+  max-width: 52ch;
+  margin: 0 auto 16px;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+#sequenceSkip {
+  min-width: 140px;
+  min-height: 44px;
+}
+
+/* ---- screen states (body classes) --------------------------------------------------- */
+
+body:not(.in-run)
+  :is(header, #waveToast, #damageNumbers, #hitflash, #portalCompass, #bossHUD, #touch, #weapons, #status, #buildCue, #stageObjective, #modStatus, #trialStatus, #trackedGoal) {
+  display: none !important;
+}
+
+body.menu-open #crosshair {
+  display: none !important;
+}
+
+body.menu-open :is(#tutorialGuide, #difficultyMeter, #powerupStatus, #interactPrompt) {
+  display: none !important;
+}
+
+.in-sequence
+  :is(header, #status, #weapons, #touch, #portalCompass, #trialStatus, #stageObjective, #modStatus, #interactPrompt, #trackedGoal, #waveToast, #crosshair) {
+  visibility: hidden;
+}
+
+.tutorial-active #portalCompass {
+  top: 250px;
+}
+
+.tutorial-active :is(#stageObjective, #waveToast) {
+  display: none;
+}
+
+/* Last-used device (set by input.js): touch shows the sticks, pad and touch hide the reticle. */
+body.in-run.touch-mode #touch {
+  display: block;
+}
+
+body.pad-mode #touch,
+body:is(.touch-mode, .pad-mode) #crosshair {
+  display: none !important;
+}
+
+/* Gamepad focus comes from .focus(), which browsers may not treat as :focus-visible; show it
+   anyway. :where() keeps this at hover strength, so selected tabs, the START button and the
+   skull keep their own colours exactly as they do under the mouse. */
+:where(body.pad-mode) :is(input, select, summary):focus,
+:where(body.pad-mode) button:focus {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+:where(body.pad-mode) button:focus {
+  color: var(--gold-hover);
+  background: var(--button-hover);
+}
+
+/* Optional CRT look for the DOM layer (HUD, menus, modals). The CRT pass (src/render/crt.js)
+   already masks, scanlines and vignettes the 3D image, so this adds only fine, faint lines: no
+   second vignette, and a period short enough not to band against the shader's rows. */
+body.crt::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom, rgb(0 0 0 / 0.14) 0 1px, transparent 1px 2px);
+}
+
+body.crt.crt-subtle::after {
+  background: repeating-linear-gradient(to bottom, rgb(0 0 0 / 0.07) 0 1px, transparent 1px 2px);
+}
+
+/* ---- main menu and results ---------------------------------------------------------- */
+
+#menu {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 28px;
+  overflow-y: auto;
+  text-align: center;
+  background: #10141e55;
+}
+
+.menu-card {
+  width: min(100%, 420px);
+  max-width: 420px;
+  margin: auto;
+  text-shadow: 2px 2px var(--shadow);
+}
+
+.menu-card h1 {
+  margin: 0 0 12px;
+  line-height: 1.12;
+  letter-spacing: -2px;
+  overflow-wrap: anywhere;
+  text-shadow:
+    3px 3px #24232a,
+    5px 5px #09090e;
+}
+
+.menu-card .brand-title {
+  margin-bottom: 32px;
+  font-size: clamp(32px, 6.8vw, 60px);
+  white-space: nowrap;
+}
+
+.menu-card h1:not(.brand-title) {
+  margin-bottom: 16px;
+  font-size: clamp(30px, 4.4vw, 56px);
+  line-height: 1.15;
+  overflow-wrap: normal;
+}
+
+.menu-card h1 span {
+  color: var(--yellow);
+}
+
+.death-mode .menu-card .brand-title span {
+  color: #cd7767;
+}
+
+.menu-card .edition {
+  margin: 8px 0 30px;
+  font-size: 16px;
+  line-height: normal;
+  letter-spacing: 4px;
+}
+
+.menu-card .edition:empty {
+  display: none;
+}
+
+.personal-best {
+  display: inline-block;
+  margin: 0 0 18px;
+  padding: 5px 10px;
+  font-size: 14px;
+  color: var(--yellow);
+  background: #2e2a1f;
+  border: 2px solid var(--yellow);
+  box-shadow: 2px 2px var(--shadow);
+  animation: record-blink 1.2s steps(1, end) 3;
+}
+
+.menu-card p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #d5e6fa;
+}
+
+.menu-card p:empty,
+#loadNote:empty {
+  display: none;
+}
+
+#runSummary {
+  margin: 0 0 20px;
+  font-size: 15px;
+}
+
+.menu-card .primary {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 15px;
+  font-size: 20px;
+  background: #3d4640;
+}
+
+.death-mode .menu-card .primary {
+  background: #503330;
+}
+
+/* Secondary actions: one tidy 2-column grid of equal buttons under the primary action. */
+.menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.menu-grid button {
+  min-width: 0;
+  min-height: 46px;
+  padding: 12px 8px;
+  font-size: 14px;
+}
+
+.menu-card .main-menu {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  font-size: 16px;
+}
+
+/* Results: TUTORIAL gives way to MAIN MENU, so JOURNAL takes the full first row. */
+.results-view .journal-button {
+  grid-column: 1 / -1;
+}
+
+#scoreSave {
+  margin: 16px 0 0;
+  color: var(--mint);
+}
+
+#loadNote {
+  display: block;
+  margin-top: 15px;
+  font-size: 14px;
+  color: #a6c2e0;
+}
+
+#runReport {
+  margin: 12px 0;
+  text-align: left;
+}
+
+#runReport summary {
+  font-size: 14px;
+  text-align: center;
+  cursor: pointer;
+}
+
+#runDetails {
+  max-height: 26dvh;
+  overflow: auto;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+#runDetails p {
+  margin: 10px 0;
+  white-space: pre-line;
+}
+
+#deathSkull {
+  position: fixed;
+  left: 77%;
+  top: 75%;
+  z-index: 22;
+  width: 80px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  touch-action: manipulation;
+}
+
+/* No box on hover/focus: the eye sockets light with purple pixel flames instead (skull-flames.js). */
+#deathSkull:hover,
+#deathSkull:focus-visible {
+  background: transparent;
+  outline: none;
+}
+
+@media (forced-colors: active) {
+  #deathSkull:focus-visible {
+    outline: 2px solid CanvasText;
+  }
+}
+
+#deathSkull .skull-flames {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 80px;
+  height: 98px;
+  image-rendering: pixelated;
+  pointer-events: none;
+  opacity: 0;
+}
+
+#deathSkull img {
+  display: block;
+  width: 80px;
+  height: auto;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+/* An expanded report owns its reading area; closing it brings the skull back. */
+#menu:has(#runReport[open]) #deathSkull {
+  visibility: hidden;
+}
+
+/* ---- modals and panels -------------------------------------------------------------- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 25px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  text-align: center;
+  background: #0e121ceb;
+}
+
+.modal > div {
+  width: min(940px, 100%);
+  max-width: 900px;
+}
+
+#runSetup,
+#settings,
+#leaderboard,
+#profile {
+  z-index: 45;
+}
+
+.settings-panel,
+.leaderboard-panel,
+.pause-card,
+.modal > .run-panel {
+  padding: 24px;
+  background: var(--panel);
+  border: 3px solid;
+  border-color: var(--bevel-panel);
+  box-shadow: 5px 5px var(--shadow);
+}
+
+.settings-panel,
+.leaderboard-panel {
+  max-height: calc(100dvh - 50px);
+  overflow: auto;
+  text-align: left;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.panel-head {
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.panel-head h2 {
+  margin: 0;
+}
+
+.head-actions {
+  display: flex;
+  flex: none;
+  gap: 10px;
+}
+
+/* ---- run setup ---------------------------------------------------------------------- */
+
+.modal > .run-panel {
+  width: min(100%, 400px);
+  max-height: 92dvh;
+  overflow: auto;
+  padding: 28px;
+  text-align: left;
+}
+
+.run-panel h2 {
+  margin-top: 0;
+}
+
+.run-panel .username {
+  display: block;
+  margin-top: 18px;
+  font-size: 16px;
+  color: var(--mint);
+}
+
+#playerName {
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  font-size: 18px;
+  color: var(--white);
+  background: var(--field);
+  border: 2px solid #747a6b;
+  touch-action: manipulation;
+}
+
+#playerName:focus {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+#playerName[aria-invalid="true"] {
+  border-color: #bc8277;
+}
+
+#runForm details {
+  margin: 10px 0;
+}
+
+#runForm summary {
+  cursor: pointer;
+}
+
+#nameKeyboard {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  margin: 12px 0;
+}
+
+#nameKeyboard button {
+  min-height: 36px;
+  padding: 4px;
+}
+
+/* SPACE and DELETE (built last by input.js) take half a row each. */
+#nameKeyboard button:nth-last-child(-n + 2) {
+  grid-column: span 3;
+}
+
+.practice-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px;
+  line-height: 1.4;
+  background: #1a1e24;
+  border: 2px solid #747a6b;
+  cursor: pointer;
+}
+
+.practice-option:has(input:checked) {
+  background: #262e2a;
+  border-color: var(--mint);
+}
+
+.practice-option input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--mint);
+  cursor: pointer;
+}
+
+.practice-option input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.practice-option span {
+  display: grid;
+  gap: 4px;
+}
+
+.practice-option strong {
+  font-size: 14px;
+  color: var(--white);
+}
+
+.practice-option small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#usernameError {
+  min-height: 20px;
+  margin: 12px 0;
+  font-size: 12px;
+  color: #d8a99a;
+}
+
+.run-panel button {
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 12px;
+}
+
+.run-panel button:last-child {
+  margin-bottom: 0;
+}
+
+/* ---- choice cards ------------------------------------------------------------------- */
+
+#choice > div {
+  width: min(900px, 94vw);
+  max-height: 90dvh;
+  overflow: auto;
+}
+
+#choiceContext {
+  margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--mint);
+}
+
+#choiceContext:empty {
+  display: none;
+}
+
+#cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 15px;
+  margin-top: 28px;
+}
+
+.card {
+  position: relative;
+  min-height: 176px;
+  padding: 20px;
+  text-align: left;
+  background: #2b3036;
+  border: 3px solid;
+  border-color: var(--bevel-card);
+}
+
+.card strong {
+  display: block;
+  font-size: 18px;
+}
+
+.card p {
+  margin: 10px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #c8dcec;
+}
+
+.card .weapon-sprite {
+  margin: 0 auto 16px;
+}
+
+.card-icon {
+  display: block;
+  margin-bottom: 12px;
+  font: 24px "Courier New", monospace;
+  color: #c7b77b;
+}
+
+.card-tag {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--mint);
+}
+
+.card-tag.cursed {
+  color: #cd7767;
+}
+
+/* A card's 24 px icon chip (relic, omen, upgrade, mod, trait), bordered by its rarity (F9). */
+.card-chip {
+  display: inline-block;
+  margin-bottom: 12px;
+  padding: 2px;
+  line-height: 0;
+  background: #151820;
+  border: 2px solid transparent;
+}
+
+.card-chip.rarity-common {
+  border-color: #ded6be;
+}
+
+.card-chip.rarity-rare {
+  border-color: #91cfff;
+}
+
+.card-chip.rarity-cursed {
+  border-color: #cd7767;
+}
+
+/* Number-key hint for the 1–3 shortcuts, styled like the weapon slot numbers. */
+.card-key {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.upgrade-comparison {
+  display: block;
+  margin-top: 10px;
+  padding-top: 10px;
+  line-height: 1.5;
+  color: #eed8a0;
+  border-top: 1px solid #666b68;
+}
+
+/* ---- pause menu --------------------------------------------------------------------- */
+
+.modal > .pause-card {
+  width: min(100%, 480px);
+}
+
+.pause-card h2 {
+  margin-top: 0;
+}
+
+#pauseStats {
+  white-space: pre-line;
+}
+
+.pause-card > .primary {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 18px 0 0;
+}
+
+.pause-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+#abandonTrial {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+}
+
+/* Run-ending actions sit apart, under a rule, so they are never hit by accident. */
+.exit-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+}
+
+.exit-run {
+  min-width: 0;
+  padding: 12px 8px;
+  font-size: 14px;
+  background: #3a2c2a;
+}
+
+#buildSummary {
+  max-height: 24vh;
+  overflow: auto;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.pause-card.confirming > :is(button, .menu-links, .menu-grid, .exit-group, #buildSummary) {
+  display: none;
+}
+
+.pause-confirm {
+  margin-top: 20px;
+}
+
+.pause-confirm p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #e8be91;
+}
+
+.pause-confirm .menu-links {
+  justify-content: center;
+  margin-top: 16px;
+}
+
+/* ---- settings ----------------------------------------------------------------------- */
+
+#settings .settings-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(660px, 100%);
+  height: min(620px, calc(100dvh - 48px));
+  padding: 24px;
+  overflow: hidden;
+}
+
+#settings .panel-head {
+  flex: none;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+/* Stays 28px on phones (only ≤520px shrinks it), unlike the other modal titles. */
+#settings h2 {
+  margin: 0;
+  font-size: 28px;
+}
+
+#settings .panel-head button {
+  padding: 10px 16px;
+}
+
+.settings-tabs {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.settings-tabs button {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 6px;
+  font-size: 14px;
+}
+
+.settings-tabs [aria-selected="true"] {
+  color: var(--gold-selected);
+  background: var(--button-selected);
+  border-bottom-color: var(--yellow);
+}
+
+#settings [role="tabpanel"] {
+  min-height: 0;
+  padding: 0 6px 10px 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.setting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
+  align-items: center;
+  gap: 24px;
+  min-height: 64px;
+  padding: 10px 0;
+  font-size: 16px;
+  line-height: 1.5;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* A row's hint reads as part of it: no rule between them, the rule moves under the hint. */
+#settings .setting-row:has(+ .settings-hint) {
+  min-height: 52px;
+  padding-bottom: 2px;
+  border-bottom: 0;
+}
+
+#settings [role="tabpanel"] > .settings-hint {
+  margin: 0;
+  padding: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  border-bottom: 1px solid var(--rule);
+}
+
+.mute-row input {
+  justify-self: end;
+  width: 22px;
+  height: 22px;
+  accent-color: var(--mint);
+}
+
+.setting-range {
+  position: relative;
+  padding-top: 18px;
+}
+
+.setting-range output {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-size: 14px;
+  color: var(--yellow);
+}
+
+input[type="range"] {
+  width: 100%;
+  min-height: 26px;
+  margin-top: 12px;
+  accent-color: var(--mint);
+  cursor: pointer;
+  touch-action: pan-x;
+}
+
+.setting-range input[type="range"] {
+  height: 24px;
+  margin: 6px 0 0;
+}
+
+#settings input[type="range"] {
+  appearance: none;
+  background: transparent;
+}
+
+#settings input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: #525b4e;
+  border: 1px solid #898a7b;
+}
+
+#settings input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 22px;
+  margin-top: -9px;
+  background: #c6c4a7;
+  border: 2px solid;
+  border-color: #ece7ca #454b40 #454b40 #ece7ca;
+}
+
+#settings input[type="range"]::-moz-range-track {
+  height: 6px;
+  background: #525b4e;
+  border: 1px solid #898a7b;
+}
+
+#settings input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 20px;
+  background: #c6c4a7;
+  border: 2px solid #898a7b;
+  border-radius: 0;
+}
+
+#settings select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px;
+  font-size: 16px;
+  color: var(--white);
+  background: #191e22;
+  border: 2px solid;
+  border-color: var(--bevel-sunken);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+#settings option {
+  color: var(--white);
+  background: var(--panel);
+}
+
+#settings :is(select, input, summary):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.bind-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
+  font-size: 14px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.bind-row button {
+  min-width: 140px;
+  min-height: 40px;
+  padding: 9px 12px;
+  font-size: 14px;
+}
+
+#bindStatus {
+  min-height: 20px;
+  font-size: 14px;
+  color: var(--yellow);
+}
+
+#resetBindings {
+  font-size: 14px;
+}
+
+.controller-help {
+  margin-top: 24px;
+  padding-top: 16px;
+  font-size: 14px;
+  border-top: 1px solid var(--rule);
+}
+
+.controller-help summary {
+  padding: 6px 0;
+  color: var(--yellow);
+  cursor: pointer;
+}
+
+.controller-help dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  line-height: 1.5;
+}
+
+.controller-help dd {
+  margin: 0;
+  color: var(--hint);
+}
+
+/* ---- leaderboard -------------------------------------------------------------------- */
+
+.ranking-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.ranking-tabs button {
+  min-height: 44px;
+}
+
+.ranking-tabs [aria-pressed="true"] {
+  background: #41463d;
+  outline: var(--focus-ring);
+}
+
+#leaderboardStatus,
+#personalStatus {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+#leaderboardStatus {
+  min-height: 2em;
+  color: var(--mint);
+}
+
+.leaderboard-panel details {
+  margin: 14px 0;
+}
+
+.table-scroll {
+  max-height: 50vh;
+  margin: 18px 0;
+  overflow: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+
+th,
+td {
+  padding: 12px 10px;
+  border-bottom: 1px solid #5c6259;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-align: left;
+  color: #c7b77b;
+  background: #252b30;
+}
+
+td {
+  font-size: 14px;
+}
+
+/* Columns: rank · player · score · stage · date. */
+td:first-child {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+th:nth-child(3),
+td:nth-child(3) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+td:nth-child(3) {
+  color: var(--yellow);
+}
+
+#leaderboardRows tr:nth-child(1) td {
+  background: #343027;
+}
+
+#leaderboardRows tr:nth-child(2) td {
+  background: #2b3032;
+}
+
+#leaderboardRows tr:nth-child(3) td {
+  background: #332b28;
+}
+
+/* This device's runs are flagged with a mint edge on the rank cell. */
+tr.own-run > td:first-child {
+  box-shadow: inset 3px 0 0 var(--mint);
+}
+
+.rank-trophy,
+.death-run-mark {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  vertical-align: middle;
+  image-rendering: pixelated;
+}
+
+/* Top-three medals are drawn in CSS (no trophy image assets ship): a disc on a ribbon. */
+.rank-trophy {
+  margin-left: 7px;
+  background:
+    radial-gradient(closest-side, var(--medal-hi) 0 34%, var(--medal) 36% 70%, var(--medal-lo) 72% 94%, transparent 96%)
+      50% 100% / 74% 74% no-repeat,
+    linear-gradient(90deg, transparent 20%, #9b3a34 20% 44%, transparent 44% 56%, #34569b 56% 80%, transparent 80%)
+      50% 0 / 100% 42% no-repeat;
+}
+
+.rank-trophy.gold {
+  --medal: var(--yellow);
+  --medal-hi: #f6e7a8;
+  --medal-lo: #7d6428;
+}
+
+.rank-trophy.silver {
+  --medal: #b9c0c4;
+  --medal-hi: #eef2f2;
+  --medal-lo: #5f676c;
+}
+
+.rank-trophy.bronze {
+  --medal: #c08a5c;
+  --medal-hi: #ecc49a;
+  --medal-lo: #6e4524;
+}
+
+.death-run-mark {
+  margin-left: 6px;
+}
+
+.score-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: normal;
+  color: var(--mint);
+}
+
+/* ---- journal ------------------------------------------------------------------------ */
+
+#journalBody > :first-child {
+  margin-top: 0;
+}
+
+#profileProgress {
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-line;
+}
+
+#profile h3 {
+  margin-top: 24px;
+  font-size: 16px;
+}
+
+#profile details {
+  margin-top: 20px;
+}
+
+#profile summary {
+  padding: 10px 0;
+  font-size: 16px;
+  color: var(--yellow);
+  cursor: pointer;
+}
+
+.cosmetic-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.cosmetic-row [aria-pressed="true"],
+.mastery-row [aria-pressed="true"],
+.extra-cosmetics [aria-pressed="true"] {
+  outline: var(--focus-ring);
+}
+
+.extra-cosmetics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.extra-cosmetics button {
+  flex: 1 1 130px;
+  padding: 12px;
+}
+
+.mastery-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 16px;
+  padding: 16px 0;
+  border-bottom: 1px solid #74776e;
+}
+
+.mastery-row strong {
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.mastery-row p {
+  grid-column: 1;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.mastery-row button {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: center;
+  min-height: 44px;
+  padding: 10px;
+}
+
+#discoveryRows p {
+  padding-bottom: 12px;
+  font-size: 14px;
+  line-height: 1.7;
+  border-bottom: 1px solid #52545c;
+}
+
+#bestiaryRows p {
+  padding: 12px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  border-bottom: 1px solid #52545c;
+}
+
+#bestiaryRows strong,
+#bestiaryRows span {
+  display: block;
+}
+
+/* ---- developer / practice tools ----------------------------------------------------- */
+
+#devTools {
+  position: fixed;
+  left: 8px;
+  bottom: 8px;
+  z-index: 90;
+  width: 240px;
+  padding: 8px;
+  font-size: 12px;
+  background: var(--panel);
+  border: 2px solid #747a6b;
+}
+
+#devTools summary {
+  cursor: pointer;
+}
+
+#devTools button,
+#devTools select {
+  display: block;
+  width: 100%;
+  margin: 4px 0;
+  padding: 6px;
+}
+
+#devTools select {
+  font-size: 12px;
+}
+
+#devTools label {
+  font-size: 12px;
+}
+
+#devTools output,
+#devMetrics {
+  display: block;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* ---- Wave-2 menus: ruleset, title cards, settings and results extras ------------------ */
+
+/* Run setup: the ruleset switch (F1.1) and the assisted note (F18.5). */
+.ruleset-row {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.ruleset-label {
+  font-size: 14px;
+  color: var(--mint);
+}
+
+.ruleset-row button {
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 8px;
+  font-size: 14px;
+}
+
+.ruleset-row [aria-pressed="true"] {
+  color: var(--gold-selected);
+  background: var(--button-selected);
+  border-bottom-color: var(--yellow);
+}
+
+#rulesetHint {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--hint);
+}
+
+#assistNote {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #9fcbff;
+}
+
+/* Stage and keeper title cards (F20.2): above the letterbox, never in the way. */
+#stageCard {
+  position: fixed;
+  top: 20%;
+  left: 50%;
+  z-index: 61;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: min(92vw, 900px);
+  text-align: center;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+#stageCardSmall {
+  font-size: 16px;
+  letter-spacing: 0.12em;
+  color: #9c9a8b;
+  text-shadow: 2px 2px #000;
+}
+
+#stageCardBig {
+  min-height: 1.1em;
+  font-size: clamp(28px, 5vw, 56px);
+  font-weight: normal;
+  line-height: 1.1;
+  color: #d4bc78;
+  text-shadow: 3px 3px #000;
+}
+
+.stage-card-rule {
+  display: block;
+  width: min(60vw, 420px);
+  height: 2px;
+  background: #d4bc78;
+  box-shadow: 2px 2px #000;
+  transform-origin: left center;
+}
+
+#stageCard.revealing .stage-card-rule {
+  animation: card-rule 0.3s steps(6, end);
+}
+
+#stageCard.slam #stageCardBig {
+  animation: card-slam 34ms steps(2, end);
+}
+
+@keyframes card-rule {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes card-slam {
+  from {
+    transform: scale(1.6);
+  }
+}
+
+/* The generic confirm dialog (menus.confirm): above the settings panel it is asked from. */
+#confirmDialog {
+  z-index: 55;
+}
+
+.modal > .confirm-panel {
+  width: min(100%, 440px);
+  padding: 24px;
+  background: var(--panel);
+  border: 3px solid;
+  border-color: var(--bevel-panel);
+  box-shadow: 5px 5px var(--shadow);
+}
+
+.confirm-panel h2 {
+  margin-top: 0;
+  font-size: 22px;
+  color: var(--yellow);
+}
+
+.confirm-panel p {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--white);
+}
+
+.confirm-panel .menu-links {
+  justify-content: center;
+}
+
+/* Settings: group headings and the telegraph palette preview (F17). */
+.settings-group {
+  margin: 26px 0 0;
+  padding-bottom: 6px;
+  font-size: 14px;
+  border-bottom: 2px solid #3d4238;
+  font-weight: normal;
+  letter-spacing: 0.08em;
+  color: var(--yellow);
+}
+
+.settings-group:first-child {
+  margin-top: 4px;
+}
+
+.palette-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.palette-swatch {
+  width: 40px;
+  height: 40px;
+  image-rendering: pixelated;
+  border: 2px solid var(--edge-dark);
+}
+
+/* Leaderboard: the THIS VERSION / THIS RULESET filter (F15). */
+.board-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 8px;
+  font-size: 14px;
+  color: var(--mint);
+  cursor: pointer;
+}
+
+.board-filter input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--mint);
+}
+
+/* Results card lines (F15, F18.5, F19). */
+.menu-card .results-title {
+  margin: -6px 0 12px;
+  font-size: 14px;
+  color: var(--yellow);
+}
+
+.menu-card .assist-line {
+  margin: 4px 0;
+  font-size: 13px;
+  color: #9fcbff;
+}
+
+.menu-card .rank-line {
+  margin: 4px 0;
+  font-size: 14px;
+  color: var(--yellow);
+}
+
+.report-relics .icon-chip {
+  display: inline-block;
+  margin-right: 4px;
+  line-height: 0;
+  vertical-align: middle;
+}
+
+/* ---- motion ------------------------------------------------------------------------- */
+
+@keyframes toast-drop {
+  from {
+    opacity: 0.35;
+    transform: translate(-50%, -15px);
+  }
+}
+
+@keyframes record-blink {
+  50% {
+    color: var(--gold-hover);
+    border-color: var(--gold-hover);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+  }
+}
+
+/* ---- breakpoints -------------------------------------------------------------------- */
+
+@media (pointer: coarse) {
+  body.in-run #touch {
+    display: block;
+  }
+
+  #crosshair,
+  .card-key {
+    display: none !important;
+  }
+}
+
+body.touch-mode .card-key {
+  display: none;
+}
+
+@media (min-width: 701px) {
+  #cards:has(> .card:nth-child(2):last-child) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: 700px;
+    margin-inline: auto;
+  }
+
+  #cards:has(> .card:only-child) {
+    grid-template-columns: 1fr;
+    max-width: 440px;
+    margin-inline: auto;
+  }
+
+  /* Four cards (keeper spoils) sit in a 2 × 2 grid. */
+  #cards:has(> .card:nth-child(4):last-child) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: 700px;
+    margin-inline: auto;
+  }
+}
+
+@media (max-width: 1200px) {
+  #weapons {
+    left: auto;
+    right: 24px;
+    transform: none;
+  }
+
+  .vitals {
+    width: 220px;
+  }
+}
+
+@media (max-width: 700px) {
+  header {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .wordmark {
+    font-size: 12px;
+  }
+
+  .wordmark span {
+    font-size: 8px;
+  }
+
+  .world-state {
+    padding: 6px;
+  }
+
+  .world-state b {
+    font-size: 10px;
+  }
+
+  .world-state span {
+    margin: 4px 2px 0;
+  }
+
+  .actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 90px;
+  }
+
+  .actions button {
+    padding: 6px;
+  }
+
+  .in-run #modeBadge {
+    top: 55px;
+    font-size: 10px;
+  }
+
+  #status {
+    left: 16px;
+    bottom: 98px;
+  }
+
+  .vitals {
+    width: 170px;
+  }
+
+  #weapons {
+    left: 50%;
+    right: auto;
+    bottom: 16px;
+    transform: translateX(-50%);
+  }
+
+  .weapon {
+    width: 58px;
+    height: 62px;
+  }
+
+  .weapon .name {
+    font-size: 8px;
+  }
+
+  #bossHUD {
+    top: 142px;
+  }
+
+  #stageObjective {
+    top: 131px;
+    font-size: 11px;
+  }
+
+  .portal-compass {
+    top: 79px;
+  }
+
+  .tutorial-active #portalCompass {
+    top: 230px;
+  }
+
+  #waveToast {
+    width: 90%;
+  }
+
+  #difficultyMeter {
+    top: 60px;
+    left: 12px;
+    font-size: 10px;
+  }
+
+  #powerupStatus {
+    top: 96px;
+    left: 12px;
+    max-width: 200px;
+    font-size: 10px;
+  }
+
+  #interactPrompt {
+    bottom: 210px;
+    font-size: 10px;
+  }
+
+  #trialStatus {
+    top: 140px;
+    font-size: 12px;
+  }
+
+  #modStatus {
+    bottom: 136px;
+    font-size: 12px;
+  }
+
+  #trackedGoal {
+    top: 76px;
+    right: 8px;
+  }
+
+  #tutorialGuide {
+    top: 72px;
+    padding: 12px;
+  }
+
+  .tutorial-heading {
+    font-size: 14px;
+  }
+
+  #tutorialHint {
+    margin: 8px 0;
+    font-size: 12px;
+  }
+
+  #tutorialWeapon {
+    font-size: 11px;
+  }
+
+  #sequence {
+    padding: 10px;
+  }
+
+  .sequence-caption {
+    padding: 16px 12px;
+  }
+
+  #sequenceText {
+    font-size: 14px;
+  }
+
+  .menu-card .edition {
+    font-size: 12px;
+  }
+
+  .menu-card h1:not(.brand-title) {
+    font-size: 32px;
+  }
+
+  .menu-grid button,
+  .exit-run {
+    font-size: 12px;
+  }
+
+  /* Three pause shortcuts would be cramped at phone width: two columns, JOURNAL spanning. */
+  .pause-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pause-grid #pauseProfile {
+    grid-column: 1 / -1;
+  }
+
+  #runReport {
+    margin: 8px 0;
+  }
+
+  .modal {
+    padding: 12px;
+  }
+
+  .modal h2 {
+    font-size: 24px;
+  }
+
+  .modal .muted {
+    margin: 5px 0;
+  }
+
+  .primary {
+    min-width: 0;
+  }
+
+  .settings-panel,
+  .leaderboard-panel,
+  .pause-card {
+    padding: 16px;
+  }
+
+  .settings-panel,
+  .leaderboard-panel {
+    max-height: calc(100dvh - 24px);
+  }
+
+  .panel-head .secondary {
+    padding: 10px 12px;
+  }
+
+  .run-panel .username {
+    margin-top: 10px;
+  }
+
+  #cards {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  .card {
+    min-height: 0;
+  }
+
+  .card strong {
+    font-size: 16px;
+  }
+
+  .card p {
+    margin: 3px 0;
+  }
+
+  .ranking-tabs button {
+    padding: 10px 6px;
+  }
+
+  .table-scroll {
+    margin: 10px -6px;
+  }
+
+  .leaderboard-panel table {
+    table-layout: fixed;
+    white-space: normal;
+  }
+
+  .leaderboard-panel .table-scroll td {
+    padding: 12px 5px;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+
+  .leaderboard-panel .table-scroll th {
+    padding: 12px 5px;
+  }
+
+  .leaderboard-panel th:nth-child(1) {
+    width: 9%;
+  }
+
+  .leaderboard-panel th:nth-child(2) {
+    width: 30%;
+  }
+
+  .leaderboard-panel th:nth-child(3) {
+    width: 18%;
+  }
+
+  .leaderboard-panel th:nth-child(4) {
+    width: 14%;
+  }
+
+  .leaderboard-panel th:nth-child(5) {
+    width: 29%;
+  }
+
+  .score-meta {
+    font-size: 11px;
+  }
+
+  .rank-trophy,
+  .death-run-mark {
+    width: 20px;
+    height: 20px;
+  }
+
+  .mastery-row {
+    gap: 8px;
+  }
+
+  .mastery-row strong {
+    font-size: 13px;
+  }
+
+  .mastery-row p {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  #buildCue {
+    bottom: 200px;
+    font-size: 11px;
+  }
+
+  body:has(#interactPrompt:not(.hidden)) #buildCue {
+    bottom: 252px;
+  }
+
+  .upgrade-comparison {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 520px) {
+  #settings .settings-panel {
+    height: min(640px, calc(100dvh - 24px));
+    padding: 16px;
+  }
+
+  #settings .panel-head {
+    margin-bottom: 20px;
+  }
+
+  #settings h2 {
+    font-size: 24px;
+  }
+
+  .settings-tabs {
+    gap: 6px;
+  }
+
+  .settings-tabs button {
+    font-size: 12px;
+  }
+
+  .setting-row {
+    grid-template-columns: minmax(0, 1fr) minmax(140px, 1fr);
+    gap: 12px;
+    font-size: 14px;
+  }
+
+  #settings select {
+    font-size: 14px;
+  }
+
+  .bind-row button {
+    min-width: 114px;
+    font-size: 12px;
+  }
+
+  .controller-help dl {
+    font-size: 12px;
+  }
+}
+
+@media (max-height: 520px) {
+  .menu-card .edition {
+    margin-bottom: 18px;
+  }
+
+  .menu-card .primary {
+    padding: 11px;
+  }
+
+  .menu-grid,
+  .menu-card .main-menu {
+    margin-top: 8px;
+  }
+
+  .menu-grid button {
+    min-height: 40px;
+    padding: 9px 8px;
+  }
+}
