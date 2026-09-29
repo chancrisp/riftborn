@@ -23,9 +23,9 @@ for (const entry of fs.readdirSync(path.join(root, 'dist'), { withFileTypes: tru
   if (entry.name === 'server' || entry.name === '.openai') continue;
   fs.cpSync(path.join(root, 'dist', entry.name), path.join(output, entry.name), { recursive: true });
 }
-// The rebuilt game (Riftborn Reborn) ships as a static preview at /next/ beside the live game.
-const next = path.join(root, 'next');
-if (fs.existsSync(next)) fs.cpSync(next, path.join(output, 'next'), { recursive: true });
+// The rebuilt game (Riftborn Reborn) ships as a password-gated test build at /dev/ beside the live game.
+const dev = path.join(root, 'dev');
+if (fs.existsSync(dev)) fs.cpSync(dev, path.join(output, 'dev'), { recursive: true });
 const index = path.join(output, 'index.html');
 let html = fs.readFileSync(index, 'utf8');
 const config = `<script>window.RIFTBORN_SCORE_API_BASE=${JSON.stringify(apiBase)};</script>`;
