@@ -33,6 +33,9 @@ import {retroMaterial,retroCharacter,retroResolution,RetroShader} from '../dist/
 import {WEAPONS,ENEMY_TYPES,DEATH_TYPES,RUN_MODES,enemyPool,movementVector,segmentHit} from '../dist/rules.js';
 import {DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding} from '../dist/preferences.js';
 
+const leaderboardHtml=fs.readFileSync(new URL('../dist/index.html',import.meta.url),'utf8');
+assert.ok(!leaderboardHtml.includes('id="boardunknown"')&&!leaderboardHtml.includes('id="boardVersion"'),'The public leaderboard exposes only Normal and Death mode buttons');
+
 assert.equal(WEAPONS.length,5);assert.equal(Object.keys(ENEMY_TYPES).length,10);
 for(let i=0;i<360;i++){
  const a=i*Math.PI/180,v=movementVector(Math.sin(a),Math.cos(a),.6);
@@ -52,6 +55,7 @@ class Renderer {constructor(){this.shadowMap={};this.info={reset(){}}}setPixelRa
 class Composer {addPass(){}render(){}setSize(){}setPixelRatio(){}}
 const context={EXTRA_SOUNDS,EXTRA_LAYERS,EFFECT_GAPS,ENEMY_VOICES,STEP_SOUNDS,AMBIENT_SOUNDS,recordWeaponKill,recordDiscovery,completeMasteryRun,masteryEntries,trackMastery,cosmeticAvailable,COSMETICS,createLandmark,LANDMARKS,CampaignSequence,EncounterPacing,movementResponse,STAGE_STORIES,updateCutaway,BuildFeedback,WEAPON_FEEDBACK,dangerMarker,disposeMarker,chargePath,ScoreOutbox,compareRun,UPGRADE_INFO,shotStats,applyUpgrade,upgradePreview,modPreview,dashPreview,randomSource,loadProfile,saveProfile,award,recordEnemy,equipCosmetic,rememberRun,BESTIARY,CHALLENGE,NodeCharge,quarryImpact,anchorMultiplier,DashEffects,SkullTrial,TRIAL_NAMES,trialLocations,CombatEffects,createBuild,RewardQueue,MODS,DASH_TRAITS,modOffer,shuffled,BALANCE,GAMEPLAY_VERSION,SimulationClock,PadMenu,T:{...Three,WebGLRenderer:Renderer},EffectComposer:Composer,RenderPass:class{},UnrealBloomPass:class{},OutputPass:class{},WEAPONS,ENEMY_TYPES,DEATH_TYPES,RUN_MODES,enemyPool,movementVector,segmentHit,DEFAULT_BINDINGS,ACTION_LABELS,keyLabel,loadPreferences,assignBinding,document,window:{__RIFTBORN_TEST__:true},navigator:{getGamepads:()=>[]},matchMedia:()=>({matches:false}),devicePixelRatio:1,innerWidth:1280,innerHeight:800,performance,crypto:webcrypto,console:{...console,error(...args){if(args[0]!=='Audio startup failed')console.error(...args)}},setTimeout:()=>0,clearTimeout(){},requestAnimationFrame(){},addEventListener(name,fn){listeners.set(name,fn)},fetch:async()=>({ok:true,json:async()=>({scores:[]})})};
 Object.assign(context,{POWERUPS,DROP_LIFETIME,MAX_DROPS,STATUE_BONUS,rollPowerup,createBoons,collectBoon,tickBoons,absorbDamage,createStatues,createTutorial,tutorialCopy,TUTORIAL_PORTAL,TUTORIAL_GOAL,createStorm,createMusicPlayer,MusicIntensity,renderHeight,fogRange,FramePacer,traceWorld,hitBody,pointAt,createTerrain,buildStageWorld,retroMaterial,retroCharacter,retroResolution,RetroShader,ShaderPass:class{}});
+context.scoreApiUrl=(query='')=>'/api/scores'+(query.startsWith('?')?query:'');
 vm.createContext(context);
 // Keep generated run seeds and gameplay randomness reproducible in this VM.
 vm.runInContext('Math.random=randomSource(7361)',context);
@@ -202,14 +206,17 @@ assert.equal(t.state.mode,'menu','Whitespace usernames cannot start a run');
 assert.ok(nodes.get('#usernameError').textContent);
 nodes.get('#playerName').value='  Ash Runner  ';nodes.get('#runForm').onsubmit({preventDefault(){}});
 assert.equal(t.state.mode,'play');
-const sent=[];context.fetch=async(url,options)=>{if(options?.method==='POST')sent.push(JSON.parse(options.body));return {ok:true,json:async()=>({scores:[{name:'Ash Runner',score:90,stage:3,played_at:Date.UTC(2026,8,26,12)}]})}};
+const sent=[],scoreReads=[];context.fetch=async(url,options)=>{if(options?.method==='POST')sent.push(JSON.parse(options.body));else scoreReads.push(url);return {ok:true,json:async()=>({scores:[{name:'Ash Runner',score:90,stage:3,played_at:Date.UTC(2026,8,26,12),gameplay_version:'campaign-2',death_mode:false}],capabilities:{modeFilter:true}})}};
 t.update(1.2);nodes.get('#playerName').value='Changed later';t.finishRun(false);
 await new Promise(resolve=>setImmediate(resolve));
 assert.equal(sent.at(-1).name,'Ash Runner','Saved name belongs to the run, not a mutable input');
 assert.equal(sent.at(-1).death_mode,false);assert.ok(sent.at(-1).seconds>=1);assert.equal(sent.at(-1).stage,1);assert.ok(Math.abs(sent.at(-1).played_at-Date.now())<2000);
 nodes.get('#start').onclick();assert.equal(nodes.get('#playerName').value,'','Play Again also clears the username');t.closePanel();
 await nodes.get('#refreshLeaderboard').onclick();
+assert.match(scoreReads.at(-1),/\?mode=normal&version=all$/,'The board combines gameplay versions within Normal');
 assert.deepEqual(nodes.get('#leaderboardRows').children.at(-1).children.map(c=>c.textContent),['Ash Runner','90','3',new Date(Date.UTC(2026,8,26,12)).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})]);
+assert.equal(nodes.get('#leaderboardRows').children[0].children[0].children[0].src,'assets/trophy-gold.svg');
+assert.equal(nodes.get('#leaderboardRows').children[0].children[0].children.at(-1).textContent,'VERSION campaign-2');
 console.log('PASS: username required every run, trimmed run identity, score submission and Player/Score/Stage/Date rows.');
 
 vm.runInContext('globalThis.deathTest={setDeathMode,hurtPlayer,audio,get state(){return {menuDeath,runDeath,runTuning}}}',context);
@@ -244,15 +251,17 @@ for(const kind of [...Object.keys(ENEMY_TYPES),...Object.keys(DEATH_TYPES),'ward
 // Inspect the actual note scheduler, with audio output replaced by note capture.
 // A failed score save keeps its original run mode, even after a different menu selection.
 t.start();t.update(1.2);const attempts=[];let failSave=true;
-context.fetch=async(url,options)=>{if(options?.method==='POST'){attempts.push(JSON.parse(options.body));if(failSave)throw new Error('offline')}return {ok:true,json:async()=>({scores:[{name:'Doom',score:200,stage:1,death_mode:true},{name:'Normal',score:100,stage:1,death_mode:false},{name:'Legacy',score:90,stage:null,death_mode:null}]})}};
+context.fetch=async(url,options)=>{if(options?.method==='POST'){attempts.push(JSON.parse(options.body));if(failSave)throw new Error('offline')}return {ok:true,json:async()=>({scores:[{name:'Doom',score:200,stage:1,death_mode:true},{name:'Crypt',score:150,stage:1,death_mode:true},{name:'Ash',score:90,stage:1,death_mode:true},{name:'Old',score:80,stage:1,death_mode:null},{name:'Other',score:70,stage:1,death_mode:false}],capabilities:{modeFilter:true}})}};
 t.finishRun(false);await new Promise(resolve=>setImmediate(resolve));
 assert.equal(attempts[0].death_mode,true);death.setDeathMode(false);t.start(true);failSave=false;
 await nodes.get('#retryScore').onclick();assert.deepEqual(attempts[1],attempts[0],'Retry preserves the complete Death Mode run');
-await nodes.get('#refreshLeaderboard').onclick();const rows=nodes.get('#leaderboardRows').children;
+await nodes.get('#boarddeath').onclick();await nodes.get('#refreshLeaderboard').onclick();const rows=nodes.get('#leaderboardRows').children;
 assert.equal(rows.length,3);assert.ok(rows.every(r=>r.children.length===4));
-assert.equal(rows[0].children[0].children[0].src,'assets/death-skull.png');assert.equal(rows[0].children[0].children[0].alt,'Death Mode');
-assert.ok(rows[1].children[0].children.every(c=>!c.src));assert.ok(rows[2].children[0].children.every(c=>!c.src));
-console.log('PASS: immutable Death Mode score on offline retry, shared skull beside player, no skull on normal/unknown runs.');
+assert.equal(rows[0].children[0].children[0].src,'assets/trophy-gold.svg');
+assert.equal(rows[1].children[0].children[0].src,'assets/trophy-silver.svg');
+assert.equal(rows[2].children[0].children[0].src,'assets/trophy-bronze.svg');
+assert.equal(rows[0].children[0].children[1].src,'assets/death-skull.png');assert.equal(rows[0].children[0].children[1].alt,'Death Mode');
+console.log('PASS: immutable Death Mode score on offline retry, top-three trophy sprites, and Death skull beside player.');
 
 const notes=[];death.audio.music={gain:{value:.7}};death.audio.tone=()=>{};death.audio.ctx={state:'running',currentTime:0,resume(){return Promise.resolve()}};death.audio.score={schedule:(step,time,mode,volume)=>notes.push({step,time,mode,volume,events:scoreEvents(step,mode)})};
 t.setMode('menu');death.setDeathMode(true);t.start();death.audio.tick();const deathNotes=notes.slice(),deathSpacing=death.audio.next/death.audio.step;

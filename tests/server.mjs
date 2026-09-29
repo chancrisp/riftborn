@@ -42,8 +42,9 @@ assert.equal((await post({...run,id:'33333333-3333-4333-8333-333333333333',name:
 assert.equal((await (await get()).json()).scores[0].name,'Ash Runner');
 for(const path of ['/','/game.js','/terrain.js','/scenery.js','/preferences.js','/menus.css','/vendor/three.module.js'])assert.equal((await worker.fetch(new Request('https://game.test'+path),env)).status,200);
 assert.equal((await worker.fetch(new Request('https://game.test/server/index.js'),env)).status,404);
-for(const path of ['/monsters.js','/graphics.js','/assets/death-skull.png','/retro.js','/ballistics.js','/retro.css','/assets/ps1-atlas.png','/assets/weapons.png','/assets/crypt-pixel.ttf']){
+for(const path of ['/monsters.js','/graphics.js','/assets/death-skull.png','/assets/trophy-gold.svg','/assets/trophy-silver.svg','/assets/trophy-bronze.svg','/retro.js','/ballistics.js','/retro.css','/assets/ps1-atlas.png','/assets/weapons.png','/assets/crypt-pixel.ttf']){
  const response=await worker.fetch(new Request('https://game.test'+path),env);assert.equal(response.status,200);
+ if(path.endsWith('.svg'))assert.equal(response.headers.get('Content-Type'),'image/svg+xml','Trophy sprites must have SVG MIME type');
  assert.deepEqual(Buffer.from(await response.arrayBuffer()),fs.readFileSync('dist'+path),'Bundled asset must preserve all bytes: '+path);
 }
 console.log('PASS: D1 schema, score insert/ranking, idempotent retries, invalid payloads, public asset serving.');
@@ -52,7 +53,11 @@ assert.equal((await post(metaRun)).status,200);
 const ranked=async(mode,version)=> (await (await worker.fetch(new Request(`https://game.test/api/scores?mode=${mode}&version=${version}`),env)).json());
 const filtered=await ranked('normal','builds-1');assert.equal(filtered.capabilities?.modeFilter,true,'Backend must explicitly support full mode filtering');assert.equal(filtered.scores.length,1);assert.equal(filtered.scores[0].statue_count,2);assert.equal(filtered.scores[0].outcome,'defeat');
 for(let i=0;i<30;i++)await post({...metaRun,id:`66666666-6666-4666-8666-${String(i).padStart(12,'0')}`,score:5000+i,death_mode:true});
-assert.equal((await ranked('normal','builds-1')).scores.length,1,'Filter before LIMIT despite 30 higher Death scores');assert.equal((await ranked('death','builds-1')).scores.length,25);assert.equal((await ranked('unknown','all')).scores[0].gameplay_version,null,'Legacy version stays unknown');
+assert.equal((await ranked('normal','builds-1')).scores.length,1,'Filter before LIMIT despite 30 higher Death scores');assert.equal((await ranked('death','builds-1')).scores.length,10,'Death board returns only its top 10');assert.equal((await ranked('unknown','all')).scores[0].gameplay_version,null,'Legacy version stays unknown');
+for(let i=0;i<24;i++)await post({...metaRun,id:`77777777-7777-4777-8777-${String(i).padStart(12,'0')}`,score:2000+i,gameplay_version:i%2?'builds-1':'campaign-2'});
+const normalAll=await ranked('normal','all');assert.equal(normalAll.scores.length,20,'Normal board returns only its top 20 across versions');
+assert.ok(normalAll.scores.some(s=>s.gameplay_version==='builds-1')&&normalAll.scores.some(s=>s.gameplay_version==='campaign-2'),'Normal ranking combines versions');
+assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM scores WHERE death_mode=0').get().count,26,'Lower scores remain stored for run history');
 for(const patch of [{statue_count:-1},{statue_modifier:101},{outcome:'fake'},{gameplay_version:'<script>'}])assert.equal((await post({...metaRun,...patch})).status,400);
-assert.ok(sqlite.prepare('EXPLAIN QUERY PLAN SELECT * FROM scores WHERE death_mode=0 AND gameplay_version=? ORDER BY score DESC,wave DESC,seconds DESC LIMIT 25').all('builds-1').some(r=>r.detail.includes('idx_scores_mode_version')));
-console.log('PASS ranking: additive metadata, preserved unknowns, filters before top 25, mode/version index and validation.');
+assert.ok(sqlite.prepare('EXPLAIN QUERY PLAN SELECT * FROM scores WHERE death_mode=0 AND gameplay_version=? ORDER BY score DESC,wave DESC,seconds DESC LIMIT 20').all('builds-1').some(r=>r.detail.includes('idx_scores_mode_version')));
+console.log('PASS ranking: additive metadata, preserved unknowns, mode limits, mode/version index and validation.');

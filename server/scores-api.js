@@ -67,9 +67,10 @@ export async function handleScores(request, env) {
       if (mode === 'unknown') clauses.push('death_mode IS NULL');
       else if (mode !== 'all') { clauses.push('death_mode = ?'); values.push(mode === 'death' ? 1 : 0); }
       if (version !== 'all') { clauses.push('gameplay_version = ?'); values.push(version); }
+      const limit = mode === 'death' ? 10 : mode === 'normal' ? 20 : 25;
       const query = 'SELECT name,score,stage,played_at,kills,wave,seconds,death_mode,statue_count,statue_modifier,outcome,gameplay_version FROM scores' +
         (clauses.length ? ' WHERE ' + clauses.join(' AND ') : '') +
-        ' ORDER BY score DESC, wave DESC, seconds DESC LIMIT 25';
+        ` ORDER BY score DESC, wave DESC, seconds DESC LIMIT ${limit}`;
       const result = await db.prepare(query).bind(...values).all();
       return json({
         scores: result.results.map(row => ({ ...row, death_mode: row.death_mode == null ? null : row.death_mode === 1 })),

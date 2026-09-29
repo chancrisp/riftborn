@@ -40,7 +40,7 @@ const debugLocal=['127.0.0.1','localhost'].includes(window.location?.hostname);
 const debugScenario=debugLocal?new URLSearchParams(window.location.search).get('scenario'):null;
 let storage;try{storage=debugScenario||window.__RIFTBORN_TEST__?null:window.localStorage}catch{}
 let profileSaved=!!storage;
-let profile=loadProfile(storage),newMilestones=[],lastSummary=null,boardMode='normal',boardVersion='current',boardRequest=0;
+let profile=loadProfile(storage),newMilestones=[],lastSummary=null,boardMode='normal',boardRequest=0;
 function realProgress(){return !demoActive&&!tutorial&&!practiceRun&&!debugScenario&&!window.__RIFTBORN_TEST__}
 function persistProfile(){profileSaved=saveProfile(storage,profile);return profileSaved}
 function milestone(key){if(award(profile,key,realProgress())){newMilestones.push(key);persistProfile()}}
@@ -715,27 +715,27 @@ async function saveScores(manual=false){
  }catch{$('#scoreSave').textContent='Score not saved. Retry when connected.';$('#retryScore').classList.remove('hidden')}finally{savingScores=false}
 }
 if(scoreOutbox){window.addEventListener('online',()=>saveScores());setInterval(()=>{if(!document.hidden)saveScores()},15000);saveScores()}
-// LEADERBOARD READ — render names as text and only mark explicitly recorded Death Mode scores.
-function scoreRows(root,rows){
- root.replaceChildren();for(const s of rows){const tr=document.createElement('tr');for(const value of [s.name,Number(s.score).toLocaleString(),Number.isInteger(s.stage)?s.stage:'—',Number.isFinite(s.played_at)?new Date(s.played_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'—']){const td=document.createElement('td');td.textContent=String(value);tr.appendChild(td)}
+// LEADERBOARD READ — rank both modes across all versions; old runs without mode stay stored but off-board.
+function scoreRows(root,rows,trophies=false){
+ root.replaceChildren();for(const [rank,s] of rows.entries()){const tr=document.createElement('tr');for(const value of [s.name,Number(s.score).toLocaleString(),Number.isInteger(s.stage)?s.stage:'—',Number.isFinite(s.played_at)?new Date(s.played_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'—']){const td=document.createElement('td');td.textContent=String(value);tr.appendChild(td)}
+  if(trophies&&rank<3){const medal=['gold','silver','bronze'][rank],trophy=document.createElement('img');trophy.src=`assets/trophy-${medal}.svg`;trophy.alt=`${rank+1}${rank===0?'st':rank===1?'nd':'rd'} place ${medal} trophy`;trophy.title=trophy.alt;trophy.className='rank-trophy';trophy.width=24;trophy.height=24;tr.firstElementChild.appendChild(trophy)}
   if(s.death_mode===true){const skull=document.createElement('img');skull.src='assets/death-skull.png';skull.alt='Death Mode';skull.title='Death Mode run';skull.className='death-run-mark';skull.width=24;skull.height=24;tr.firstElementChild.appendChild(skull)}
-  const meta=document.createElement('small');meta.className='score-meta';meta.textContent=(s.gameplay_version||'Unknown version')+' · '+(s.outcome||'Unknown outcome')+' · Curse '+(Number.isInteger(s.statue_modifier)?s.statue_modifier+'%':'unknown');tr.firstElementChild.appendChild(meta);root.appendChild(tr);
+  const meta=document.createElement('small');meta.className='score-meta';meta.textContent='VERSION '+(s.gameplay_version||'UNRECORDED');tr.firstElementChild.appendChild(meta);root.appendChild(tr);
  }
 }
-function localRanking(){return profile.runs.filter(s=>(boardMode==='unknown'?s.death_mode==null:s.death_mode===(boardMode==='death'))&&(boardVersion==='all'||s.gameplay_version===GAMEPLAY_VERSION)).sort((a,b)=>b.score-a.score||b.wave-a.wave||b.seconds-a.seconds).slice(0,25)}
+function localRanking(){return profile.runs.filter(s=>s.death_mode===(boardMode==='death')).sort((a,b)=>b.score-a.score||b.wave-a.wave||b.seconds-a.seconds).slice(0,boardMode==='death'?10:20)}
 async function loadLeaderboard(){
  const request=++boardRequest;$('#leaderboardRows').replaceChildren();$('#leaderboardStatus').textContent='Loading scores…';
- for(const key of ['normal','death','unknown'])$('#board'+key).setAttribute('aria-pressed',String(key===boardMode));
- scoreRows($('#personalRows'),localRanking());$('#personalStatus').textContent=localRanking().length?'':'No personal results for this filter.';
- try{let r=await fetch(scoreApiUrl('?mode='+boardMode+'&version='+(boardVersion==='all'?'all':GAMEPLAY_VERSION)),{cache:'no-store'});if(!r.ok)throw new Error('Unavailable');let data=await r.json();if(request!==boardRequest)return;if(!Array.isArray(data.scores))throw new Error('Invalid scores');
-  const supported=data.capabilities?.modeFilter===true&&data.capabilities?.versionFilter===true;
-  if(!supported){r=await fetch(scoreApiUrl(),{cache:'no-store'});if(!r.ok)throw new Error('Unavailable');data=await r.json();if(request!==boardRequest)return;if(!Array.isArray(data.scores))throw new Error('Invalid scores')}
-  $('#leaderboardStatus').textContent=supported?(data.scores.length?'Unverified player-reported scores. Versions may not be comparable.':'No scores for this mode/version yet.'):'Legacy combined top 25 · server does not support mode/version filtering. Separated personal results below.';
-  scoreRows($('#leaderboardRows'),data.scores);
+ for(const key of ['normal','death'])$('#board'+key).setAttribute('aria-pressed',String(key===boardMode));
+ const personal=localRanking();scoreRows($('#personalRows'),personal);$('#personalStatus').textContent=personal.length?'':'No personal results for this mode.';
+ try{const r=await fetch(scoreApiUrl('?mode='+boardMode+'&version=all'),{cache:'no-store'});if(!r.ok)throw new Error('Unavailable');const data=await r.json();if(request!==boardRequest)return;if(!Array.isArray(data.scores))throw new Error('Invalid scores');
+  if(data.capabilities?.modeFilter!==true){$('#leaderboardStatus').textContent='Mode rankings unavailable on this server. Personal results below.';return}
+  const limit=boardMode==='death'?10:20,visible=data.scores.filter(s=>s.death_mode===(boardMode==='death')).slice(0,limit);
+  $('#leaderboardStatus').textContent=visible.length?`TOP ${limit} ${boardMode.toUpperCase()} · ALL VERSIONS · PLAYER-REPORTED`:`No ${boardMode} scores yet.`;
+  scoreRows($('#leaderboardRows'),visible,true);
  }catch{if(request===boardRequest)$('#leaderboardStatus').textContent='Remote leaderboard unavailable. Personal results below; Refresh to retry.'}
 }
-for(const key of ['normal','death','unknown'])$('#board'+key).onclick=()=>{boardMode=key;loadLeaderboard()};
-$('#boardVersion').onchange=e=>{boardVersion=e.target.value;loadLeaderboard()};
+for(const key of ['normal','death'])$('#board'+key).onclick=()=>{boardMode=key;loadLeaderboard()};
 
 // PROFILE & RUN FEEDBACK — safe local records, never permanent gameplay stats.
 function captureSummary(defeated){lastSummary={comparisons:realProgress()?compareRun({id:runId,score,stage,seconds:Math.floor(elapsed),outcome:victory?'victory':defeated?'defeat':'ended',death_mode:runDeath,gameplay_version:GAMEPLAY_VERSION},profile.runs,profile.scoreBests):[],outcome:victory?'VICTORY':defeated?'DEFEATED':'RUN ENDED',stage,seconds:elapsed,build:buildText(),damage:[...runDamage],statues:statueCount,trials:trialCount,modifier:100+difficultyBonus,cause:victory?'Rift Warden defeated':defeated?(BESTIARY[lethalSource]?.[0]||lethalSource||'Unknown source'):'Voluntary end',mastery:masteryEntries(profile).filter(e=>e.complete&&!initialMastery.has(e.id)).map(e=>e.title),earned:[...newMilestones]};if(realProgress())persistProfile()}
