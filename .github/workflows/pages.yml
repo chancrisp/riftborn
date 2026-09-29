@@ -26,7 +26,7 @@ jobs:
       - run: npm ci
       - run: npm run build:pages
         env:
-          RIFTBORN_SCORE_API_BASE: ${{ vars.RIFTBORN_SCORE_API_BASE }}
+          RIFTBORN_SCORE_API_BASE: ${{ vars.RIFTBORN_SCORE_API_BASE || 'https://riftborn-leaderboard.chanmanc10.workers.dev' }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

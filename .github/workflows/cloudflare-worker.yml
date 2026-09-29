@@ -1,6 +1,15 @@
 name: Deploy Riftborn leaderboard Worker
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cloudflare-worker.yml'
+      - 'cloudflare/**'
+      - 'server/scores-api.js'
+      - 'scripts/cloudflare-worker-upload.mjs'
+      - 'package.json'
+      - 'package-lock.json'
   workflow_dispatch:
 
 permissions:
@@ -15,21 +24,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Check deployment settings
+          cache: npm
+      - run: npm ci
+      - name: Deploy Worker through the Cloudflare Script Upload API
         env:
-          RIFTBORN_SITE_ORIGIN: ${{ vars.RIFTBORN_SITE_ORIGIN }}
-        run: |
-          if [ -z "$RIFTBORN_SITE_ORIGIN" ]; then
-            echo "Set the repository variable RIFTBORN_SITE_ORIGIN first." >&2
-            exit 1
-          fi
-      - name: Materialize D1 binding
-        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
-        run: node scripts/materialize-wrangler.mjs
-      - uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4.143.0"
-          command: deploy --config cloudflare/.wrangler.deployment.jsonc --var ALLOWED_ORIGINS:${{ vars.RIFTBORN_SITE_ORIGIN }}
+          RIFTBORN_SITE_ORIGIN: ${{ vars.RIFTBORN_SITE_ORIGIN }}
+        run: node scripts/cloudflare-worker-upload.mjs

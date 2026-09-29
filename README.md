@@ -70,7 +70,7 @@ Nightmare now has heavier rain, a much shorter fog falloff, a dark sky, and a st
 
 ### GitHub Pages and Cloudflare transition
 
-The current ChatGPT Site remains live while a separate GitHub Pages + Cloudflare Worker/D1 deployment is prepared. See [the full deployment guide](docs/GITHUB-CLOUDFLARE-DEPLOYMENT.md) for repository variables, the Worker token, migration/deploy order, historical-score limits and rollback. `npm run build:pages` creates a curated `_site/` static package; the existing `npm run build` still produces the Sites Worker package. Pages and Worker deploy workflows are separate, and production D1 migrations require manually running their dedicated workflow.
+The current ChatGPT Site remains live while the GitHub Pages + Cloudflare Worker/D1 transition is completed. See [the full deployment guide](docs/GITHUB-CLOUDFLARE-DEPLOYMENT.md) for setup, migration order, score import and rollback. `npm run build:pages` creates a curated `_site/` static package; the existing `npm run build` still produces the Sites Worker package. Worker deployment uses Cloudflare's Script Upload API because Wrangler currently reports the visible D1 database as missing during binding validation. Wrangler migrations also fail against this account, so apply the checked-in SQL in D1 Studio until [Cloudflare fixes issue #15144](https://github.com/cloudflare/workers-sdk/issues/15144).
 
 Dash has two charges. Each spent charge refills in sequence over 1.8 seconds of active play; the two white foot markers show available charges and refill progress. A small overhead health bar shows current HP and shifts from green through yellow and orange to red as health falls. Graphics has a saved **Player indicators opacity** slider (0–100%) for both cues.
 
