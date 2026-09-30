@@ -71,15 +71,16 @@ function auditOutput(dir, { noindex = false } = {}) {
 const cspOf = dir => matchHeaders(parseHeaders(fs.readFileSync(path.join(dir, '_headers'), 'utf8')), '/').get('content-security-policy').value;
 
 // ---- the committed switch --------------------------------------------------------------------
-assert.equal(LAUNCHED, false, 'LAUNCHED stays false until the launch commit');
+assert.equal(LAUNCHED, true, 'LAUNCHED since the 2.2 launch (2026-09-30)');
 assert.throws(() => resolveSiteConfig({ CI: 'true', RIFTBORN_FORCE_LAUNCHED: '1' }), /not allowed in CI/, 'Overrides are refused in CI');
 assert.throws(() => resolveSiteConfig({ RIFTBORN_TEST_LIVE_ORIGIN: 'http://localhost:1/x' }), /exact/);
-assert.equal(resolveSiteConfig({}).launched, false);
+assert.equal(resolveSiteConfig({}).launched, true);
+assert.equal(resolveSiteConfig({ RIFTBORN_FORCE_LAUNCHED: '0' }).launched, false, 'A local test can still build the pre-launch outputs');
 assert.equal(resolveSiteConfig({ RIFTBORN_FORCE_LAUNCHED: '1' }).launchedForReal, false, 'A forced local build is not a real launch');
-console.log('PASS site config: LAUNCHED is a committed false, test overrides refused in CI.');
+console.log('PASS site config: LAUNCHED is committed true since the 2.2 launch, test overrides refused in CI.');
 
 // ---- before launch -------------------------------------------------------------------------------
-const pre = build('pre');
+const pre = build('pre', { RIFTBORN_FORCE_LAUNCHED: '0' });
 {
   const live = path.join(pre, '_cf', 'live');
   assert.deepEqual(walk(live), ['404.html', '_headers', 'assets/crypt-pixel.ttf', 'index.html', 'privacy/index.html'],
@@ -159,7 +160,7 @@ console.log('PASS launched: riftborn.us = game + classic + privacy with strict C
   assert.equal(dry.status, 0, dry.stderr);
   assert.match(dry.stdout, /pages project create riftborn --production-branch main/);
   const outputs = spawnSync(process.execPath, ['scripts/site-config.mjs'], { encoding: 'utf8' }).stdout;
-  assert.equal(outputs, 'launched=false\nlive_project=riftborn\ndev_project=riftborn-dev\n');
+  assert.equal(outputs, 'launched=true\nlive_project=riftborn\ndev_project=riftborn-dev\n');
 
   // Wrangler holds the production token: exact-pinned by a lockfile, never fetched at deploy time,
   // run without a shell and with only the environment it needs.

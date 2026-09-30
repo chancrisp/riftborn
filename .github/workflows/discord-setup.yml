@@ -1,0 +1,93 @@
+name: Discord server setup
+
+# Builds the Riftborn Discord server with RiftBot (scripts/discord-setup.mjs). Idempotent: a re-run
+# only fills in what is missing or has drifted, and never posts twice. One step per phase so each
+# phase's pass/fail shows on its own; every outcome is also a job annotation (::notice / ::error).
+# Discord needs Community before announcement and forum channels exist, so the channels phase runs
+# twice: before Community (everything else) and after it (the announcement and forum channels).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/discord-setup.yml'
+      - 'scripts/discord-setup.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discord-setup
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    # Only main's copy of the script ever runs with the bot token.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The bot token is given only to the steps that run the setup script, never to checkout or
+    # setup-node.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Discover guild
+        id: discover
+        run: node scripts/discord-setup.mjs discover
+        env:
+          DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
+      - name: Roles
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        run: node scripts/discord-setup.mjs roles
+        env:
+          DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
+      - name: Categories and channels
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        run: node scripts/discord-setup.mjs channels
+        env:
+          DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
+      - name: Community
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        run: node scripts/discord-setup.mjs community
+        env:
+          DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
+      - name: News and forum channels
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        run: node scripts/discord-setup.mjs news-forums
+        env:
+          DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
+      - name: Onboarding
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        run: node scripts/discord-setup.mjs onboarding
+        env:
+          DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
+      - name: AutoMod
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        run: node scripts/discord-setup.mjs automod
+        env:
+          DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
+      - name: Server settings and icon
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        run: node scripts/discord-setup.mjs settings
+        env:
+          DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
+      - name: Posts
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        run: node scripts/discord-setup.mjs posts
+        env:
+          DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
+      - name: Bot profile
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        run: node scripts/discord-setup.mjs profile
+        env:
+          DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
+      - name: Invite link
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        run: node scripts/discord-setup.mjs invite
+        env:
+          DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
