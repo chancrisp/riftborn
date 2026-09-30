@@ -1,0 +1,77 @@
+# One-off: attach api.riftborn.us to the riftborn-leaderboard Worker.
+# Runs when this file is pushed (or by hand). Tries a Workers custom domain first; if the token
+# can't do that, falls back to a proxied DNS record + a Worker route. The outcome (Cloudflare's
+# error codes/messages only, never the token) is committed to the ops-log branch for the lead.
+name: Cloudflare domain setup
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/cloudflare-domain-setup.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    environment: cloudflare-production
+    steps:
+      - name: Attach api.riftborn.us
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          cat > setup.mjs <<'EOF'
+          import { writeFileSync } from 'node:fs';
+          const HOST = 'api.riftborn.us', ZONE = 'riftborn.us', SERVICE = 'riftborn-leaderboard';
+          const acct = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const log = [];
+          const api = async (method, path, body) => {
+            const r = await fetch('https://api.cloudflare.com/client/v4' + path, {
+              method,
+              headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
+              body: body ? JSON.stringify(body) : undefined,
+            });
+            const j = await r.json().catch(() => ({}));
+            const entry = { step: `${method} ${path.replace(acct, '<account>')}`, status: r.status, success: !!j.success,
+              errors: (j.errors || []).map((e) => ({ code: e.code, message: e.message })) };
+            log.push(entry);
+            return { ...entry, result: j.result };
+          };
+          let outcome = 'failed';
+          try {
+            if (!acct) throw new Error('CLOUDFLARE_ACCOUNT_ID variable missing');
+            const z = await api('GET', `/zones?name=${ZONE}`);
+            const zone = (z.result || [])[0];
+            log.push({ zone: zone ? { status: zone.status, sameAccount: zone.account?.id === acct } : null });
+            if (!zone) throw new Error('zone not visible to the token');
+            const d = await api('PUT', `/accounts/${acct}/workers/domains`, { environment: 'production', hostname: HOST, service: SERVICE, zone_id: zone.id });
+            if (d.success) outcome = 'custom-domain';
+            else {
+              const rec = await api('POST', `/zones/${zone.id}/dns_records`, { type: 'AAAA', name: 'api', content: '100::', proxied: true, comment: 'Riftborn API (Worker route)' });
+              const recOk = rec.success || rec.errors.some((e) => e.code === 81057 || e.code === 81058);
+              const route = await api('POST', `/zones/${zone.id}/workers/routes`, { pattern: `${HOST}/*`, script: SERVICE });
+              const routeOk = route.success || route.errors.some((e) => e.code === 10020);
+              if (recOk && routeOk) outcome = 'dns-and-route';
+            }
+          } catch (e) {
+            log.push({ error: String(e.message || e) });
+          }
+          writeFileSync('result.json', JSON.stringify({ outcome, at: new Date().toISOString(), log }, null, 2));
+          console.log(JSON.stringify({ outcome, log }, null, 2));
+          EOF
+          node setup.mjs
+      - name: Record the outcome on the ops-log branch
+        if: always()
+        run: |
+          [ -f result.json ] || echo '{"outcome":"no-result"}' > result.json
+          mv result.json /tmp/result.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin ops-log 2>/dev/null && git checkout -B ops-log origin/ops-log || git checkout --orphan ops-log
+          git rm -rq --cached . 2>/dev/null || true
+          mkdir -p ops && cp /tmp/result.json ops/cloudflare-domain-setup.json
+          git add ops/cloudflare-domain-setup.json
+          git commit -qm "ops: cloudflare domain setup result" && git push -q origin ops-log
