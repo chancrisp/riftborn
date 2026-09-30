@@ -1,5 +1,6 @@
 # One-off: connect riftborn.us and dev.riftborn.us to the Cloudflare Pages projects.
-# Each action is its own step so pass/fail is visible without logs. Removed after it runs.
+# Writes Cloudflare's responses (status codes and error messages only, never the token) to
+# ops/pages-domains.json on the ops-log branch so the lead can read the outcome. Removed after use.
 name: Cloudflare Pages domains
 
 on:
@@ -9,53 +10,72 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   domains:
     runs-on: ubuntu-latest
     environment: cloudflare-production
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
     steps:
-      - name: Write helper
+      - name: Connect domains
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          cat > cf.mjs <<'EOF'
+          cat > run.mjs <<'EOF'
+          import { writeFileSync } from 'node:fs';
           const acct = process.env.CLOUDFLARE_ACCOUNT_ID;
-          export const api = async (method, path, body) => {
+          const log = [];
+          const api = async (method, path, body) => {
             const r = await fetch('https://api.cloudflare.com/client/v4' + path, { method,
               headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
               body: body ? JSON.stringify(body) : undefined });
             const j = await r.json().catch(() => ({}));
-            console.log(method, path.replace(acct, '<account>'), r.status, j.success, JSON.stringify((j.errors || []).map((e) => [e.code, e.message])));
+            log.push({ call: `${method} ${path.replace(acct, '<account>')}`, status: r.status, success: !!j.success,
+              errors: (j.errors || []).map((e) => [e.code, e.message]) });
             return j;
           };
-          export const zoneId = async () => (await api('GET', '/zones?name=riftborn.us')).result?.[0]?.id;
-          export const addDomain = async (project, name) => {
-            const j = await api('POST', `/accounts/${acct}/pages/projects/${project}/domains`, { name });
-            const ok = j.success || (j.errors || []).some((e) => /already/i.test(e.message || ''));
-            if (!ok) process.exit(1);
-          };
-          export const cname = async (name, target) => {
-            const zone = await zoneId(); if (!zone) process.exit(1);
-            const existing = await api('GET', `/zones/${zone}/dns_records?name=${name}`);
-            const recs = existing.result || [];
-            if (recs.some((r) => r.type === 'CNAME' && r.content === target)) return;
-            if (recs.length) { console.log('conflicting records exist:', recs.map((r) => r.type).join(',')); process.exit(1); }
-            const j = await api('POST', `/zones/${zone}/dns_records`, { type: 'CNAME', name, content: target, proxied: true, comment: 'Riftborn Cloudflare Pages' });
-            if (!j.success) process.exit(1);
-          };
+          try {
+            const projects = await api('GET', `/accounts/${acct}/pages/projects`);
+            log.push({ projects: (projects.result || []).map((p) => ({ name: p.name, subdomain: p.subdomain, domains: p.domains })) });
+            for (const [project, name] of [['riftborn', 'riftborn.us'], ['riftborn-dev', 'dev.riftborn.us']]) {
+              await api('POST', `/accounts/${acct}/pages/projects/${project}/domains`, { name });
+            }
+            const zone = (await api('GET', '/zones?name=riftborn.us')).result?.[0];
+            if (zone) {
+              const recs = await api('GET', `/zones/${zone.id}/dns_records?per_page=100`);
+              log.push({ dns: (recs.result || []).map((r) => ({ type: r.type, name: r.name, content: r.content, proxied: r.proxied })) });
+              for (const [name, target] of [['riftborn.us', 'riftborn.pages.dev'], ['dev.riftborn.us', 'riftborn-dev.pages.dev']]) {
+                const have = (recs.result || []).filter((r) => r.name === name);
+                if (have.some((r) => r.type === 'CNAME' && r.content === target)) { log.push({ dnsOk: name }); continue; }
+                if (have.length) { log.push({ dnsConflict: name }); continue; }
+                await api('POST', `/zones/${zone.id}/dns_records`, { type: 'CNAME', name, content: target, proxied: true, comment: 'Riftborn Cloudflare Pages' });
+              }
+            }
+            for (const project of ['riftborn', 'riftborn-dev']) {
+              const d = await api('GET', `/accounts/${acct}/pages/projects/${project}/domains`);
+              log.push({ domainStatus: project, domains: (d.result || []).map((x) => ({ name: x.name, status: x.status, verification: x.verification_data?.status, validation: x.validation_data?.status, error: x.verification_data?.error_message || x.validation_data?.error_message })) });
+            }
+          } catch (e) { log.push({ error: String(e.message || e) }); }
+          writeFileSync('result.json', JSON.stringify({ at: new Date().toISOString(), log }, null, 2));
           EOF
-      - name: Pages domain riftborn.us
+          node run.mjs
+      - name: Publish the result to the ops-log branch
         if: always()
-        run: node --input-type=module -e "import { addDomain } from './cf.mjs'; await addDomain('riftborn', 'riftborn.us');"
-      - name: Pages domain dev.riftborn.us
-        if: always()
-        run: node --input-type=module -e "import { addDomain } from './cf.mjs'; await addDomain('riftborn-dev', 'dev.riftborn.us');"
-      - name: DNS riftborn.us
-        if: always()
-        run: node --input-type=module -e "import { cname } from './cf.mjs'; await cname('riftborn.us', 'riftborn.pages.dev');"
-      - name: DNS dev.riftborn.us
-        if: always()
-        run: node --input-type=module -e "import { cname } from './cf.mjs'; await cname('dev.riftborn.us', 'riftborn-dev.pages.dev');"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          MAIN_SHA: ${{ github.sha }}
+        run: |
+          [ -f result.json ] || echo '{"error":"no result"}' > result.json
+          node --input-type=module -e "
+          import { readFileSync } from 'node:fs';
+          const h = { Authorization: 'Bearer ' + process.env.GH_TOKEN, Accept: 'application/vnd.github+json', 'User-Agent': 'ops' };
+          const base = 'https://api.github.com/repos/' + process.env.REPO;
+          let ref = await fetch(base + '/git/ref/heads/ops-log', { headers: h });
+          if (ref.status === 404) await fetch(base + '/git/refs', { method: 'POST', headers: h, body: JSON.stringify({ ref: 'refs/heads/ops-log', sha: process.env.MAIN_SHA }) });
+          const cur = await fetch(base + '/contents/ops/pages-domains.json?ref=ops-log', { headers: h });
+          const sha = cur.ok ? (await cur.json()).sha : undefined;
+          const put = await fetch(base + '/contents/ops/pages-domains.json', { method: 'PUT', headers: h, body: JSON.stringify({ message: 'ops: pages domains result', branch: 'ops-log', content: Buffer.from(readFileSync('result.json')).toString('base64'), sha }) });
+          console.log('publish', put.status);
+          "
