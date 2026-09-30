@@ -4,10 +4,12 @@
   "main": "worker.js",
   "compatibility_date": "2026-09-28",
   "workers_dev": true,
+  "routes": [{ "pattern": "api.riftborn.us", "custom_domain": true }],
   "observability": { "enabled": true },
   "vars": {
     "ENVIRONMENT": "production",
-    "ALLOWED_ORIGINS": "https://SET-GITHUB-PAGES-ORIGIN"
+    "ALLOWED_ORIGINS": "https://riftborn.us,https://dev.riftborn.us,https://chancrisp.github.io",
+    "AUTH_PUBLIC_BASE": "https://api.riftborn.us"
   },
   "d1_databases": [
     {
@@ -27,6 +29,11 @@
       "name": "FEEDBACK_RATE_LIMITER",
       "namespace_id": "7451062",
       "simple": { "limit": 3, "period": 60 }
+    },
+    {
+      "name": "ACCOUNTS_RATE_LIMITER",
+      "namespace_id": "6184035",
+      "simple": { "limit": 30, "period": 60 }
     }
   ]
 }

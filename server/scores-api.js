@@ -1,5 +1,14 @@
 // Cross-origin score API shared by the current Sites Worker and the standalone
 // Cloudflare Worker used by the GitHub Pages edition.
+// Riftborn accounts (v2.2): the Cloudflare Worker passes server/accounts-api.js's scoreAccounts
+// hooks as handleScores' third argument (this file is also concatenated into the Sites build, so
+// it imports nothing). With them, a signed-in POST stores account_id and the account's username,
+// guests cannot post under an account's username (or a name that renders like it: guest names are
+// NFKC-normalised, invisible characters are refused, and the hook compares look-alike skeletons),
+// and GET joins current usernames at read time. Without them (the Sites Worker) everything behaves
+// exactly as before.
+const CORS_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
+const CORS_HEADERS = 'Content-Type, Authorization';
 const json = (value, status = 200, origin = null) => {
   const headers = {
     'Content-Type': 'application/json',
@@ -9,8 +18,8 @@ const json = (value, status = 200, origin = null) => {
   };
   if (origin) {
     headers['Access-Control-Allow-Origin'] = origin;
-    headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
-    headers['Access-Control-Allow-Headers'] = 'Content-Type';
+    headers['Access-Control-Allow-Methods'] = CORS_METHODS;
+    headers['Access-Control-Allow-Headers'] = CORS_HEADERS;
   }
   return new Response(JSON.stringify(value), { status, headers });
 };
@@ -24,12 +33,13 @@ const database = env => {
 // runs' ranking score). They are added lazily: the production database was created by hand and
 // Wrangler migrations cannot reach it. Checked once per isolate and DB binding; a column whose
 // check or ALTER fails is simply left out (re-checked after a cooldown), so scores keep working
-// exactly as before without it.
-const LATE_COLUMNS = Object.freeze({ game_version: 'TEXT', rift_score: 'INTEGER' });
+// exactly as before without it. account_id (v2.2) links a run to a Riftborn account; it is set
+// only server-side from a signed-in session, never from the payload, and is never returned.
+const LATE_COLUMNS = Object.freeze({ game_version: 'TEXT', rift_score: 'INTEGER', account_id: 'TEXT' });
 const LATE_RETRY_MS = 300000;
 const lateColumnCache = new WeakMap();
 // -> Promise<string[]> of the late columns the scores table has (LATE_COLUMNS order). Never rejects.
-function lateColumns(db) {
+export function lateColumns(db) {
   const cached = lateColumnCache.get(db);
   if (cached && !(cached.failedAt && Date.now() - cached.failedAt > LATE_RETRY_MS)) return cached.ready;
   const entry = { failedAt: 0, ready: null };
@@ -52,6 +62,11 @@ function lateColumns(db) {
       }
       ready.push(name);
     }
+    if (ready.includes('account_id')) {
+      try { await db.prepare('CREATE INDEX IF NOT EXISTS idx_scores_account ON scores (account_id)').run(); } catch (error) {
+        console.error('Score account index unavailable', error); // lookups still work, just slower
+      }
+    }
     return ready;
   })().catch(error => {
     console.error('Score columns unavailable', error);
@@ -70,6 +85,10 @@ function lateColumnLost(db, error) {
   lateColumnCache.set(db, { failedAt: Date.now(), ready: Promise.resolve([]) });
 }
 const RIFT_SCORE_MAX = 1e10;
+// Characters a guest name may not contain once accounts are on: controls, format characters (zero
+// width spaces and joiners, word joiners, bidi controls, tags), private-use, unassigned and lone
+// surrogate code points, line/paragraph separators, and letters that render as blank space.
+export const GUEST_NAME_INVISIBLE = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u115F\u1160\u3164\uFFA0\u2800]/u;
 const isKeepers = version => typeof version === 'string' && version.startsWith('keepers-');
 
 function originAllowed(origin, env) {
@@ -83,7 +102,7 @@ function originAllowed(origin, env) {
     .includes(origin);
 }
 
-export async function handleScores(request, env) {
+export async function handleScores(request, env, accounts = null) {
   const url = new URL(request.url);
   if (url.pathname !== '/api/scores') return null;
 
@@ -96,8 +115,8 @@ export async function handleScores(request, env) {
       status: 204,
       headers: {
         'Access-Control-Allow-Origin': origin,
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': CORS_METHODS,
+        'Access-Control-Allow-Headers': CORS_HEADERS,
         'Access-Control-Max-Age': '86400',
         'Cache-Control': 'no-store',
         Vary: 'Origin'
@@ -125,20 +144,33 @@ export async function handleScores(request, env) {
       if (ruleset === 'keepers') clauses.push("gameplay_version LIKE 'keepers-%'");
       else if (ruleset === 'original') clauses.push("(gameplay_version IS NULL OR gameplay_version NOT LIKE 'keepers-%')");
       const limit = ruleset === 'keepers' ? (mode === 'all' ? 25 : 20) : mode === 'death' ? 10 : mode === 'normal' ? 20 : 25;
-      const query = (late, order) => 'SELECT name,score,stage,played_at,kills,wave,seconds,death_mode,statue_count,statue_modifier,outcome,gameplay_version' +
-        late.map(name => ',' + name).join('') + ' FROM scores' +
+      // joined: account rows show the account's current username (a rename reaches old rows) and
+      // verified marks rows that belong to a Riftborn account. account_id itself is never returned.
+      const query = (late, order, joined = false) => 'SELECT ' + (joined ? 'COALESCE(a.username, s.name) AS name' : 's.name AS name') +
+        ',s.score,s.stage,s.played_at,s.kills,s.wave,s.seconds,s.death_mode,s.statue_count,s.statue_modifier,s.outcome,s.gameplay_version' +
+        late.map(name => ',s.' + name).join('') + (joined ? ',(a.id IS NOT NULL) AS verified' : '') + ' FROM scores s' +
+        (joined ? ' LEFT JOIN accounts a ON a.id = s.account_id' : '') +
         (clauses.length ? ' WHERE ' + clauses.join(' AND ') : '') +
         ` ORDER BY ${order} LIMIT ${limit}`;
       const byScore = 'score DESC, wave DESC, seconds DESC';
       const late = await lateColumns(db);
+      const shown = late.filter(name => name !== 'account_id');
       let result = null;
       if (late.length) {
-        const order = ruleset === 'keepers' && late.includes('rift_score') ? 'rift_score DESC, stage DESC, seconds ASC' : byScore;
-        try { result = await db.prepare(query(late, order)).bind(...values).all(); } catch (error) { lateColumnLost(db, error); }
+        const order = ruleset === 'keepers' && shown.includes('rift_score') ? 'rift_score DESC, stage DESC, seconds ASC' : byScore;
+        if (accounts && late.includes('account_id') && await accounts.ready(env)) {
+          try { result = await db.prepare(query(shown, order, true)).bind(...values).all(); } catch (error) {
+            // No accounts table after all: read without the join. Late-column errors as before.
+            if (!/no such table: accounts/i.test(String(error?.message || error))) lateColumnLost(db, error);
+          }
+        }
+        if (!result) {
+          try { result = await db.prepare(query(shown, order)).bind(...values).all(); } catch (error) { lateColumnLost(db, error); }
+        }
       }
       result ||= await db.prepare(query([], byScore)).bind(...values).all();
       return json({
-        scores: result.results.map(row => ({ ...row, death_mode: row.death_mode == null ? null : row.death_mode === 1, game_version: row.game_version ?? null, rift_score: row.rift_score ?? null })),
+        scores: result.results.map(({ verified, ...row }) => ({ ...row, death_mode: row.death_mode == null ? null : row.death_mode === 1, game_version: row.game_version ?? null, rift_score: row.rift_score ?? null, verified: verified === 1 || verified === true })),
         capabilities: { modeFilter: true, versionFilter: true, runMetadata: true, rulesetFilter: true },
         ranking: { mode, version, ruleset: ruleset || 'all' },
         verified: false
@@ -158,7 +190,12 @@ export async function handleScores(request, env) {
     let p;
     try { p = JSON.parse(text); } catch { return json({ error: 'Invalid JSON' }, 400, origin); }
     const integer = (value, max) => Number.isInteger(value) && value >= 0 && value <= max;
-    if (!p || typeof p.id !== 'string' || !(/^[0-9a-f-]{36}$/i).test(p.id) || typeof p.name !== 'string' || !p.name.trim() || p.name.trim().length > 16 ||
+    // A signed-in run is posted under the account's username; the client-sent name is ignored.
+    const account = accounts && p && typeof p === 'object' ? await accounts.session(request, env) : null;
+    if (account && account.unavailable) return json({ error: 'Leaderboard temporarily unavailable' }, 503, origin);
+    // Guest names: trimmed; with accounts on, in NFKC form first (fullwidth and styled letters folded).
+    const guestName = account || !p || typeof p !== 'object' || typeof p.name !== 'string' ? null : (accounts ? p.name.normalize('NFKC') : p.name).trim();
+    if (!p || typeof p.id !== 'string' || !(/^[0-9a-f-]{36}$/i).test(p.id) || (!account && (!guestName || guestName.length > 16)) ||
       !integer(p.score, 100000000) || !integer(p.kills, 1000000) || !integer(p.seconds, 86400) || p.seconds < 1 || !integer(p.wave, 2881) || p.wave !== 1 + Math.floor(p.seconds / 30)) {
       return json({ error: 'Invalid run' }, 400, origin);
     }
@@ -175,12 +212,18 @@ export async function handleScores(request, env) {
     // Rift Score belongs to KEEPERS runs only.
     if (p.rift_score !== undefined && (!isKeepers(p.gameplay_version) || !integer(p.rift_score, RIFT_SCORE_MAX))) return json({ error: 'Invalid rift score' }, 400, origin);
 
+    if (!account && accounts && GUEST_NAME_INVISIBLE.test(guestName)) return json({ error: 'invalid_name' }, 400, origin);
+    const name = account ? account.username : guestName;
+    // Name protection: a guest cannot post under a Riftborn account's username, in any letter case
+    // or in look-alike characters (accounts.owns compares skeletons).
+    if (!account && accounts && await accounts.owns(env, name)) return json({ error: 'name_taken' }, 409, origin);
+
     const now = Date.now();
     const insert = late => db.prepare('INSERT INTO scores (id,name,score,kills,wave,seconds,created_at,stage,played_at,death_mode,statue_count,statue_modifier,outcome,gameplay_version' +
       late.map(name => ',' + name).join('') + ') VALUES (' + Array(14 + late.length).fill('?').join(',') + ') ON CONFLICT(id) DO NOTHING')
-      .bind(p.id, p.name.trim(), p.score, p.kills, p.wave, p.seconds, now, p.stage ?? null, p.played_at ?? now,
+      .bind(p.id, name, p.score, p.kills, p.wave, p.seconds, now, p.stage ?? null, p.played_at ?? now,
         p.death_mode === undefined ? null : Number(p.death_mode), p.statue_count ?? null, p.statue_modifier ?? null,
-        p.outcome ?? null, p.gameplay_version ?? null, ...late.map(name => p[name] ?? null)).run();
+        p.outcome ?? null, p.gameplay_version ?? null, ...late.map(column => column === 'account_id' ? (account ? account.id : null) : p[column] ?? null)).run();
     const late = await lateColumns(db);
     let saved = false;
     if (late.length) {

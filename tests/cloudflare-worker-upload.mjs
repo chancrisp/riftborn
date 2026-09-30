@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 const uploadModule = await import('../scripts/cloudflare-worker-upload.mjs').catch(() => null);
 assert.ok(uploadModule, 'Worker upload helper must exist');
@@ -13,7 +14,32 @@ assert.equal(metadata.workers_dev, true);
 assert.ok(metadata.bindings.some(binding => binding.type === 'inherit' && binding.name === 'DB'));
 assert.ok(!JSON.stringify(metadata.bindings).includes(databaseId), 'The broken D1 ID is not resubmitted during deployment');
 assert.ok(metadata.bindings.some(binding => binding.type === 'plain_text' && binding.name === 'ENVIRONMENT' && binding.text === 'production'));
-assert.ok(metadata.bindings.some(binding => binding.type === 'plain_text' && binding.name === 'ALLOWED_ORIGINS' && binding.text === siteOrigin));
+// CORS: riftborn.us, dev.riftborn.us and the GitHub Pages origin always (site.hosts.mjs); the
+// RIFTBORN_SITE_ORIGIN variable is optional and may add more (one origin or a comma list).
+const SITE_ORIGINS = 'https://riftborn.us,https://dev.riftborn.us,https://chancrisp.github.io';
+const originsOf = meta => meta.bindings.find(binding => binding.type === 'plain_text' && binding.name === 'ALLOWED_ORIGINS')?.text;
+assert.equal(originsOf(metadata), SITE_ORIGINS, 'The legacy origin given as the variable is not repeated');
+assert.ok(metadata.bindings.some(binding => binding.type === 'plain_text' && binding.name === 'AUTH_PUBLIC_BASE' && binding.text === 'https://api.riftborn.us'), 'Sign-in runs on api.riftborn.us');
+assert.equal(uploadModule.allowedOrigins('').join(','), SITE_ORIGINS, 'The variable is optional');
+assert.equal(uploadModule.allowedOrigins(undefined).join(','), SITE_ORIGINS);
+assert.equal(uploadModule.allowedOrigins(' https://preview.example , https://riftborn.us ').join(','), SITE_ORIGINS + ',https://preview.example', 'A comma list adds origins');
+for (const bad of ['https://riftborn.us/', 'https://riftborn.us/game', 'riftborn.us', 'ftp://riftborn.us', 'https://riftborn.us,nope']) {
+  assert.throws(() => uploadModule.allowedOrigins(bad), /RIFTBORN_SITE_ORIGIN/, 'Refused: ' + bad);
+}
+{
+  // The deployed Worker answers CORS for each site origin on scores, feedback and accounts, and for nobody else.
+  const worker = (await import('../cloudflare/worker.js')).default;
+  const env = { ENVIRONMENT: 'production', ALLOWED_ORIGINS: originsOf(metadata) };
+  for (const path of ['/api/scores', '/api/feedback', '/api/account']) {
+    for (const origin of SITE_ORIGINS.split(',')) {
+      const response = await worker.fetch(new Request('https://api.riftborn.us' + path, { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' } }), env, { waitUntil() {} });
+      assert.equal(response.status, 204, `${path} preflight from ${origin}`);
+      assert.equal(response.headers.get('Access-Control-Allow-Origin'), origin);
+    }
+    const evil = await worker.fetch(new Request('https://api.riftborn.us' + path, { method: 'OPTIONS', headers: { Origin: 'https://riftborn.us.evil.example', 'Access-Control-Request-Method': 'POST' } }), env, { waitUntil() {} });
+    assert.equal(evil.status, 403, `${path} refuses other origins`);
+  }
+}
 assert.ok(metadata.bindings.some(binding => binding.type === 'ratelimit' && binding.name === 'SCORE_RATE_LIMITER' && binding.namespace_id === '9280928'));
 assert.ok(metadata.bindings.some(binding => binding.type === 'ratelimit' && binding.name === 'FEEDBACK_RATE_LIMITER' &&
   binding.namespace_id !== '9280928' && binding.simple.limit === 3 && binding.simple.period === 60), 'Feedback has its own tight rate limit');
@@ -47,4 +73,71 @@ assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\
 assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\/feedback/, 'The bundled Worker serves the feedback route');
 assert.ok(JSON.parse(await uploadRequest.body.get('metadata').text()).bindings.some(binding => binding.name === 'FEEDBACK_ADMIN_KEY' && binding.text === 'deploy-key'));
 
-console.log('PASS Cloudflare Worker upload: entry module, D1, production origin, and score rate limit, feedback rate limit and optional feedback secrets.');
+assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\/account/, 'The bundled Worker serves the accounts routes');
+
+// Riftborn accounts (v2.2): OAuth credentials and the signing key are secrets, bound only when set.
+assert.ok(!metadata.bindings.some(binding => binding.name === 'FAKE_OAUTH'), 'The fake provider is never enabled on the deployed Worker');
+const accountSecrets = {
+  googleClientId: 'g-id', googleClientSecret: 'g-secret', discordClientId: 'd-id', discordClientSecret: 'd-secret',
+  githubClientId: 'h-id', githubClientSecret: ' h-secret ', authSigningKey: 'k'.repeat(43)
+};
+const withAccounts = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, ...accountSecrets }).get('metadata').text());
+assert.deepEqual(withAccounts.bindings.filter(binding => binding.type === 'secret_text').map(binding => [binding.name, binding.text]), [
+  ['GOOGLE_CLIENT_ID', 'g-id'], ['GOOGLE_CLIENT_SECRET', 'g-secret'], ['DISCORD_CLIENT_ID', 'd-id'], ['DISCORD_CLIENT_SECRET', 'd-secret'],
+  ['GITHUB_CLIENT_ID', 'h-id'], ['GITHUB_CLIENT_SECRET', 'h-secret'], ['AUTH_SIGNING_KEY', 'k'.repeat(43)]
+]);
+assert.ok(withAccounts.bindings.some(binding => binding.type === 'plain_text' && binding.name === 'ENVIRONMENT' && binding.text === 'production'), 'Accounts deploy as production');
+assert.ok(!withAccounts.bindings.some(binding => binding.name === 'FAKE_OAUTH'));
+const partial = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, googleClientId: 'g-id', discordClientSecret: '  ' }).get('metadata').text());
+assert.deepEqual(partial.bindings.filter(binding => binding.type === 'secret_text').map(binding => binding.name), ['GOOGLE_CLIENT_ID'], 'Unset or blank secrets are not bound');
+assert.throws(() => uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, authSigningKey: 'too-short' }), /AUTH_SIGNING_KEY/);
+// GitHub Actions forbids secret names starting with GITHUB_: the GitHub app arrives as GH_CLIENT_*.
+assert.deepEqual(uploadModule.ACCOUNT_SECRETS.map(([, binding, envName]) => [binding, envName]).filter(([binding]) => binding.startsWith('GITHUB_')),
+  [['GITHUB_CLIENT_ID', 'GH_CLIENT_ID'], ['GITHUB_CLIENT_SECRET', 'GH_CLIENT_SECRET']]);
+assert.ok(uploadModule.ACCOUNT_SECRETS.every(([, , envName]) => !envName.startsWith('GITHUB_')));
+const workflow = fs.readFileSync('.github/workflows/cloudflare-worker.yml', 'utf8');
+for (const [, , envName] of uploadModule.ACCOUNT_SECRETS) assert.ok(workflow.includes(`${envName}: \${{ secrets.${envName} }}`), 'The workflow passes ' + envName);
+for (const path of ['server/accounts-api.js', 'server/username-rules.js']) assert.ok(workflow.includes(`- '${path}'`), 'The workflow redeploys on ' + path);
+// Key rotation: the previous key is an optional secret with the same length rule; ACCOUNTS_LIVE=1
+// refuses a deploy that would drop AUTH_SIGNING_KEY.
+const rotated = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, authSigningKey: 'n'.repeat(43), authSigningKeyPrevious: ' ' + 'o'.repeat(43) + ' ' }).get('metadata').text());
+assert.deepEqual(rotated.bindings.filter(binding => binding.type === 'secret_text').map(binding => [binding.name, binding.text]),
+  [['AUTH_SIGNING_KEY', 'n'.repeat(43)], ['AUTH_SIGNING_KEY_PREVIOUS', 'o'.repeat(43)]]);
+assert.throws(() => uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, authSigningKey: 'n'.repeat(43), authSigningKeyPrevious: 'short' }), /AUTH_SIGNING_KEY_PREVIOUS/);
+assert.throws(() => uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, accountsLive: '1' }), /ACCOUNTS_LIVE=1/, 'Live accounts need the signing key');
+assert.throws(() => uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, accountsLive: '1', authSigningKey: '   ' }), /ACCOUNTS_LIVE=1/);
+assert.ok(uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, accountsLive: '1', authSigningKey: 'k'.repeat(43) }), 'Live with the key deploys');
+assert.ok(uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, accountsLive: '' }), 'Not live yet: the key stays optional');
+assert.ok(workflow.includes('ACCOUNTS_LIVE: ${{ vars.ACCOUNTS_LIVE }}'), 'The workflow passes the ACCOUNTS_LIVE repository variable');
+
+// The accounts per-IP limiter binding matches what the Worker assumes, with its own namespace.
+const { IP_BINDING_LIMIT } = await import('../server/accounts-api.js');
+const limiter = metadata.bindings.find(binding => binding.name === 'ACCOUNTS_RATE_LIMITER');
+assert.ok(limiter && limiter.type === 'ratelimit', 'The accounts rate limiter is bound');
+assert.deepEqual(limiter.simple, IP_BINDING_LIMIT);
+assert.equal(new Set(metadata.bindings.filter(binding => binding.type === 'ratelimit').map(binding => binding.namespace_id)).size, 3, 'Each limiter has its own namespace');
+
+const wrangler = fs.readFileSync('cloudflare/wrangler.jsonc', 'utf8');
+assert.deepEqual(JSON.parse(wrangler).ratelimits.find(item => item.name === 'ACCOUNTS_RATE_LIMITER'),
+  { name: 'ACCOUNTS_RATE_LIMITER', namespace_id: limiter.namespace_id, simple: IP_BINDING_LIMIT }, 'wrangler.jsonc binds the same limiter');
+assert.match(wrangler, /"ENVIRONMENT":\s*"production"/, 'wrangler.jsonc also deploys as production');
+assert.equal(JSON.parse(wrangler).vars.ALLOWED_ORIGINS, SITE_ORIGINS, 'wrangler.jsonc lists the same CORS origins');
+assert.equal(JSON.parse(wrangler).vars.AUTH_PUBLIC_BASE, 'https://api.riftborn.us');
+assert.deepEqual(JSON.parse(wrangler).routes, [{ pattern: 'api.riftborn.us', custom_domain: true }], 'wrangler.jsonc documents the api.riftborn.us custom domain');
+assert.ok(workflow.includes("- 'site.hosts.mjs'"), 'The Worker redeploys when the hosts change');
+{
+  // The Worker redeploys when (and only when) one of its inputs changes: every repository file the
+  // bundle reads is in the workflow's path filter, and the launch switch (site.config.mjs, LAUNCHED)
+  // is neither an input nor in the filter, so flipping it never re-uploads the Worker.
+  const { build } = await import('esbuild');
+  const bundled = await build({ entryPoints: ['cloudflare/worker.js'], bundle: true, write: false, format: 'esm', target: 'es2022', metafile: true, logLevel: 'silent' });
+  const inputs = Object.keys(bundled.metafile.inputs).filter(file => !file.startsWith('node_modules/'));
+  const filters = [...workflow.replace(/\r\n/g, '\n').matchAll(/^ {6}- '([^']+)'$/gm)].map(match => match[1]);
+  const covered = file => filters.some(filter => filter === file || (filter.endsWith('/**') && file.startsWith(filter.slice(0, -2))));
+  for (const file of inputs) assert.ok(covered(file), 'The Worker path filter covers its input ' + file);
+  assert.ok(inputs.includes('site.hosts.mjs'), 'The Worker reads its hosts from site.hosts.mjs');
+  assert.ok(!inputs.includes('site.config.mjs') && !filters.includes('site.config.mjs'), 'LAUNCHED (site.config.mjs) never redeploys the Worker');
+}
+assert.ok(!/FAKE_OAUTH/.test(wrangler + workflow), 'FAKE_OAUTH never reaches a deployed configuration');
+
+console.log('PASS Cloudflare Worker upload: entry module, D1, production origin, and score rate limit, feedback rate limit and optional feedback secrets, optional account secrets, previous signing key, ACCOUNTS_LIVE guard, accounts rate limiter.');

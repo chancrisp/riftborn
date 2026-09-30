@@ -239,7 +239,9 @@ r = await worker.fetch(new Request('https://api.test/api/scores', { headers: { O
 assert.equal(r.status, 200);
 assert.deepEqual((await r.json()).scores, []);
 r = await worker.fetch(new Request('https://api.test/api/scores', { method: 'OPTIONS', headers: { Origin: ORIGIN } }), env);
-assert.equal(r.headers.get('Access-Control-Allow-Methods'), 'GET, POST, OPTIONS', 'Score CORS is unchanged');
+// v2.2 accounts: /api/scores also allows the Authorization header (signed-in posts) and the accounts methods.
+assert.equal(r.headers.get('Access-Control-Allow-Methods'), 'GET, POST, PUT, PATCH, DELETE, OPTIONS', 'Score CORS matches the accounts API');
+assert.equal(r.headers.get('Access-Control-Allow-Headers'), 'Content-Type, Authorization');
 assert.equal((await worker.fetch(new Request('https://api.test/elsewhere'), env)).status, 404);
 
 // ---- a database the migrations never reached (production today) bootstraps the table ----------

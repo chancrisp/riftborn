@@ -5,3 +5,4 @@ dist/.openai/
 _site/
 .wrangler/
 .wrangler.deployment.jsonc
+_cf/
