@@ -26,6 +26,9 @@ for (const entry of fs.readdirSync(path.join(root, 'dist'), { withFileTypes: tru
 // The rebuilt game (Riftborn Reborn) ships as a password-gated test build at /dev/ beside the live game.
 const dev = path.join(root, 'dev');
 if (fs.existsSync(dev)) fs.cpSync(dev, path.join(output, 'dev'), { recursive: true });
+// The private player-feedback inbox (noindex; every read needs the Worker's admin key).
+const inbox = path.join(root, 'feedback');
+if (fs.existsSync(inbox)) fs.cpSync(inbox, path.join(output, 'feedback'), { recursive: true });
 const index = path.join(output, 'index.html');
 let html = fs.readFileSync(index, 'utf8');
 const config = `<script>window.RIFTBORN_SCORE_API_BASE=${JSON.stringify(apiBase)};</script>`;

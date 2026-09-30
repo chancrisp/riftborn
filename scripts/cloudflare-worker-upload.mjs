@@ -6,7 +6,7 @@ const ACCOUNT_API = 'https://api.cloudflare.com/client/v4/accounts';
 const WORKER_NAME = 'riftborn-leaderboard';
 
 /** Build multipart metadata for the documented Workers Script Upload API. */
-export function createWorkerUpload(bundle, { databaseId, siteOrigin }) {
+export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl }) {
   if (!/^[0-9a-f-]{36}$/i.test(databaseId || '')) throw new Error('Set CLOUDFLARE_D1_DATABASE_ID to the D1 database UUID.');
   const origin = new URL(siteOrigin || '');
   if (!/^https?:$/.test(origin.protocol) || origin.origin !== siteOrigin) {
@@ -30,8 +30,23 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin }) {
         namespace_id: '9280928',
         simple: { limit: 30, period: 60 },
       },
+      {
+        type: 'ratelimit',
+        name: 'FEEDBACK_RATE_LIMITER',
+        namespace_id: '7451062',
+        simple: { limit: 3, period: 60 },
+      },
     ],
   };
+  // Optional secrets: bound only when set, so a deploy without them still succeeds (the
+  // feedback inbox then answers 503 and the Discord ping is skipped).
+  const adminKey = (feedbackAdminKey || '').trim();
+  if (adminKey) metadata.bindings.push({ type: 'secret_text', name: 'FEEDBACK_ADMIN_KEY', text: adminKey });
+  const webhook = (discordWebhookUrl || '').trim();
+  if (webhook) {
+    if (!/^https:\/\//i.test(webhook)) throw new Error('DISCORD_WEBHOOK_URL must be an https:// URL.');
+    metadata.bindings.push({ type: 'secret_text', name: 'DISCORD_WEBHOOK_URL', text: webhook });
+  }
 
   const form = new FormData();
   form.set('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }), 'metadata.json');
@@ -39,7 +54,7 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin }) {
   return form;
 }
 
-export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin, fetchImpl = fetch }) {
+export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, fetchImpl = fetch }) {
   if (!/^[0-9a-f]{32}$/i.test(accountId || '')) throw new Error('Set CLOUDFLARE_ACCOUNT_ID to the Cloudflare account ID.');
   if (!apiToken) throw new Error('Set the CLOUDFLARE_API_TOKEN GitHub secret.');
 
@@ -51,7 +66,7 @@ export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin
     target: 'es2022',
     minify: true,
   });
-  const form = createWorkerUpload(result.outputFiles[0].text, { databaseId, siteOrigin });
+  const form = createWorkerUpload(result.outputFiles[0].text, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl });
   const response = await fetchImpl(`${ACCOUNT_API}/${accountId}/workers/scripts/${WORKER_NAME}?bindings_inherit=strict`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${apiToken}` },
@@ -71,6 +86,8 @@ async function main() {
     apiToken: process.env.CLOUDFLARE_API_TOKEN,
     databaseId: process.env.CLOUDFLARE_D1_DATABASE_ID,
     siteOrigin: process.env.RIFTBORN_SITE_ORIGIN,
+    feedbackAdminKey: process.env.FEEDBACK_ADMIN_KEY,
+    discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
   });
   console.log(`Deployed ${WORKER_NAME}; version ${result?.id || 'created'}.`);
 }
