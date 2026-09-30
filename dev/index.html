@@ -24,7 +24,7 @@ so a reload before it lands can't lose it, in this tab's sessionStorage. Runs be
 <script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
 the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
 makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
-window.RIFTBORN_BUILD = "84dfe85d7a";
+window.RIFTBORN_BUILD = "3df526605e";
 (function () {
   var b = window.RIFTBORN_BUILD;
   if (b === "dev" || !window.fetch || !window.URL) return;
@@ -40,7 +40,7 @@ window.RIFTBORN_BUILD = "84dfe85d7a";
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23161c42'/%3E%3Cpath d='m18 2-12 17h9l-2 11 13-18h-9z' fill='%238effd1'/%3E%3C/svg%3E">
 <link rel="preload" href="assets/ps1-atlas.png" as="image" crossorigin="anonymous">
 <link rel="preload" href="assets/crypt-pixel.ttf" as="font" type="font/ttf" crossorigin>
-<link rel="stylesheet" href="css/riftborn.9d0cdc533b.css">
+<link rel="stylesheet" href="css/riftborn.d665a07036.css">
 </head>
 <body class="menu-open">
 <canvas id="game" aria-label="3D survival arena"></canvas>
@@ -99,7 +99,7 @@ window.RIFTBORN_BUILD = "84dfe85d7a";
 
 <main id="menu">
   <button id="deathSkull" type="button" aria-label="Enter Death Mode" aria-pressed="false"><img src="assets/death-skull.png" width="80" height="98" alt="" draggable="false"></button>
-  <div class="menu-card">
+  <div class="menu-card ui-scaled">
     <h1 class="brand-title">RIFT<span>BORN</span></h1>
     <div class="edition"></div>
     <p id="runSummary"></p>
@@ -123,6 +123,7 @@ window.RIFTBORN_BUILD = "84dfe85d7a";
       <details><summary>ON-SCREEN KEYBOARD</summary><div id="nameKeyboard" aria-label="Username characters"></div></details>
       <div id="rulesetRow" class="ruleset-row" role="group" aria-label="Ruleset"><span class="ruleset-label">RULESET</span><button id="rulesetKeepers" type="button" class="secondary" aria-pressed="true">KEEPERS</button><button id="rulesetOriginal" type="button" class="secondary" aria-pressed="false">ORIGINAL</button><small id="rulesetHint"></small></div>
       <label class="practice-option" for="practiceRun"><input id="practiceRun" type="checkbox"><span><strong>PRACTICE RUN</strong><small>Play the full game without saving scores or Journal progress.</small></span></label>
+      <p id="devRunNote" class="dev-run-note" role="status" hidden>DEVELOPER MODE: NOT SCORED OR SAVED</p>
       <p id="usernameError" role="alert"></p>
       <p id="assistNote" class="assist-note hidden" role="status"></p>
       <button id="beginRun" type="submit" class="primary">BEGIN RUN</button>
@@ -272,7 +273,7 @@ checks this table before every deploy. */
 (function () {
   var HASH = "6057f115a0d917397c72f5ca48b752fd27cf76370e923af446247ab2f525b87c";
   var KEY = "riftborn-dev-gate";
-  var GAME = "js/riftborn.84dfe85d7a.js";
+  var GAME = "js/riftborn.3df526605e.js";
   var gate = document.getElementById("devGate");
   var form = document.getElementById("devGateForm");
   var input = document.getElementById("devGatePass");
