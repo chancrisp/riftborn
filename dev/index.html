@@ -7,10 +7,26 @@
 <title>Riftborn</title>
 <meta name="description" content="A PS1-style survival shooter. Cross five fractured worlds and defeat the Rift Warden.">
 <meta name="theme-color" content="#10141e">
+<script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
+the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
+makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
+window.RIFTBORN_BUILD = "77c248c274";
+(function () {
+  var b = window.RIFTBORN_BUILD;
+  if (b === "dev" || !window.fetch || !window.URL) return;
+  fetch("version.json?t=" + Date.now(), { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (v) {
+    if (!v || !v.build || v.build === b) return;
+    var u = new URL(location.href);
+    if (u.searchParams.get("v") === v.build) return;
+    u.searchParams.set("v", v.build);
+    location.replace(u.href);
+  }).catch(function () {});
+})();
+</script>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23161c42'/%3E%3Cpath d='m18 2-12 17h9l-2 11 13-18h-9z' fill='%238effd1'/%3E%3C/svg%3E">
 <link rel="preload" href="assets/ps1-atlas.png" as="image" crossorigin="anonymous">
 <link rel="preload" href="assets/crypt-pixel.ttf" as="font" type="font/ttf" crossorigin>
-<link rel="stylesheet" href="css/riftborn.50625fef74.css">
+<link rel="stylesheet" href="css/riftborn.49d96dc168.css">
 </head>
 <body class="menu-open">
 <canvas id="game" aria-label="3D survival arena"></canvas>
@@ -155,6 +171,7 @@
 
 <script>window.addEventListener("error",function(){if(!window.gameReady){var n=document.querySelector("#loadNote");if(n)n.textContent="The 3D game could not load. Enable WebGL / hardware acceleration and reload.";}});</script>
 <script>/* The live D1 board only for the live game at /riftborn/; previews (/dev/ etc.) keep scores on the device. */window.RIFTBORN_SCORE_API_BASE = window.RIFTBORN_SCORE_API_BASE || (location.hostname === "chancrisp.github.io" && (location.pathname === "/riftborn/" || location.pathname === "/riftborn/index.html") ? "https://riftborn-leaderboard.chanmanc10.workers.dev" : "");</script>
+<script>/* Player feedback goes to the same Worker from the live game and the /dev/ test build (context.source tells them apart); local builds keep it on the device. */window.RIFTBORN_FEEDBACK_API_BASE = window.RIFTBORN_FEEDBACK_API_BASE || (location.hostname === "chancrisp.github.io" ? "https://riftborn-leaderboard.chanmanc10.workers.dev" : "");</script>
 
 <div id="devGate" role="dialog" aria-modal="true" aria-labelledby="devGateTitle">
   <form id="devGateForm" autocomplete="off" novalidate>
@@ -188,7 +205,7 @@
 (function () {
   var HASH = "488aeb0b98cf7219c182964510cbc8880c513e0352c7e792f714ae1ff215fd34";
   var KEY = "riftborn-dev-gate";
-  var GAME = "js/riftborn.0f9611ede6.js";
+  var GAME = "js/riftborn.77c248c274.js";
   var gate = document.getElementById("devGate");
   var form = document.getElementById("devGateForm");
   var input = document.getElementById("devGatePass");
