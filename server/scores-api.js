@@ -20,6 +20,58 @@ const database = env => {
   return env.DB;
 };
 
+// Late columns: game_version (the release a run was played on, "2.1.0") and rift_score (KEEPERS
+// runs' ranking score). They are added lazily: the production database was created by hand and
+// Wrangler migrations cannot reach it. Checked once per isolate and DB binding; a column whose
+// check or ALTER fails is simply left out (re-checked after a cooldown), so scores keep working
+// exactly as before without it.
+const LATE_COLUMNS = Object.freeze({ game_version: 'TEXT', rift_score: 'INTEGER' });
+const LATE_RETRY_MS = 300000;
+const lateColumnCache = new WeakMap();
+// -> Promise<string[]> of the late columns the scores table has (LATE_COLUMNS order). Never rejects.
+function lateColumns(db) {
+  const cached = lateColumnCache.get(db);
+  if (cached && !(cached.failedAt && Date.now() - cached.failedAt > LATE_RETRY_MS)) return cached.ready;
+  const entry = { failedAt: 0, ready: null };
+  entry.ready = (async () => {
+    const info = await db.prepare("PRAGMA table_info('scores')").all();
+    const have = new Set((info?.results || []).map(column => column?.name));
+    const ready = [];
+    for (const [name, type] of Object.entries(LATE_COLUMNS)) {
+      if (!have.has(name)) {
+        try {
+          await db.prepare(`ALTER TABLE scores ADD COLUMN ${name} ${type}`).run();
+        } catch (error) {
+          // "duplicate column": another isolate added it first. Anything else: go without it.
+          if (!/duplicate column/i.test(String(error?.message || error))) {
+            console.error('Score column unavailable: ' + name, error);
+            entry.failedAt = Date.now();
+            continue;
+          }
+        }
+      }
+      ready.push(name);
+    }
+    return ready;
+  })().catch(error => {
+    console.error('Score columns unavailable', error);
+    entry.failedAt = Date.now();
+    return [];
+  });
+  lateColumnCache.set(db, entry);
+  return entry.ready;
+}
+// A query naming late columns failed because of one ("no such column: game_version"): forget them
+// (re-checked after the cooldown) so the caller runs the original query. Other errors are thrown.
+function lateColumnLost(db, error) {
+  const message = String(error?.message || error);
+  if (!Object.keys(LATE_COLUMNS).some(name => message.includes(name))) throw error;
+  console.error('Score column lost', error);
+  lateColumnCache.set(db, { failedAt: Date.now(), ready: Promise.resolve([]) });
+}
+const RIFT_SCORE_MAX = 1e10;
+const isKeepers = version => typeof version === 'string' && version.startsWith('keepers-');
+
 function originAllowed(origin, env) {
   if (!origin) return true;
   const defaults = 'https://riftborn.chanmanc10.chatgpt.site' +
@@ -60,22 +112,35 @@ export async function handleScores(request, env) {
     if (request.method === 'GET') {
       const mode = url.searchParams.get('mode') || 'all';
       const version = url.searchParams.get('version') || 'all';
-      if (!['all', 'normal', 'death', 'unknown'].includes(mode) || !(/^[a-zA-Z0-9.-]{1,32}$/).test(version)) {
+      // ruleset: absent = every run (as before); keepers = KEEPERS stamps (keepers-*), ranked by
+      // Rift Score; original = everything else, legacy and unstamped runs included.
+      const ruleset = url.searchParams.get('ruleset');
+      if (!['all', 'normal', 'death', 'unknown'].includes(mode) || !(/^[a-zA-Z0-9.-]{1,32}$/).test(version) || (ruleset !== null && !['keepers', 'original'].includes(ruleset))) {
         return json({ error: 'Invalid ranking filter' }, 400, origin);
       }
       const clauses = [], values = [];
       if (mode === 'unknown') clauses.push('death_mode IS NULL');
       else if (mode !== 'all') { clauses.push('death_mode = ?'); values.push(mode === 'death' ? 1 : 0); }
       if (version !== 'all') { clauses.push('gameplay_version = ?'); values.push(version); }
-      const limit = mode === 'death' ? 10 : mode === 'normal' ? 20 : 25;
-      const query = 'SELECT name,score,stage,played_at,kills,wave,seconds,death_mode,statue_count,statue_modifier,outcome,gameplay_version FROM scores' +
+      if (ruleset === 'keepers') clauses.push("gameplay_version LIKE 'keepers-%'");
+      else if (ruleset === 'original') clauses.push("(gameplay_version IS NULL OR gameplay_version NOT LIKE 'keepers-%')");
+      const limit = ruleset === 'keepers' ? (mode === 'all' ? 25 : 20) : mode === 'death' ? 10 : mode === 'normal' ? 20 : 25;
+      const query = (late, order) => 'SELECT name,score,stage,played_at,kills,wave,seconds,death_mode,statue_count,statue_modifier,outcome,gameplay_version' +
+        late.map(name => ',' + name).join('') + ' FROM scores' +
         (clauses.length ? ' WHERE ' + clauses.join(' AND ') : '') +
-        ` ORDER BY score DESC, wave DESC, seconds DESC LIMIT ${limit}`;
-      const result = await db.prepare(query).bind(...values).all();
+        ` ORDER BY ${order} LIMIT ${limit}`;
+      const byScore = 'score DESC, wave DESC, seconds DESC';
+      const late = await lateColumns(db);
+      let result = null;
+      if (late.length) {
+        const order = ruleset === 'keepers' && late.includes('rift_score') ? 'rift_score DESC, stage DESC, seconds ASC' : byScore;
+        try { result = await db.prepare(query(late, order)).bind(...values).all(); } catch (error) { lateColumnLost(db, error); }
+      }
+      result ||= await db.prepare(query([], byScore)).bind(...values).all();
       return json({
-        scores: result.results.map(row => ({ ...row, death_mode: row.death_mode == null ? null : row.death_mode === 1 })),
-        capabilities: { modeFilter: true, versionFilter: true, runMetadata: true },
-        ranking: { mode, version },
+        scores: result.results.map(row => ({ ...row, death_mode: row.death_mode == null ? null : row.death_mode === 1, game_version: row.game_version ?? null, rift_score: row.rift_score ?? null })),
+        capabilities: { modeFilter: true, versionFilter: true, runMetadata: true, rulesetFilter: true },
+        ranking: { mode, version, ruleset: ruleset || 'all' },
         verified: false
       }, 200, origin);
     }
@@ -105,12 +170,23 @@ export async function handleScores(request, env) {
     if (p.statue_count !== undefined && p.statue_modifier !== undefined && p.statue_modifier !== 100 + p.statue_count * 5) return json({ error: 'Inconsistent curse' }, 400, origin);
     if (p.outcome !== undefined && !['victory', 'defeat', 'ended'].includes(p.outcome)) return json({ error: 'Invalid outcome' }, 400, origin);
     if (p.gameplay_version !== undefined && (typeof p.gameplay_version !== 'string' || !(/^[a-zA-Z0-9.-]{1,32}$/).test(p.gameplay_version))) return json({ error: 'Invalid gameplay version' }, 400, origin);
+    if (p.game_version !== undefined && (typeof p.game_version !== 'string' || p.game_version.length > 16 || !(/^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$/).test(p.game_version))) return json({ error: 'Invalid game version' }, 400, origin);
+
+    // Rift Score belongs to KEEPERS runs only.
+    if (p.rift_score !== undefined && (!isKeepers(p.gameplay_version) || !integer(p.rift_score, RIFT_SCORE_MAX))) return json({ error: 'Invalid rift score' }, 400, origin);
 
     const now = Date.now();
-    await db.prepare('INSERT INTO scores (id,name,score,kills,wave,seconds,created_at,stage,played_at,death_mode,statue_count,statue_modifier,outcome,gameplay_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING')
+    const insert = late => db.prepare('INSERT INTO scores (id,name,score,kills,wave,seconds,created_at,stage,played_at,death_mode,statue_count,statue_modifier,outcome,gameplay_version' +
+      late.map(name => ',' + name).join('') + ') VALUES (' + Array(14 + late.length).fill('?').join(',') + ') ON CONFLICT(id) DO NOTHING')
       .bind(p.id, p.name.trim(), p.score, p.kills, p.wave, p.seconds, now, p.stage ?? null, p.played_at ?? now,
         p.death_mode === undefined ? null : Number(p.death_mode), p.statue_count ?? null, p.statue_modifier ?? null,
-        p.outcome ?? null, p.gameplay_version ?? null).run();
+        p.outcome ?? null, p.gameplay_version ?? null, ...late.map(name => p[name] ?? null)).run();
+    const late = await lateColumns(db);
+    let saved = false;
+    if (late.length) {
+      try { await insert(late); saved = true; } catch (error) { lateColumnLost(db, error); }
+    }
+    if (!saved) await insert([]);
     return json({ saved: true }, 200, origin);
   } catch (error) {
     console.error('Leaderboard request failed', error);
