@@ -9,7 +9,7 @@
 <script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
 the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
 makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
-window.RIFTBORN_BUILD = "4339a97b57";
+window.RIFTBORN_BUILD = "33c9a9ab13";
 (function () {
   var b = window.RIFTBORN_BUILD;
   if (b === "dev" || !window.fetch || !window.URL) return;
@@ -25,8 +25,8 @@ window.RIFTBORN_BUILD = "4339a97b57";
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23161c42'/%3E%3Cpath d='m18 2-12 17h9l-2 11 13-18h-9z' fill='%238effd1'/%3E%3C/svg%3E">
 <link rel="preload" href="assets/ps1-atlas.png" as="image" crossorigin="anonymous">
 <link rel="preload" href="assets/crypt-pixel.ttf" as="font" type="font/ttf" crossorigin>
-<link rel="modulepreload" href="js/riftborn.4339a97b57.js">
-<link rel="stylesheet" href="css/riftborn.f62ae74eb5.css">
+<link rel="modulepreload" href="js/riftborn.33c9a9ab13.js">
+<link rel="stylesheet" href="css/riftborn.81171492da.css">
 </head>
 <body class="menu-open">
 <canvas id="game" aria-label="3D survival arena"></canvas>
@@ -92,7 +92,7 @@ window.RIFTBORN_BUILD = "4339a97b57";
     <details id="runReport" class="hidden"><summary>RUN REPORT</summary><div id="runDetails"></div></details>
     <button id="start" type="button" class="primary" disabled>LOADING THE RIFT…</button>
     <button id="mainMenu" type="button" class="secondary main-menu hidden">MAIN MENU</button>
-    <div class="menu-grid"><button id="tutorial" type="button" class="secondary tutorial-start" disabled>TUTORIAL</button><button id="menuProfile" type="button" class="secondary journal-button">JOURNAL</button><button id="menuSettings" type="button" class="secondary">SETTINGS</button><button id="menuLeaderboard" type="button" class="secondary">LEADERBOARD</button></div>
+    <div class="menu-grid"><button id="menuCosmetics" type="button" class="secondary cosmetics-button">COSMETICS</button><button id="tutorial" type="button" class="secondary tutorial-start" disabled>TUTORIAL</button><button id="menuProfile" type="button" class="secondary journal-button">JOURNAL</button><button id="menuSettings" type="button" class="secondary">SETTINGS</button><button id="menuLeaderboard" type="button" class="secondary">LEADERBOARD</button></div>
     <p id="scoreSave" role="status"></p>
     <button id="retryScore" type="button" class="secondary hidden">RETRY SAVING SCORE</button>
     <small id="loadNote">Building your world…</small>
@@ -165,10 +165,24 @@ window.RIFTBORN_BUILD = "4339a97b57";
   </div>
 </section>
 
+<section id="cosmetics" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="cosmeticsTitle">
+  <div class="cosmetics-panel ui-scaled">
+    <div class="panel-head"><h2 id="cosmeticsTitle">COSMETICS</h2><button id="closeCosmetics" type="button" class="secondary">BACK</button></div>
+    <div id="cosmeticsBody" class="cos-body"></div>
+  </div>
+</section>
+
+<section id="codes" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="codesTitle">
+  <div class="settings-panel codes-panel ui-scaled">
+    <div class="panel-head"><h2 id="codesTitle">RIFT TERMINAL</h2><button id="closeCodes" type="button" class="secondary">BACK</button></div>
+    <div id="codesBody" class="codes-body"></div>
+  </div>
+</section>
+
 <aside id="devTools" class="hidden" aria-label="Practice tools"></aside>
 
 <noscript><p class="noscript">Riftborn needs JavaScript and WebGL.</p></noscript>
-<script type="module" src="js/riftborn.4339a97b57.js"></script>
+<script type="module" src="js/riftborn.33c9a9ab13.js"></script>
 <script>window.addEventListener("error",function(){if(!window.gameReady){var n=document.querySelector("#loadNote");if(n)n.textContent="The 3D game could not load. Enable WebGL / hardware acceleration and reload.";}});</script>
 <script>/* The live D1 board only for the live game at /riftborn/; previews (/dev/ etc.) keep scores on the device. */window.RIFTBORN_SCORE_API_BASE = window.RIFTBORN_SCORE_API_BASE || (location.hostname === "chancrisp.github.io" && (location.pathname === "/riftborn/" || location.pathname === "/riftborn/index.html") ? "https://riftborn-leaderboard.chanmanc10.workers.dev" : "");</script>
 <script>/* Player feedback goes to the same Worker from the live game and the /dev/ test build (context.source tells them apart); local builds keep it on the device. */window.RIFTBORN_FEEDBACK_API_BASE = window.RIFTBORN_FEEDBACK_API_BASE || (location.hostname === "chancrisp.github.io" ? "https://riftborn-leaderboard.chanmanc10.workers.dev" : "");</script>
