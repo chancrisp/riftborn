@@ -40,7 +40,10 @@ export const MIGRATION = Object.freeze({
     'riftborn-reborn-login-verifier-v1',
     'riftborn-reborn-account-sync-v1',
     'riftborn-reborn-account-reminded',
-    'riftborn-reborn-dev-accounts'
+    'riftborn-reborn-dev-accounts',
+    // Developer mode (the game's src/meta/dev-mode.js): its switch and loadout stay on the device.
+    'riftborn-reborn-dev-mode-v1',
+    'riftborn-reborn-dev-loadout-v1'
   ]),
   // The classic edition's saves, moved as well.
   extra: Object.freeze(['riftborn-profile-v1', 'neon-crypt-preferences-v1']),
