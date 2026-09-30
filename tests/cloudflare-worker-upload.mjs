@@ -73,8 +73,29 @@ assert.ok(uploadModule.ACCOUNT_SECRETS.every(([, , envName]) => !envName.startsW
 const workflow = fs.readFileSync('.github/workflows/cloudflare-worker.yml', 'utf8');
 for (const [, , envName] of uploadModule.ACCOUNT_SECRETS) assert.ok(workflow.includes(`${envName}: \${{ secrets.${envName} }}`), 'The workflow passes ' + envName);
 for (const path of ['server/accounts-api.js', 'server/username-rules.js']) assert.ok(workflow.includes(`- '${path}'`), 'The workflow redeploys on ' + path);
+// Key rotation: the previous key is an optional secret with the same length rule; ACCOUNTS_LIVE=1
+// refuses a deploy that would drop AUTH_SIGNING_KEY.
+const rotated = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, authSigningKey: 'n'.repeat(43), authSigningKeyPrevious: ' ' + 'o'.repeat(43) + ' ' }).get('metadata').text());
+assert.deepEqual(rotated.bindings.filter(binding => binding.type === 'secret_text').map(binding => [binding.name, binding.text]),
+  [['AUTH_SIGNING_KEY', 'n'.repeat(43)], ['AUTH_SIGNING_KEY_PREVIOUS', 'o'.repeat(43)]]);
+assert.throws(() => uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, authSigningKey: 'n'.repeat(43), authSigningKeyPrevious: 'short' }), /AUTH_SIGNING_KEY_PREVIOUS/);
+assert.throws(() => uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, accountsLive: '1' }), /ACCOUNTS_LIVE=1/, 'Live accounts need the signing key');
+assert.throws(() => uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, accountsLive: '1', authSigningKey: '   ' }), /ACCOUNTS_LIVE=1/);
+assert.ok(uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, accountsLive: '1', authSigningKey: 'k'.repeat(43) }), 'Live with the key deploys');
+assert.ok(uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, accountsLive: '' }), 'Not live yet: the key stays optional');
+assert.ok(workflow.includes('ACCOUNTS_LIVE: ${{ vars.ACCOUNTS_LIVE }}'), 'The workflow passes the ACCOUNTS_LIVE repository variable');
+
+// The accounts per-IP limiter binding matches what the Worker assumes, with its own namespace.
+const { IP_BINDING_LIMIT } = await import('../server/accounts-api.js');
+const limiter = metadata.bindings.find(binding => binding.name === 'ACCOUNTS_RATE_LIMITER');
+assert.ok(limiter && limiter.type === 'ratelimit', 'The accounts rate limiter is bound');
+assert.deepEqual(limiter.simple, IP_BINDING_LIMIT);
+assert.equal(new Set(metadata.bindings.filter(binding => binding.type === 'ratelimit').map(binding => binding.namespace_id)).size, 3, 'Each limiter has its own namespace');
+
 const wrangler = fs.readFileSync('cloudflare/wrangler.jsonc', 'utf8');
+assert.deepEqual(JSON.parse(wrangler).ratelimits.find(item => item.name === 'ACCOUNTS_RATE_LIMITER'),
+  { name: 'ACCOUNTS_RATE_LIMITER', namespace_id: limiter.namespace_id, simple: IP_BINDING_LIMIT }, 'wrangler.jsonc binds the same limiter');
 assert.match(wrangler, /"ENVIRONMENT":\s*"production"/, 'wrangler.jsonc also deploys as production');
 assert.ok(!/FAKE_OAUTH/.test(wrangler + workflow), 'FAKE_OAUTH never reaches a deployed configuration');
 
-console.log('PASS Cloudflare Worker upload: entry module, D1, production origin, and score rate limit, feedback rate limit and optional feedback secrets, optional account secrets.');
+console.log('PASS Cloudflare Worker upload: entry module, D1, production origin, and score rate limit, feedback rate limit and optional feedback secrets, optional account secrets, previous signing key, ACCOUNTS_LIVE guard, accounts rate limiter.');

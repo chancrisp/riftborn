@@ -4,9 +4,12 @@ import { pathToFileURL } from 'node:url';
 
 const ACCOUNT_API = 'https://api.cloudflare.com/client/v4/accounts';
 const WORKER_NAME = 'riftborn-leaderboard';
-// Riftborn accounts (v2.2): optional OAuth app credentials and the HMAC signing key. Each is bound
-// as a secret only when set; a provider without both its ID and secret is simply unavailable.
-// Never bind FAKE_OAUTH here: the fake provider is for the local harness only.
+// Riftborn accounts (v2.2): optional OAuth app credentials, the HMAC signing key and, after a key
+// rotation, the previous key (only tried for lookups, so players signed up under it keep their
+// accounts). Each is bound as a secret only when set; a provider without both its ID and secret is
+// simply unavailable. Once accounts are live (repository variable ACCOUNTS_LIVE=1) a deploy without
+// AUTH_SIGNING_KEY fails instead of switching accounts off.
+// Never bind FAKE_OAUTH here: the fake providers are for the local harness only.
 // [option, Worker binding, environment variable]. GitHub Actions forbids secret names starting
 // with GITHUB_, so the GitHub OAuth app's credentials arrive as GH_CLIENT_ID/_SECRET.
 export const ACCOUNT_SECRETS = Object.freeze([
@@ -14,10 +17,14 @@ export const ACCOUNT_SECRETS = Object.freeze([
   ['discordClientId', 'DISCORD_CLIENT_ID', 'DISCORD_CLIENT_ID'], ['discordClientSecret', 'DISCORD_CLIENT_SECRET', 'DISCORD_CLIENT_SECRET'],
   ['githubClientId', 'GITHUB_CLIENT_ID', 'GH_CLIENT_ID'], ['githubClientSecret', 'GITHUB_CLIENT_SECRET', 'GH_CLIENT_SECRET'],
   ['authSigningKey', 'AUTH_SIGNING_KEY', 'AUTH_SIGNING_KEY'],
+  ['authSigningKeyPrevious', 'AUTH_SIGNING_KEY_PREVIOUS', 'AUTH_SIGNING_KEY_PREVIOUS'],
 ]);
+const SIGNING_KEYS = Object.freeze(['AUTH_SIGNING_KEY', 'AUTH_SIGNING_KEY_PREVIOUS']);
+// The accounts per-IP limiter (server/accounts-api.js IP_BINDING_LIMIT): no D1 write per request.
+export const ACCOUNTS_RATE_LIMITER = Object.freeze({ type: 'ratelimit', name: 'ACCOUNTS_RATE_LIMITER', namespace_id: '6184035', simple: { limit: 30, period: 60 } });
 
 /** Build multipart metadata for the documented Workers Script Upload API. */
-export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, ...accountSecrets }) {
+export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, ...accountSecrets }) {
   if (!/^[0-9a-f-]{36}$/i.test(databaseId || '')) throw new Error('Set CLOUDFLARE_D1_DATABASE_ID to the D1 database UUID.');
   const origin = new URL(siteOrigin || '');
   if (!/^https?:$/.test(origin.protocol) || origin.origin !== siteOrigin) {
@@ -47,6 +54,7 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
         namespace_id: '7451062',
         simple: { limit: 3, period: 60 },
       },
+      { ...ACCOUNTS_RATE_LIMITER, simple: { ...ACCOUNTS_RATE_LIMITER.simple } },
     ],
   };
   // Optional secrets: bound only when set, so a deploy without them still succeeds (the
@@ -58,10 +66,14 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
     if (!/^https:\/\//i.test(webhook)) throw new Error('DISCORD_WEBHOOK_URL must be an https:// URL.');
     metadata.bindings.push({ type: 'secret_text', name: 'DISCORD_WEBHOOK_URL', text: webhook });
   }
+  const live = String(accountsLive ?? '').trim() === '1';
+  if (live && !String(accountSecrets.authSigningKey ?? '').trim()) {
+    throw new Error('ACCOUNTS_LIVE=1 but the AUTH_SIGNING_KEY secret is empty: refusing to deploy (players would lose their accounts). Restore the secret.');
+  }
   for (const [option, name] of ACCOUNT_SECRETS) {
     const value = String(accountSecrets[option] ?? '').trim();
     if (!value) continue;
-    if (name === 'AUTH_SIGNING_KEY' && value.length < 32) throw new Error('AUTH_SIGNING_KEY must be at least 32 characters (use 32+ random bytes).');
+    if (SIGNING_KEYS.includes(name) && value.length < 32) throw new Error(`${name} must be at least 32 characters (use 32+ random bytes).`);
     metadata.bindings.push({ type: 'secret_text', name, text: value });
   }
 
@@ -71,7 +83,7 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
   return form;
 }
 
-export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, fetchImpl = fetch, ...accountSecrets }) {
+export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, fetchImpl = fetch, ...accountSecrets }) {
   if (!/^[0-9a-f]{32}$/i.test(accountId || '')) throw new Error('Set CLOUDFLARE_ACCOUNT_ID to the Cloudflare account ID.');
   if (!apiToken) throw new Error('Set the CLOUDFLARE_API_TOKEN GitHub secret.');
 
@@ -83,7 +95,7 @@ export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin
     target: 'es2022',
     minify: true,
   });
-  const form = createWorkerUpload(result.outputFiles[0].text, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, ...accountSecrets });
+  const form = createWorkerUpload(result.outputFiles[0].text, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, ...accountSecrets });
   const response = await fetchImpl(`${ACCOUNT_API}/${accountId}/workers/scripts/${WORKER_NAME}?bindings_inherit=strict`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${apiToken}` },
@@ -105,6 +117,7 @@ async function main() {
     siteOrigin: process.env.RIFTBORN_SITE_ORIGIN,
     feedbackAdminKey: process.env.FEEDBACK_ADMIN_KEY,
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
+    accountsLive: process.env.ACCOUNTS_LIVE,
     ...Object.fromEntries(ACCOUNT_SECRETS.map(([option, , envName]) => [option, process.env[envName]])),
   });
   console.log(`Deployed ${WORKER_NAME}; version ${result?.id || 'created'}.`);

@@ -27,6 +27,11 @@
       "name": "FEEDBACK_RATE_LIMITER",
       "namespace_id": "7451062",
       "simple": { "limit": 3, "period": 60 }
+    },
+    {
+      "name": "ACCOUNTS_RATE_LIMITER",
+      "namespace_id": "6184035",
+      "simple": { "limit": 30, "period": 60 }
     }
   ]
 }

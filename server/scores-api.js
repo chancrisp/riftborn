@@ -3,8 +3,10 @@
 // Riftborn accounts (v2.2): the Cloudflare Worker passes server/accounts-api.js's scoreAccounts
 // hooks as handleScores' third argument (this file is also concatenated into the Sites build, so
 // it imports nothing). With them, a signed-in POST stores account_id and the account's username,
-// guests cannot post under an account's username, and GET joins current usernames at read time.
-// Without them (the Sites Worker) everything behaves exactly as before.
+// guests cannot post under an account's username (or a name that renders like it: guest names are
+// NFKC-normalised, invisible characters are refused, and the hook compares look-alike skeletons),
+// and GET joins current usernames at read time. Without them (the Sites Worker) everything behaves
+// exactly as before.
 const CORS_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
 const CORS_HEADERS = 'Content-Type, Authorization';
 const json = (value, status = 200, origin = null) => {
@@ -83,6 +85,10 @@ function lateColumnLost(db, error) {
   lateColumnCache.set(db, { failedAt: Date.now(), ready: Promise.resolve([]) });
 }
 const RIFT_SCORE_MAX = 1e10;
+// Characters a guest name may not contain once accounts are on: controls, format characters (zero
+// width spaces and joiners, word joiners, bidi controls, tags), private-use, unassigned and lone
+// surrogate code points, line/paragraph separators, and letters that render as blank space.
+export const GUEST_NAME_INVISIBLE = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u115F\u1160\u3164\uFFA0\u2800]/u;
 const isKeepers = version => typeof version === 'string' && version.startsWith('keepers-');
 
 function originAllowed(origin, env) {
@@ -186,7 +192,10 @@ export async function handleScores(request, env, accounts = null) {
     const integer = (value, max) => Number.isInteger(value) && value >= 0 && value <= max;
     // A signed-in run is posted under the account's username; the client-sent name is ignored.
     const account = accounts && p && typeof p === 'object' ? await accounts.session(request, env) : null;
-    if (!p || typeof p.id !== 'string' || !(/^[0-9a-f-]{36}$/i).test(p.id) || (!account && (typeof p.name !== 'string' || !p.name.trim() || p.name.trim().length > 16)) ||
+    if (account && account.unavailable) return json({ error: 'Leaderboard temporarily unavailable' }, 503, origin);
+    // Guest names: trimmed; with accounts on, in NFKC form first (fullwidth and styled letters folded).
+    const guestName = account || !p || typeof p !== 'object' || typeof p.name !== 'string' ? null : (accounts ? p.name.normalize('NFKC') : p.name).trim();
+    if (!p || typeof p.id !== 'string' || !(/^[0-9a-f-]{36}$/i).test(p.id) || (!account && (!guestName || guestName.length > 16)) ||
       !integer(p.score, 100000000) || !integer(p.kills, 1000000) || !integer(p.seconds, 86400) || p.seconds < 1 || !integer(p.wave, 2881) || p.wave !== 1 + Math.floor(p.seconds / 30)) {
       return json({ error: 'Invalid run' }, 400, origin);
     }
@@ -203,8 +212,10 @@ export async function handleScores(request, env, accounts = null) {
     // Rift Score belongs to KEEPERS runs only.
     if (p.rift_score !== undefined && (!isKeepers(p.gameplay_version) || !integer(p.rift_score, RIFT_SCORE_MAX))) return json({ error: 'Invalid rift score' }, 400, origin);
 
-    const name = account ? account.username : p.name.trim();
-    // Name protection: a guest cannot post under a Riftborn account's username (any letter case).
+    if (!account && accounts && GUEST_NAME_INVISIBLE.test(guestName)) return json({ error: 'invalid_name' }, 400, origin);
+    const name = account ? account.username : guestName;
+    // Name protection: a guest cannot post under a Riftborn account's username, in any letter case
+    // or in look-alike characters (accounts.owns compares skeletons).
     if (!account && accounts && await accounts.owns(env, name)) return json({ error: 'name_taken' }, 409, origin);
 
     const now = Date.now();

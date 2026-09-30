@@ -13,11 +13,12 @@ export const USERNAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 // Names nobody may take (compared case-insensitively, whole name).
 export const RESERVED_USERNAMES = Object.freeze([
-  "admin", "administrator", "anonymous", "dev", "developer", "guest", "mod", "moderator",
+  "admin", "administrator", "anonymous", "dev", "developer", "exile", "guest", "mod", "moderator",
   "null", "official", "owner", "riftborn", "root", "staff", "support", "system", "undefined",
   "you", "warden", "the-warden", "rift-warden",
 ]);
-// Prefixes reserved for names the game generates itself (anonymised rows after a deletion).
+// Prefixes reserved for names the game generates itself (anonymised rows after a deletion: EXILE-xxxx;
+// the bare name "exile" is reserved above).
 export const RESERVED_PREFIXES = Object.freeze(["exile-", "exile_", "riftborn-", "riftborn_"]);
 
 // Deliberately small: blocks the obvious, avoids flagging innocent names (no short substrings

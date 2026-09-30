@@ -9,15 +9,18 @@
 //     DEV_ACCOUNTS_FRESH=1      delete the saved database and signing key first
 //     GOOGLE_CLIENT_ID/_SECRET, DISCORD_..., GITHUB_...   optional: real providers, whose OAuth
 //                               apps must then allow http://127.0.0.1:8787/auth/<p>/callback
+//     AUTH_SIGNING_KEY_PREVIOUS=<key>   optional: try a key rotation (the saved key becomes the
+//                               previous one only if you also pass it here)
 //
 //   Then serve the game on port 8700 (launch config "riftborn") and open
 //   http://localhost:8700/?accounts=local   (the game points its account API at this harness).
 //
 // What it sets up:
-// - ENVIRONMENT=development and FAKE_OAUTH=1: provider "fake" works. /auth/fake/start shows a tiny
-//   page with a "fake user id" field; Continue finishes the OAuth flow with a valid state, so the
-//   whole sign-in runs with no real provider. (The Worker refuses "fake" whenever
-//   ENVIRONMENT=production, or when it is not reached on 127.0.0.1/localhost.)
+// - ENVIRONMENT=development and FAKE_OAUTH=1: providers "fake" and "fake2" work (two, so linking a
+//   second platform can be tried). /auth/fake/start (or /auth/fake2/start) shows a tiny page with a
+//   "fake user id" field; Continue finishes the OAuth flow with a valid state, so the whole sign-in
+//   runs with no real provider. (The Worker refuses both whenever ENVIRONMENT=production, or when
+//   it is not reached on 127.0.0.1/localhost.) Like the real ones, a start needs ?challenge=.
 // - ALLOWED_ORIGINS and AUTH_RETURN_ORIGINS: http://localhost:8700 and http://127.0.0.1:8700;
 //   AUTH_RETURN_PATHS: "/" plus the real "/riftborn/" and "/riftborn/dev/".
 // - A throwaway AUTH_SIGNING_KEY, generated once and kept next to the database (a new key would
@@ -64,6 +67,7 @@ const env = {
   FAKE_OAUTH: '1',
   AUTH_SIGNING_KEY: throwawayKey()
 };
+if ((process.env.AUTH_SIGNING_KEY_PREVIOUS || '').length >= 32) env.AUTH_SIGNING_KEY_PREVIOUS = process.env.AUTH_SIGNING_KEY_PREVIOUS;
 for (const name of ['GOOGLE', 'DISCORD', 'GITHUB']) {
   for (const part of ['CLIENT_ID', 'CLIENT_SECRET']) {
     const value = process.env[`${name}_${part}`];

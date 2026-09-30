@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import worker from '../cloudflare/worker.js';
 import { createD1, openDatabase } from '../server/d1-sqlite.mjs';
-import { checkReturnUrl, fakeEnabled, PROFILE_MAX } from '../server/accounts-api.js';
+import { checkReturnUrl, fakeEnabled, PROFILE_MAX, hmac, ipSubject, keyId, nameSkeleton } from '../server/accounts-api.js';
 
 const sqlite = openDatabase(':memory:', 'drizzle', fs);
 const DB = createD1(sqlite);
@@ -50,33 +50,46 @@ async function call(path, { method = 'GET', body, token, ip = freshIp(), origin 
 }
 const nav = (path, opts = {}) => call(path, { origin: null, jar: browser, ...opts });
 const hashParam = (location, key) => new URLSearchParams(new URL(location).hash.slice(1)).get(key);
+const U = (...codes) => String.fromCodePoint(...codes);
+
+// A tab's client challenge, as the game makes it: it keeps the verifier and sends SHA-256 of it to
+// /start; the verifier goes with the login code to /auth/session.
+async function newChallenge() {
+  const verifier = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+  const challenge = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))).toString('base64url');
+  return { verifier, challenge };
+}
+const CH = await newChallenge(); // for flows whose code is never redeemed
+const START = '/auth/fake/start?challenge=' + CH.challenge + '&return=' + encodeURIComponent(RETURN);
 
 // The fake provider: start -> tiny page with the state -> Continue -> callback -> back to the game.
-async function fakeRedirect(userId, { mode, ticket, ret = RETURN, e = env } = {}) {
-  const params = new URLSearchParams({ return: ret });
+async function fakeRedirect(userId, { mode, ticket, ret = RETURN, e = env, provider = 'fake', jar = browser, pkce = null } = {}) {
+  const { verifier, challenge } = pkce || await newChallenge();
+  const params = new URLSearchParams({ return: ret, challenge });
   if (mode) params.set('mode', mode);
   if (ticket) params.set('ticket', ticket);
-  const page = await nav('/auth/fake/start?' + params, { e });
-  if (page.status !== 200) return { page };
+  const page = await nav(`/auth/${provider}/start?` + params, { e, jar });
+  if (page.status !== 200) return { page, verifier };
   const state = /name="state" value="([A-Za-z0-9_-]{43})"/.exec(page.data)?.[1];
   assert.ok(state, 'The fake page carries a valid state');
-  const back = await nav(`/auth/fake/callback?state=${state}&code=${encodeURIComponent(userId)}`, { e });
+  assert.ok(page.data.includes(`action="/auth/${provider}/callback"`), 'The fake page returns to its own provider');
+  const back = await nav(`/auth/${provider}/callback?state=${state}&code=${encodeURIComponent(userId)}`, { e, jar });
   assert.equal(back.status, 302);
-  return { page, state, location: back.headers.get('Location') };
+  return { page, state, location: back.headers.get('Location'), verifier };
 }
-async function fakeLogin(userId, opts) {
-  const { location } = await fakeRedirect(userId, opts);
-  assert.ok(location.startsWith(opts?.ret || RETURN), 'Back to the allowed return URL: ' + location);
+async function fakeLogin(userId, opts = {}) {
+  const { location, verifier } = await fakeRedirect(userId, opts);
+  assert.ok(location.startsWith(opts.ret || RETURN), 'Back to the allowed return URL: ' + location);
   const code = hashParam(location, 'rb_login');
   assert.ok(code, 'Login code in the fragment: ' + location);
-  const session = await call('/auth/session', { method: 'POST', body: { code }, e: opts?.e });
+  const session = await call('/auth/session', { method: 'POST', body: { code, verifier }, e: opts.e, token: opts.token });
   assert.equal(session.status, 200, JSON.stringify(session.data));
-  return { ...session.data, code, location };
+  return { ...session.data, code, location, verifier };
 }
-async function register(userId, username) {
-  const login = await fakeLogin(userId);
+async function register(userId, username, e = env, provider = 'fake') {
+  const login = await fakeLogin(userId, { e, provider });
   assert.equal(login.needsUsername, true);
-  const created = await call('/api/account', { method: 'POST', body: { signupToken: login.signupToken, username } });
+  const created = await call('/api/account', { method: 'POST', body: { signupToken: login.signupToken, username }, e });
   assert.equal(created.status, 200, JSON.stringify(created.data));
   return created.data;
 }
@@ -111,10 +124,10 @@ console.log('PASS accounts CORS: preflight headers and methods, Authorization al
 
 // ---- configuration: providers, fake provider gating, signing key ------------------------------
 {
-  assert.deepEqual((await call('/api/auth/providers')).data, { providers: ['fake'] });
+  assert.deepEqual((await call('/api/auth/providers')).data, { providers: ['fake', 'fake2'] }, 'Two fake platforms in the harness');
   const configured = { ...env, GOOGLE_CLIENT_ID: 'g-id', GOOGLE_CLIENT_SECRET: 'g-secret', DISCORD_CLIENT_ID: 'd-id', DISCORD_CLIENT_SECRET: 'd-secret', GITHUB_CLIENT_ID: 'h-id' };
-  assert.deepEqual((await call('/api/auth/providers', { e: configured })).data, { providers: ['google', 'discord', 'fake'] }, 'A provider missing its secret is unavailable');
-  const r = await nav('/auth/github/start?return=' + encodeURIComponent(RETURN), { e: configured });
+  assert.deepEqual((await call('/api/auth/providers', { e: configured })).data, { providers: ['google', 'discord', 'fake', 'fake2'] }, 'A provider missing its secret is unavailable');
+  const r = await nav('/auth/github/start?challenge=' + CH.challenge + '&return=' + encodeURIComponent(RETURN), { e: configured });
   assert.equal(r.status, 503);
   assert.equal(r.data.error, 'provider_unavailable');
 
@@ -123,6 +136,10 @@ console.log('PASS accounts CORS: preflight headers and methods, Authorization al
   assert.deepEqual((await call('/api/auth/providers', { e: production })).data, { providers: [] });
   assert.equal((await nav('/auth/fake/start?return=' + encodeURIComponent(RETURN), { e: production })).status, 404);
   assert.equal((await nav('/auth/fake/callback?state=x&code=y', { e: production })).status, 404);
+  for (const path of ['/auth/fake2/start?return=' + encodeURIComponent(RETURN), '/auth/fake2/callback?state=x&code=y']) {
+    assert.equal((await nav(path, { e: production })).status, 404, 'fake2 is gated exactly like fake: ' + path);
+    assert.equal((await nav(path, { base: 'https://riftborn-leaderboard.chanmanc10.workers.dev' })).status, 404);
+  }
   assert.equal(fakeEnabled(production, BASE + '/auth/fake/start'), false);
   assert.equal(fakeEnabled(env, 'https://riftborn-leaderboard.chanmanc10.workers.dev/auth/fake/start'), false, 'Not on a deployed host');
   assert.equal((await nav('/auth/fake/start?return=' + encodeURIComponent(RETURN), { base: 'https://riftborn-leaderboard.chanmanc10.workers.dev' })).status, 404);
@@ -174,13 +191,13 @@ console.log('PASS return URLs: exact origin + path allow-list, index.html, plain
 // ---- sign-up flow ----------------------------------------------------------------------------
 let alice, aliceToken;
 {
-  const { page, location } = await fakeRedirect('alice-1');
+  const { page, location, verifier } = await fakeRedirect('alice-1');
   assert.match(page.headers.get('Content-Security-Policy'), /default-src 'none'/);
   assert.equal(page.headers.get('X-Frame-Options'), 'DENY');
   assert.ok(location.startsWith(RETURN + '#rb_login='), 'Redirects to <return>#rb_login=<code>');
   const code = hashParam(location, 'rb_login');
   assert.match(code, /^[A-Za-z0-9_-]{43}$/);
-  let r = await call('/auth/session', { method: 'POST', body: { code } });
+  let r = await call('/auth/session', { method: 'POST', body: { code, verifier } });
   assert.equal(r.status, 200);
   assert.equal(r.data.needsUsername, true);
   assert.match(r.data.signupToken, /^[A-Za-z0-9_-]{43}$/);
@@ -188,12 +205,12 @@ let alice, aliceToken;
   assert.equal(r.data.token, undefined, 'No session before a username');
   const signupToken = r.data.signupToken;
 
-  r = await call('/auth/session', { method: 'POST', body: { code } });
+  r = await call('/auth/session', { method: 'POST', body: { code, verifier } });
   assert.equal(r.status, 400, 'A login code works once');
   assert.equal(r.data.error, 'expired');
 
   for (const [username, error] of [['ab', 'invalid'], ['a'.repeat(17), 'invalid'], ['bad name', 'invalid'], ['émile', 'invalid'], ['Admin', 'reserved'],
-    ['EXILE-1a2b', 'reserved'], ['riftborn', 'reserved'], ['Sh1tLord', 'reserved'], [42, 'invalid']]) {
+    ['EXILE-1a2b', 'reserved'], ['Exile', 'reserved'], ['riftborn', 'reserved'], ['Sh1tLord', 'reserved'], [42, 'invalid']]) {
     r = await call('/api/account', { method: 'POST', body: { signupToken, username } });
     assert.equal(r.status, 400, 'Refuses username ' + username);
     assert.equal(r.data.error, error, 'Username ' + username);
@@ -238,7 +255,9 @@ let alice, aliceToken;
   assert.notEqual(identity.provider_user_id, 'alice-1');
   assert.ok(!identity.provider_user_id.includes('alice'));
   const dump = JSON.stringify([q('SELECT * FROM sessions'), q('SELECT * FROM auth_pending'), q('SELECT * FROM rate_limits'), q('SELECT * FROM identities'), q('SELECT * FROM accounts')]);
-  for (const secret of [aliceToken, code, signupToken, 'alice-1', '10.0.0.']) assert.ok(!dump.includes(secret), 'Not stored raw: ' + secret.slice(0, 8));
+  for (const secret of [aliceToken, code, signupToken, 'alice-1', '10.0.0.', verifier]) assert.ok(!dump.includes(secret), 'Not stored raw: ' + secret.slice(0, 8));
+  assert.equal(identity.key_id, await keyId(KEY), 'The identity records which key hashed it');
+  assert.equal(one('SELECT username_skeleton FROM accounts WHERE id = ?', alice.id).username_skeleton, 'alice');
 }
 console.log('PASS sign-up: fake login -> needsUsername -> create (rules, single-use tokens) -> session -> GET account; only hashes stored.');
 
@@ -343,24 +362,28 @@ function stubProviders({ fail = null } = {}) {
 }
 const withProviders = { ...env, GOOGLE_CLIENT_ID: 'g-id', GOOGLE_CLIENT_SECRET: 'g-secret', DISCORD_CLIENT_ID: 'd-id', DISCORD_CLIENT_SECRET: 'd-secret', GITHUB_CLIENT_ID: 'h-id', GITHUB_CLIENT_SECRET: 'h-secret' };
 async function providerRedirect(provider, { mode, ticket, e = withProviders, fail } = {}) {
-  const params = new URLSearchParams({ return: RETURN });
+  const { verifier, challenge } = await newChallenge();
+  const params = new URLSearchParams({ return: RETURN, challenge });
   if (mode) params.set('mode', mode);
   if (ticket) params.set('ticket', ticket);
   const start = await nav(`/auth/${provider}/start?` + params, { e });
-  if (start.status !== 302) return { start };
+  if (start.status !== 302) return { start, verifier };
   const target = new URL(start.headers.get('Location'));
-  if (target.origin === GAME) return { start, location: target.href };
+  if (target.origin === GAME) return { start, location: target.href, verifier };
   stubProviders({ fail });
   try {
     const back = await nav(`/auth/${provider}/callback?code=provider-code-123&state=${target.searchParams.get('state')}`, { e });
     assert.equal(back.status, 302);
-    return { start, target, location: back.headers.get('Location') };
+    return { start, target, location: back.headers.get('Location'), verifier };
   } finally { globalThis.fetch = realFetch; }
 }
 {
   // Start: authorization code + state + PKCE S256, minimal scopes, callback on the Worker.
   for (const [provider, host, scope] of [['google', 'https://accounts.google.com/o/oauth2/v2/auth', 'openid'], ['discord', 'https://discord.com/oauth2/authorize', 'identify'], ['github', 'https://github.com/login/oauth/authorize', null]]) {
-    const r = await nav(`/auth/${provider}/start?return=` + encodeURIComponent(RETURN), { e: withProviders });
+    const refused = await nav(`/auth/${provider}/start?return=` + encodeURIComponent(RETURN), { e: withProviders });
+    assert.equal(refused.status, 400, 'No client challenge, no sign-in: ' + provider);
+    assert.equal(refused.data.error, 'challenge_required');
+    const r = await nav(`/auth/${provider}/start?challenge=${CH.challenge}&return=` + encodeURIComponent(RETURN), { e: withProviders });
     assert.equal(r.status, 302);
     assert.equal(r.headers.get('Referrer-Policy'), 'no-referrer');
     const target = new URL(r.headers.get('Location'));
@@ -373,11 +396,12 @@ async function providerRedirect(provider, { mode, ticket, e = withProviders, fai
     assert.match(target.searchParams.get('code_challenge'), /^[A-Za-z0-9_-]{43}$/);
     assert.match(target.searchParams.get('state'), /^[A-Za-z0-9_-]{43}$/);
     assert.ok(!target.href.includes('return'), 'The return URL stays server-side');
+    assert.ok(!target.href.includes(CH.challenge), 'The client challenge stays server-side');
   }
 
   // Callback: server-side code exchange with the PKCE verifier; only the platform id is read.
   providerCalls.length = 0;
-  const { target, location } = await providerRedirect('discord');
+  const { target, location, verifier: discordVerifier } = await providerRedirect('discord');
   const tokenCall = providerCalls.find(c => c.url === 'https://discord.com/api/oauth2/token');
   const form = new URLSearchParams(tokenCall.init.body);
   assert.equal(form.get('code'), 'provider-code-123');
@@ -386,7 +410,7 @@ async function providerRedirect(provider, { mode, ticket, e = withProviders, fai
   const challenge = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(form.get('code_verifier')))).toString('base64url');
   assert.equal(challenge, target.searchParams.get('code_challenge'), 'The verifier matches the challenge');
   assert.equal(providerCalls.find(c => c.url === 'https://discord.com/api/users/@me').init.headers.Authorization, 'Bearer d-access');
-  const discordLogin = await call('/auth/session', { method: 'POST', body: { code: hashParam(location, 'rb_login') } });
+  const discordLogin = await call('/auth/session', { method: 'POST', body: { code: hashParam(location, 'rb_login'), verifier: discordVerifier } });
   assert.equal(discordLogin.data.needsUsername, true, 'A new Discord user chooses a username');
   const gh = await providerRedirect('github');
   assert.ok(hashParam(gh.location, 'rb_login'));
@@ -399,7 +423,7 @@ async function providerRedirect(provider, { mode, ticket, e = withProviders, fai
   const failed = await providerRedirect('google', { fail: 'https://oauth2.googleapis.com/token' });
   console.error = logError;
   assert.equal(failed.location, RETURN + '#rb_error=provider_error');
-  const denied = await nav('/auth/fake/start?return=' + encodeURIComponent(RETURN));
+  const denied = await nav(START);
   const deniedState = /name="state" value="([^"]+)"/.exec(denied.data)[1];
   const cancelled = await nav(`/auth/fake/callback?state=${deniedState}&error=access_denied`);
   assert.equal(cancelled.headers.get('Location'), RETURN + '#rb_error=cancelled');
@@ -409,20 +433,25 @@ async function providerRedirect(provider, { mode, ticket, e = withProviders, fai
   assert.equal(r.status, 200);
   const ticket = r.data.ticket;
   assert.ok(r.data.expiresAt <= Date.now() + 5 * 60000);
+  const otherDevice = await fakeLogin('alice-1');
   const linked = await providerRedirect('google', { mode: 'link', ticket });
   const linkCode = hashParam(linked.location, 'rb_login');
-  r = await call('/auth/session', { method: 'POST', body: { code: linkCode } });
-  assert.equal(r.status, 200);
+  assert.equal(one("SELECT COUNT(*) AS n FROM identities WHERE provider = 'google'").n, 0, 'The callback links nothing by itself');
+  r = await call('/auth/session', { method: 'POST', body: { code: linkCode, verifier: linked.verifier }, token: aliceToken });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.linked, 'google');
   assert.equal(r.data.token, undefined, 'A link hands out no new token');
   assert.deepEqual(r.data.account.providers, ['fake', 'google']);
+  assert.ok(r.data.revoked >= 1, 'Linking signs out the other devices');
+  assert.equal((await call('/api/account', { token: otherDevice.token })).status, 401);
+  assert.equal((await call('/api/account', { token: aliceToken })).status, 200, 'The device that linked stays signed in');
   const reuse = await providerRedirect('google', { mode: 'link', ticket });
   assert.equal(reuse.location, RETURN + '#rb_error=invalid_state', 'A link ticket works once');
   assert.equal((await call('/api/account/link-ticket', { method: 'POST' })).status, 401);
 
   // Google now signs in to Alice's account too.
   const viaGoogle = await providerRedirect('google');
-  r = await call('/auth/session', { method: 'POST', body: { code: hashParam(viaGoogle.location, 'rb_login') } });
+  r = await call('/auth/session', { method: 'POST', body: { code: hashParam(viaGoogle.location, 'rb_login'), verifier: viaGoogle.verifier } });
   assert.equal(r.data.account.id, alice.id, 'Any linked platform signs in to the same account');
 
   // Mallory cannot take Alice's Google identity; Alice cannot link a second Google account.
@@ -444,13 +473,16 @@ async function providerRedirect(provider, { mode, ticket, e = withProviders, fai
   r = await unlink('google');
   assert.equal(r.status, 200);
   assert.deepEqual(r.data.account.providers, ['fake']);
+  assert.ok(r.data.revoked >= 1, 'Unlinking signs out the other devices');
+  assert.equal((await call('/api/account', { token: viaGoogle.token })).status, 401, 'A session made through the removed platform is gone');
+  assert.equal((await call('/api/account', { token: aliceToken })).status, 200);
   r = await unlink('fake');
   assert.equal(r.status, 409);
   assert.equal(r.data.error, 'last_identity');
   assert.equal(one('SELECT COUNT(*) AS n FROM identities WHERE account_id = ?', alice.id).n, 1);
   assert.equal((await unlink('fake', mallory.token)).data.error, 'last_identity');
 }
-console.log('PASS platforms: OAuth start (state, PKCE S256, scopes), code exchange, link via ticket, already_linked, unlink (last identity refused).');
+console.log('PASS platforms: OAuth start (challenge required, state, PKCE S256, scopes), code exchange, link via ticket + session, already_linked, unlink (last identity refused), other devices signed out.');
 
 // ---- profile sync --------------------------------------------------------------------------
 {
@@ -554,22 +586,22 @@ console.log('PASS sessions: logout revokes, 180-day sliding expiry, expired refu
 
 // ---- expired and used codes, states, tickets --------------------------------------------------------
 {
-  const { location } = await fakeRedirect('alice-1');
+  const { location, verifier } = await fakeRedirect('alice-1');
   sqlite.prepare("UPDATE auth_pending SET expires_at = ? WHERE kind = 'login'").run(Date.now() - 1);
-  let r = await call('/auth/session', { method: 'POST', body: { code: hashParam(location, 'rb_login') } });
+  let r = await call('/auth/session', { method: 'POST', body: { code: hashParam(location, 'rb_login'), verifier } });
   assert.equal(r.status, 400, 'Login codes expire (60 s)');
   assert.equal(r.data.error, 'expired');
   for (const code of [undefined, '', 'short', 'x'.repeat(43), 12]) {
     assert.equal((await call('/auth/session', { method: 'POST', body: { code } })).data.error, 'expired');
   }
 
-  const page = await nav('/auth/fake/start?return=' + encodeURIComponent(RETURN));
+  const page = await nav(START);
   const state = /name="state" value="([^"]+)"/.exec(page.data)[1];
   r = await nav(`/auth/fake/callback?state=${state}&code=alice-1`);
   assert.ok(hashParam(r.headers.get('Location'), 'rb_login'));
   r = await nav(`/auth/fake/callback?state=${state}&code=alice-1`);
   assert.equal(r.headers.get('Location'), GAME + '/#rb_error=invalid_state', 'A state works once (errors go to the first allowed return)');
-  const page2 = await nav('/auth/fake/start?return=' + encodeURIComponent(RETURN));
+  const page2 = await nav(START);
   const state2 = /name="state" value="([^"]+)"/.exec(page2.data)[1];
   sqlite.prepare("UPDATE auth_pending SET expires_at = ? WHERE kind = 'state'").run(Date.now() - 1);
   r = await nav(`/auth/fake/callback?state=${state2}&code=alice-1`);
@@ -577,11 +609,11 @@ console.log('PASS sessions: logout revokes, 180-day sliding expiry, expired refu
   r = await nav('/auth/fake/callback?code=alice-1');
   assert.equal(r.headers.get('Location'), GAME + '/#rb_error=invalid_state');
   // A state from one provider cannot finish another provider's sign-in.
-  const page3 = await nav('/auth/fake/start?return=' + encodeURIComponent(RETURN));
+  const page3 = await nav(START);
   const state3 = /name="state" value="([^"]+)"/.exec(page3.data)[1];
   r = await nav(`/auth/google/callback?state=${state3}&code=abc`, { e: withProviders });
   assert.equal(r.headers.get('Location'), GAME + '/#rb_error=invalid_state');
-  const page4 = await nav('/auth/fake/start?return=' + encodeURIComponent(RETURN));
+  const page4 = await nav(START);
   r = await nav(`/auth/fake/callback?state=${/name="state" value="([^"]+)"/.exec(page4.data)[1]}&code=${encodeURIComponent('bad id!')}`);
   assert.equal(r.headers.get('Location'), RETURN + '#rb_error=provider_error');
 
@@ -599,15 +631,15 @@ console.log('PASS sessions: logout revokes, 180-day sliding expiry, expired refu
 }
 console.log('PASS single-use values: login codes, states, signup tokens and link tickets are single-use and expire.');
 
-// ---- CSRF: the OAuth round trip is bound to the browser; optional client challenge -----------------
+// ---- CSRF: the OAuth round trip is bound to the browser; the client challenge is required -------
 {
-  const startUrl = (extra = '') => '/auth/fake/start?return=' + encodeURIComponent(RETURN) + extra;
+  const startUrl = (extra = '', challenge = CH.challenge) => '/auth/fake/start?return=' + encodeURIComponent(RETURN) + (challenge === null ? '' : '&challenge=' + challenge) + extra;
   const stateOf = page => /name="state" value="([^"]+)"/.exec(page.data)[1];
 
   // Cookie: first-party on the Worker origin, HttpOnly, Lax, 10 min; __Host- + Secure over https.
   let r = await nav(startUrl(), { jar: newJar() });
   assert.match(r.headers.get('Set-Cookie'), /^rb_oauth=[A-Za-z0-9_-]{43}; Path=\/; Max-Age=600; HttpOnly; SameSite=Lax$/);
-  const https = await nav('/auth/google/start?return=' + encodeURIComponent('https://chancrisp.github.io/riftborn/'), {
+  const https = await nav('/auth/google/start?challenge=' + CH.challenge + '&return=' + encodeURIComponent('https://chancrisp.github.io/riftborn/'), {
     base: 'https://riftborn-leaderboard.chanmanc10.workers.dev', jar: newJar(),
     e: { ...withProviders, ENVIRONMENT: 'production', AUTH_RETURN_ORIGINS: undefined, AUTH_RETURN_PATHS: undefined, FAKE_OAUTH: undefined }
   });
@@ -629,10 +661,91 @@ console.log('PASS single-use values: login codes, states, signup tokens and link
   r = await nav(`/auth/fake/callback?state=${stateOf(forged2)}&code=attacker-1`, { jar: wrong });
   assert.equal(r.headers.get('Location'), RETURN + '#rb_error=invalid_state', 'A different nonce is refused');
 
-  // Link CSRF: an attacker's link flow finished by a victim does not attach the victim's platform.
+  // The client challenge is required (security fix): no flow starts without one, in either mode,
+  // and a malformed one is refused. A refused link start does not use up the ticket.
+  for (const bad of [startUrl('', null), startUrl('&mode=link', null), '/auth/fake2/start?return=' + encodeURIComponent(RETURN)]) {
+    r = await nav(bad, { jar: newJar() });
+    assert.equal(r.status, 400, 'Refused without a challenge: ' + bad);
+    assert.equal(r.data.error, 'challenge_required');
+    assert.equal(r.headers.get('Set-Cookie'), null, 'and nothing is set up');
+  }
+  assert.equal((await nav(startUrl('', 'short'))).status, 400);
+  assert.equal((await nav(startUrl('', 'short'))).data.error, 'invalid_challenge');
   const eve = await register('eve-1', 'Eve');
+  const keptTicket = (await call('/api/account/link-ticket', { method: 'POST', token: eve.token })).data.ticket;
+  assert.equal((await nav(startUrl('&mode=link&ticket=' + keptTicket, null))).status, 400);
+  const stillGood = await fakeRedirect('eve-link-probe', { mode: 'link', ticket: keptTicket, provider: 'fake2' });
+  assert.ok(hashParam(stillGood.location, 'rb_login'), 'The ticket survived the refused start');
+
+  // A code redeems only with its flow's verifier: none, a wrong one, or another tab's is refused.
+  const { verifier, challenge } = await newChallenge();
+  const redeem = async body => {
+    const p = await nav(startUrl('', challenge));
+    const back = await nav(`/auth/fake/callback?state=${stateOf(p)}&code=alice-1`);
+    return call('/auth/session', { method: 'POST', body: { code: hashParam(back.headers.get('Location'), 'rb_login'), ...body } });
+  };
+  for (const body of [{}, { verifier: 'x'.repeat(43) }, { verifier: (await newChallenge()).verifier }, { verifier: challenge }]) {
+    r = await redeem(body);
+    assert.equal(r.status, 400, 'Refused verifier: ' + JSON.stringify(body));
+    assert.equal(r.data.error, 'expired');
+  }
+  r = await redeem({ verifier });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.account.id, alice.id);
+  // A pending login without a challenge (made before challenges were required) is refused too.
+  for (const withVerifier of [false, true]) {
+    const flow = await fakeRedirect('alice-1');
+    sqlite.prepare("UPDATE auth_pending SET data = json_remove(data, '$.challenge') WHERE kind = 'login'").run();
+    r = await call('/auth/session', { method: 'POST', body: { code: hashParam(flow.location, 'rb_login'), ...(withVerifier ? { verifier: flow.verifier } : {}) } });
+    assert.equal(r.status, 400, 'No challenge on the code, no session');
+  }
+
+  // Login CSRF / account fixation (security fix): the attacker completes a sign-in in their own
+  // browser, with their own challenge, and sends the victim <game>#rb_login=CODE. The victim's
+  // page holds no verifier for it (or another flow's): no username screen, no session, nothing.
+  const pendingSignups = () => one("SELECT COUNT(*) AS n FROM auth_pending WHERE kind = 'signup'").n;
+  const signupsBefore = pendingSignups();
+  for (const victimBody of [code => ({ code }), async code => ({ code, verifier: (await newChallenge()).verifier })]) {
+    for (const who of ['fixation-new-1', 'alice-1']) { // an unregistered attacker identity, and a registered one
+      const planted = await fakeRedirect(who, { jar: newJar() });
+      const code = hashParam(planted.location, 'rb_login');
+      r = await call('/auth/session', { method: 'POST', body: await victimBody(code) });
+      assert.equal(r.status, 400, 'The victim page cannot redeem the attacker code (' + who + ')');
+      assert.equal(r.data.error, 'expired');
+      assert.equal(r.data.token, undefined);
+      assert.equal(r.data.signupToken, undefined);
+    }
+  }
+  assert.equal(pendingSignups(), signupsBefore, 'No signup was opened for the attacker identity');
+
+  // Link CSRF (security fix): the attacker's ticket, started and finished in the victim's browser
+  // (so the cookie binding passes and the victim's own platform identity comes back), attaches
+  // nothing. The code needs the attacker page's verifier AND the attacker account's session.
+  const victimAccount = await register('victim-link-1', 'VictimLinker');
+  const attempts = [
+    { label: 'no verifier, no session', body: () => ({}), token: null, error: 'expired', status: 400 },
+    { label: 'the right verifier but no session', body: v => ({ verifier: v }), token: null, error: 'unauthorized', status: 401 },
+    { label: "the victim's own session", body: v => ({ verifier: v }), token: victimAccount.token, error: 'wrong_account', status: 403 }
+  ];
+  for (const attempt of attempts) {
+    const eveTicket = (await call('/api/account/link-ticket', { method: 'POST', token: eve.token })).data.ticket;
+    const victimBrowser = newJar();
+    const attackerPkce = await newChallenge(); // chosen by the attacker, in the link they send
+    const flow = await fakeRedirect('victim-7', { mode: 'link', ticket: eveTicket, provider: 'fake2', jar: victimBrowser, pkce: attackerPkce });
+    const code = hashParam(flow.location, 'rb_login');
+    assert.ok(code, 'The victim browser finished the provider step');
+    r = await call('/auth/session', { method: 'POST', body: { code, ...attempt.body(attackerPkce.verifier) }, token: attempt.token });
+    assert.equal(r.status, attempt.status, attempt.label + ': ' + JSON.stringify(r.data));
+    assert.equal(r.data.error, attempt.error, attempt.label);
+  }
+  assert.deepEqual((await call('/api/account', { token: eve.token })).data.account.providers, ['fake'], 'Nothing was linked to the attacker');
+  assert.equal(one("SELECT COUNT(*) AS n FROM identities WHERE provider = 'fake2'").n, 0, 'The victim identity is still free');
+  const victimFake2 = await fakeLogin('victim-7', { provider: 'fake2' });
+  assert.equal(victimFake2.needsUsername, true, 'The victim signs in as themselves, not into the attacker account');
+
+  // The old shape of the attack (callback in a different browser) stays refused.
   const eveTicket = (await call('/api/account/link-ticket', { method: 'POST', token: eve.token })).data.ticket;
-  const start = await nav('/auth/google/start?mode=link&ticket=' + eveTicket + '&return=' + encodeURIComponent(RETURN), { jar: attacker, e: withProviders });
+  const start = await nav('/auth/google/start?mode=link&challenge=' + CH.challenge + '&ticket=' + eveTicket + '&return=' + encodeURIComponent(RETURN), { jar: attacker, e: withProviders });
   const state = new URL(start.headers.get('Location')).searchParams.get('state');
   stubProviders();
   try {
@@ -643,34 +756,14 @@ console.log('PASS single-use values: login codes, states, signup tokens and link
 
   // Two tabs signing in at once share the nonce, so both finish.
   const tabs = newJar();
-  const one = await nav(startUrl(), { jar: tabs });
-  const two = await nav(startUrl(), { jar: tabs });
-  for (const tab of [one, two]) {
+  const tabOne = await nav(startUrl(), { jar: tabs });
+  const tabTwo = await nav(startUrl(), { jar: tabs });
+  for (const tab of [tabOne, tabTwo]) {
     r = await nav(`/auth/fake/callback?state=${stateOf(tab)}&code=tabs-1`, { jar: tabs });
     assert.ok(hashParam(r.headers.get('Location'), 'rb_login'), 'Parallel sign-ins both complete');
   }
-
-  // Client challenge: a login code only redeems with the verifier of the page that started it.
-  const verifier = 'v'.repeat(21) + 'erifier-0123456789abcd'; // 43 base64url characters, like 32 random bytes
-  const challenge = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))).toString('base64url');
-  assert.equal((await nav(startUrl('&challenge=short'))).status, 400);
-  const redeem = async body => {
-    const p = await nav(startUrl('&challenge=' + challenge));
-    const back = await nav(`/auth/fake/callback?state=${stateOf(p)}&code=alice-1`);
-    return call('/auth/session', { method: 'POST', body: { code: hashParam(back.headers.get('Location'), 'rb_login'), ...body } });
-  };
-  r = await redeem({});
-  assert.equal(r.status, 400, 'Without the verifier a challenged code is refused');
-  assert.equal(r.data.error, 'expired');
-  r = await redeem({ verifier: 'x'.repeat(43) });
-  assert.equal(r.status, 400, 'A wrong verifier is refused');
-  r = await redeem({ verifier });
-  assert.equal(r.status, 200);
-  assert.equal(r.data.account.id, alice.id);
-  const plain = await fakeLogin('alice-1');
-  assert.ok(plain.token, 'Flows without a challenge still work (game not yet sending one)');
 }
-console.log('PASS CSRF: browser-bound OAuth round trip (login and link CSRF refused), parallel tabs, optional client challenge.');
+console.log('PASS CSRF: challenge required at /start, verifier required at /auth/session, login CSRF and account fixation refused, link CSRF refused (verifier + own session), browser-bound round trip, parallel tabs.');
 
 // ---- rate limits ----------------------------------------------------------------------------
 {
@@ -681,10 +774,43 @@ console.log('PASS CSRF: browser-bound OAuth round trip (login and link CSRF refu
   assert.equal(r.data.error, 'rate_limited');
   assert.ok(Number(r.headers.get('Retry-After')) > 0);
   assert.equal((await call('/api/username-available?name=Someone')).status, 200, 'Other IPs are unaffected');
+  // Past the limit the counter row is left alone: a flood costs no further writes.
+  const checkKey = await hmac(KEY, 'rl:check:ip:' + ip);
+  const counted = one('SELECT count FROM rate_limits WHERE key = ?', checkKey).count;
+  assert.equal(counted, 61);
+  for (let i = 0; i < 5; i++) assert.equal((await call('/api/username-available?name=Someone', { ip })).status, 429);
+  assert.equal(one('SELECT count FROM rate_limits WHERE key = ?', checkKey).count, counted, 'Rejected requests are not written');
+
+  // IPv6: one bucket per /64, so rotating addresses inside it does not reset the limit.
+  assert.equal(ipSubject('2001:db8:1:2::1'), '2001:db8:1:2::/64');
+  assert.equal(ipSubject('2001:0DB8:0001:0002:ffff:ffff:ffff:ffff'), '2001:db8:1:2::/64');
+  assert.equal(ipSubject('2001:db8::1'), '2001:db8:0:0::/64');
+  assert.equal(ipSubject('::1'), '0:0:0:0::/64');
+  assert.equal(ipSubject('::ffff:198.51.100.7'), '198.51.100.7');
+  assert.equal(ipSubject('198.51.100.7'), '198.51.100.7');
+  assert.equal(ipSubject(null), 'unknown');
+  for (let i = 0; i < 60; i++) assert.equal((await call('/api/username-available?name=Someone', { ip: `2001:db8:1:2::${(i + 1).toString(16)}` })).status, 200);
+  assert.equal((await call('/api/username-available?name=Someone', { ip: '2001:db8:1:2:abcd:ef01:2345:6789' })).status, 429, 'Same /64, same bucket');
+  assert.equal((await call('/api/username-available?name=Someone', { ip: '2001:db8:1:3::1' })).status, 200, 'Another /64 is unaffected');
+
+  // With the Workers rate-limit binding (the deployed Worker), per-IP buckets never write to D1.
+  const seen = [];
+  let allowance = 2;
+  const withBinding = { ...env, ACCOUNTS_RATE_LIMITER: { async limit({ key }) { seen.push(key); return { success: allowance-- > 0 }; } } };
+  const rowsBefore = one('SELECT COUNT(*) AS n FROM rate_limits').n;
+  const bindingIp = '198.51.100.23';
+  assert.equal((await call('/api/username-available?name=Someone', { ip: bindingIp, e: withBinding })).status, 200);
+  assert.equal((await call('/api/username-available?name=Someone', { ip: bindingIp, e: withBinding })).status, 200);
+  r = await call('/api/username-available?name=Someone', { ip: bindingIp, e: withBinding });
+  assert.equal(r.status, 429);
+  assert.equal(r.headers.get('Retry-After'), '60');
+  assert.equal(one('SELECT COUNT(*) AS n FROM rate_limits').n, rowsBefore, 'No D1 row for binding-limited buckets');
+  assert.equal(new Set(seen).size, 1);
+  assert.ok(!seen[0].includes('198.51.100'), 'The binding key is hashed too');
 
   const startIp = '203.0.113.78';
-  for (let i = 0; i < 20; i++) assert.equal((await nav('/auth/fake/start?return=' + encodeURIComponent(RETURN), { ip: startIp })).status, 200);
-  assert.equal((await nav('/auth/fake/start?return=' + encodeURIComponent(RETURN), { ip: startIp })).status, 429, 'Sign-in starts: 20 per 10 min per IP');
+  for (let i = 0; i < 20; i++) assert.equal((await nav(START, { ip: startIp })).status, 200);
+  assert.equal((await nav(START, { ip: startIp })).status, 429, 'Sign-in starts: 20 per 10 min per IP');
 
   const sessionIp = '203.0.113.79';
   for (let i = 0; i < 30; i++) await call('/auth/session', { method: 'POST', body: { code: 'x' }, ip: sessionIp });
@@ -703,7 +829,7 @@ console.log('PASS CSRF: browser-bound OAuth round trip (login and link CSRF refu
   assert.equal((await call('/api/profile', { method: 'PUT', body: { profile: {}, baseRev: rev }, token: bob.token })).status, 429, 'Profile saves: 120 per hour per account');
   assert.ok(!JSON.stringify(q('SELECT key FROM rate_limits')).includes('203.0.113'), 'Limiter keys are hashed, never raw IPs');
 }
-console.log('PASS rate limits: fixed windows per hashed IP / account, 429 rate_limited with Retry-After.');
+console.log('PASS rate limits: fixed windows per hashed IP (IPv6 per /64) / account, no writes past the limit, rate-limit binding for per-IP buckets, 429 rate_limited with Retry-After.');
 
 // ---- delete account ---------------------------------------------------------------------------
 {
@@ -747,7 +873,237 @@ console.log('PASS delete account: account, identities, sessions and profile remo
   assert.ok(bare.prepare("SELECT name FROM sqlite_master WHERE name = 'idx_scores_account'").get(), 'with its index');
   const login = await fakeLogin('dora-1', { e: bareEnv });
   assert.equal(login.needsUsername, true, 'Account tables bootstrap on first use');
+
+  // A database made by the first 2.2 build (no username_skeleton, no key_id) gets both columns,
+  // and its accounts their skeletons, so guest name protection covers them at once.
+  const early = openDatabase(':memory:', 'drizzle', fs);
+  early.exec(`CREATE TABLE accounts (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE, created_at INTEGER,
+    username_changed_at INTEGER, profile_json TEXT, profile_rev INTEGER NOT NULL DEFAULT 0, updated_at INTEGER)`);
+  early.exec('CREATE TABLE identities (provider TEXT, provider_user_id TEXT, account_id TEXT, created_at INTEGER, PRIMARY KEY (provider, provider_user_id))');
+  early.exec("INSERT INTO accounts (id, username, created_at, profile_rev) VALUES ('acc-early', 'Early_Bird', 1, 0)");
+  const earlyEnv = { ...env, DB: createD1(early) };
+  r = await call('/api/scores', { method: 'POST', body: run(95, { name: 'EarlyBird' }), e: earlyEnv });
+  assert.equal(r.status, 409, 'The backfilled skeleton protects an old account name');
+  assert.equal(early.prepare("SELECT username_skeleton FROM accounts WHERE id = 'acc-early'").get().username_skeleton, 'earlybird');
+  assert.ok(early.prepare("PRAGMA table_info('identities')").all().some(c => c.name === 'key_id'));
+  const early1 = await register('early-1', 'EarlyTwo', earlyEnv);
+  assert.equal(early.prepare('SELECT key_id FROM identities WHERE account_id = ?').get(early1.account.id).key_id, await keyId(KEY));
 }
-console.log('PASS lazy schema: tables and account_id column bootstrap on an old database; old rows read as unverified.');
+console.log('PASS lazy schema: tables and account_id column bootstrap on an old database; old rows read as unverified; first-build account tables gain skeletons and key ids.');
+
+// ---- guest name protection: look-alike and invisible characters (security fix) -----------------------
+{
+  assert.equal(nameSkeleton('VictimName'), 'victimname');
+  for (const name of ['Victim_Name', 'victim-name', 'Victim Name', 'VictimNam' + U(0x0435), 'V' + U(0x0456) + 'ctimName', 'V' + U(0xED) + 'ctimName',
+    U(0xFF36, 0xFF49, 0xFF43, 0xFF54, 0xFF49, 0xFF4D, 0xFF2E, 0xFF41, 0xFF4D, 0xFF45), 'Victim' + U(0x200B) + 'Name', 'VictimName' + U(0x2060),
+    'Vict' + U(0x03B9) + 'mName', 'V' + U(0x0301) + 'ictimName']) {
+    assert.equal(nameSkeleton(name), 'victimname', 'Skeleton of ' + JSON.stringify(name));
+  }
+  assert.equal(nameSkeleton('Illidan'), nameSkeleton('lllidan'), 'A capital I reads as l');
+  assert.equal(nameSkeleton('Illidan'), nameSkeleton('1llidan'));
+  assert.notEqual(nameSkeleton('Kai'), nameSkeleton('Kal'), 'A small i does not');
+  assert.equal(nameSkeleton('B0B'), nameSkeleton('bob'));
+  assert.equal(nameSkeleton('___'), '', 'Separators only: an empty skeleton');
+
+  const victim = await register('victim-1', 'VictimName');
+  const post = (n, name) => call('/api/scores', { method: 'POST', body: run(n, { name }) });
+  // Invisible characters: refused outright (zero width space, word joiner, bidi override, zero
+  // width no-break space, Hangul filler, private use, tag characters).
+  const invisible = ['Victim' + U(0x200B) + 'Name', 'VictimName' + U(0x2060), U(0x202E) + 'emaNmitciV', 'Victim' + U(0xFEFF) + 'Name',
+    'Victim' + U(0x3164) + 'Name', 'Victim' + U(0xE000) + 'Name', 'VictimName' + U(0xE0041), 'Victim' + U(0x200D) + 'Name'];
+  let n = 60;
+  for (const name of invisible) {
+    const r = await post(n++, name);
+    assert.equal(r.status, 400, 'Invisible characters refused: ' + JSON.stringify(name));
+    assert.equal(r.data.error, 'invalid_name');
+  }
+  // Look-alikes of the account's name: refused like the name itself.
+  const lookalikes = ['VictimNam' + U(0x0435), 'V' + U(0x0456) + 'ctimName', U(0xFF36, 0xFF49, 0xFF43, 0xFF54, 0xFF49, 0xFF4D, 0xFF2E, 0xFF41, 0xFF4D, 0xFF45),
+    'Victim_Name', 'Victim Name', 'VICTIM-NAME', 'V' + U(0xED) + 'ctim Name', 'Vi' + U(0x0441) + 'timName', 'Vict' + U(0x03B9) + 'mName', 'victimname'];
+  for (const name of lookalikes) {
+    const r = await post(n++, name);
+    assert.equal(r.status, 409, 'Look-alike refused: ' + JSON.stringify(name));
+    assert.equal(r.data.error, 'name_taken');
+  }
+  assert.equal(one('SELECT COUNT(*) AS n FROM scores WHERE id >= ? AND id < ?', uid(60), uid(n)).n, 0, 'None of them reached the board');
+  // The game's guest pre-check (?guest=1) gives the same answers before a run is posted.
+  const guestCheck = async name => (await call('/api/username-available?guest=1&name=' + encodeURIComponent(name))).data;
+  for (const name of invisible) assert.deepEqual(await guestCheck(name), { available: false, reason: 'invalid' }, 'Guest check: ' + JSON.stringify(name));
+  for (const name of lookalikes) assert.deepEqual(await guestCheck(name), { available: false, reason: 'taken' }, 'Guest check: ' + JSON.stringify(name));
+  for (const name of ['Guest Runner', 'Victor', U(0x6771, 0x4EAC)]) assert.deepEqual(await guestCheck(name), { available: true }, 'Guest check: ' + name);
+  for (const name of ['', '   ', 'x'.repeat(17)]) assert.equal((await guestCheck(name)).reason, 'invalid');
+  assert.deepEqual((await call('/api/username-available?name=Victim_Name')).data, { available: true }, 'Account names follow their own rules (look-alike accounts stay possible)');
+  // Other names are untouched, non-Latin ones included; NFKC-folded names are stored folded.
+  for (const name of ['Victor', 'Name Victim', U(0xC9) + 'mile', U(0x6771, 0x4EAC), U(0x0414, 0x043C, 0x0438, 0x0442, 0x0440, 0x0438, 0x0439), 'Victim Name 2']) {
+    assert.equal((await post(n++, name)).status, 200, 'Allowed: ' + name);
+  }
+  assert.equal((await post(n++, U(0xFF2A, 0xFF4F))).status, 200);
+  assert.equal(one('SELECT name FROM scores WHERE id = ?', uid(n - 1)).name, 'Jo', 'Fullwidth letters are stored in their plain form');
+  // The account's own posts are unaffected, and a rename moves the protection with the name.
+  assert.equal((await call('/api/scores', { method: 'POST', body: run(n++), token: victim.token })).status, 200);
+  assert.equal((await call('/api/account', { method: 'PATCH', body: { username: 'Other_Name' }, token: victim.token })).status, 200);
+  assert.equal((await post(n++, 'VictimNam' + U(0x0435))).status, 200, 'The old name is free after a rename');
+  assert.equal((await post(n++, 'OtherNam' + U(0x0435))).status, 409, 'The new one is protected');
+  assert.equal((await call('/api/account', { method: 'PATCH', body: { username: 'OTHER_NAME' }, token: victim.token })).status, 200);
+  assert.equal(one('SELECT username_skeleton FROM accounts WHERE id = ?', victim.account.id).username_skeleton, 'othername', 'A letter-case change updates the skeleton');
+  const illidan = await register('illidan-1', 'Illidan');
+  for (const name of ['lllidan', 'IIlidan', '1llidan']) assert.equal((await post(n++, name)).status, 409, 'Capital I look-alike: ' + name);
+  assert.ok(illidan.account.id);
+}
+console.log('PASS guest names: invisible characters refused (400 invalid_name), look-alike skeletons (Cyrillic, Greek, fullwidth, accents, separators, I/l/1, 0/o) protected, renames move the protection.');
+
+// ---- sessions: sign out other devices, one-year cap, link and unlink end other sessions (security fix) ----
+{
+  const sam = await register('sam-1', 'SamSessions');
+  const phone = await fakeLogin('sam-1');
+  const tablet = await fakeLogin('sam-1');
+  let r = await call('/auth/logout', { method: 'POST', token: sam.token, body: { all: true } });
+  assert.deepEqual(r.data, { ok: true, revoked: 2 }, 'Sign out other devices');
+  assert.equal((await call('/api/account', { token: phone.token })).status, 401);
+  assert.equal((await call('/api/account', { token: tablet.token })).status, 401);
+  assert.equal((await call('/api/account', { token: sam.token })).status, 200, 'This device stays signed in');
+  assert.equal((await call('/auth/logout', { method: 'POST', body: { all: true } })).status, 401);
+  assert.equal((await call('/auth/logout', { method: 'POST', body: { all: true }, token: phone.token })).status, 401, 'A revoked session cannot sign out others');
+  r = await call('/auth/logout', { method: 'POST', token: sam.token, body: { all: false } });
+  assert.deepEqual(r.data, { ok: true });
+  assert.equal((await call('/api/account', { token: sam.token })).status, 401, 'Without all: true only this session ends');
+  const main = await fakeLogin('sam-1');
+
+  // A session never lives more than a year after its sign-in, however often it is used.
+  const old = await fakeLogin('sam-1');
+  const oldHash = await hmac(KEY, old.token);
+  sqlite.prepare('UPDATE sessions SET created_at = ?, last_seen = ? WHERE token_hash = ?').run(Date.now() - 366 * DAY, Date.now() - 2 * DAY, oldHash);
+  assert.equal((await call('/api/account', { token: old.token })).status, 401, 'Refused after 365 days');
+  assert.equal(one('SELECT COUNT(*) AS n FROM sessions WHERE token_hash = ?', oldHash).n, 0, 'and deleted');
+  const aging = await fakeLogin('sam-1');
+  const agingHash = await hmac(KEY, aging.token);
+  const createdAt = Date.now() - 300 * DAY;
+  sqlite.prepare('UPDATE sessions SET created_at = ?, last_seen = ? WHERE token_hash = ?').run(createdAt, Date.now() - 2 * DAY, agingHash);
+  assert.equal((await call('/api/account', { token: aging.token })).status, 200);
+  assert.equal(one('SELECT expires_at FROM sessions WHERE token_hash = ?', agingHash).expires_at, createdAt + 365 * DAY, 'Sliding stops at the cap');
+
+  // Link a second platform (fake2) end to end: the code, its verifier and the account's session.
+  const ticket = (await call('/api/account/link-ticket', { method: 'POST', token: main.token })).data.ticket;
+  const flow = await fakeRedirect('sam-2', { mode: 'link', ticket, provider: 'fake2' });
+  r = await call('/auth/session', { method: 'POST', body: { code: hashParam(flow.location, 'rb_login'), verifier: flow.verifier }, token: main.token });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.linked, 'fake2');
+  assert.deepEqual(r.data.account.providers, ['fake', 'fake2']);
+  assert.equal(r.data.revoked, 1, 'Linking ends the other session');
+  assert.equal((await call('/api/account', { token: aging.token })).status, 401);
+  const via2 = await fakeLogin('sam-2', { provider: 'fake2' });
+  assert.equal(via2.account.id, sam.account.id, 'The second platform signs in to the same account');
+  // Linking an identity that is already this account's is a no-op (nothing revoked).
+  const again = await fakeRedirect('sam-2', { mode: 'link', ticket: (await call('/api/account/link-ticket', { method: 'POST', token: main.token })).data.ticket, provider: 'fake2' });
+  r = await call('/auth/session', { method: 'POST', body: { code: hashParam(again.location, 'rb_login'), verifier: again.verifier }, token: main.token });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.revoked, 0);
+  assert.equal((await call('/api/account', { token: via2.token })).status, 200);
+  // Unlink from the fake2 device: the fake-platform session ends, this one stays.
+  r = await call('/api/account/identities/fake', { method: 'DELETE', token: via2.token });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data.account.providers, ['fake2']);
+  assert.equal(r.data.revoked, 1);
+  assert.equal((await call('/api/account', { token: main.token })).status, 401, 'A session from before the unlink is gone');
+  assert.equal((await call('/api/account', { token: via2.token })).status, 200);
+  // A race: two links of the same platform for one account; the second is refused (atomic check).
+  const t1 = (await call('/api/account/link-ticket', { method: 'POST', token: via2.token })).data.ticket;
+  const t2 = (await call('/api/account/link-ticket', { method: 'POST', token: via2.token })).data.ticket;
+  const f1 = await fakeRedirect('sam-3', { mode: 'link', ticket: t1 });
+  const f2 = await fakeRedirect('sam-4', { mode: 'link', ticket: t2 });
+  r = await call('/auth/session', { method: 'POST', body: { code: hashParam(f1.location, 'rb_login'), verifier: f1.verifier }, token: via2.token });
+  assert.equal(r.status, 200);
+  r = await call('/auth/session', { method: 'POST', body: { code: hashParam(f2.location, 'rb_login'), verifier: f2.verifier }, token: via2.token });
+  assert.equal(r.status, 409, 'One identity per platform per account');
+  assert.equal(r.data.error, 'already_linked');
+}
+console.log('PASS session eviction: sign out other devices (logout all), 365-day cap, link and unlink keep only the current session, fake2 link end to end.');
+
+// ---- signing key rotation: nobody is locked out, nobody is sent to signup ------------------------------
+{
+  const KEY_A = 'rotation-key-A-0123456789-abcdefghijklmnop';
+  const KEY_B = 'rotation-key-B-0123456789-abcdefghijklmnop';
+  const KEY_C = 'rotation-key-C-0123456789-abcdefghijklmnop';
+  const rot = openDatabase(':memory:', 'drizzle', fs);
+  const at = keys => ({ ...env, DB: createD1(rot), AUTH_SIGNING_KEY: keys[0], AUTH_SIGNING_KEY_PREVIOUS: keys[1] }); // a fresh binding: a new isolate
+  const envA = at([KEY_A]);
+  const p1 = await register('rot-1', 'RotOne', envA);
+  const p2 = await register('rot-2', 'RotTwo', envA);
+  const pending = await fakeRedirect('rot-1', { e: envA }); // a sign-in under way during the deploy
+  const idA = await keyId(KEY_A), idB = await keyId(KEY_B);
+  assert.notEqual(idA, idB);
+  assert.deepEqual(rot.prepare('SELECT DISTINCT key_id FROM identities').all().map(row => row.key_id), [idA]);
+
+  // Rotation: B current, A previous.
+  const envB = at([KEY_B, KEY_A]);
+  let r = await call('/api/account', { token: p1.token, e: envB });
+  assert.equal(r.status, 200, 'A session from before the rotation still works');
+  assert.equal(r.data.account.id, p1.account.id);
+  assert.equal(rot.prepare('SELECT COUNT(*) AS n FROM sessions WHERE token_hash = ?').get(await hmac(KEY_B, p1.token)).n, 1, 'and is re-hashed under the new key');
+  r = await call('/auth/session', { method: 'POST', body: { code: hashParam(pending.location, 'rb_login'), verifier: pending.verifier }, e: envB });
+  assert.equal(r.status, 200, 'A login code minted under the old key still redeems');
+  assert.equal(r.data.account.id, p1.account.id);
+  const back = await fakeLogin('rot-1', { e: envB });
+  assert.equal(back.account.id, p1.account.id, 'The identity is found with the previous key: same account, no signup');
+  const row = rot.prepare('SELECT provider_user_id, key_id FROM identities WHERE account_id = ?').get(p1.account.id);
+  assert.equal(row.key_id, idB, 'and re-hashed under the current key');
+  assert.equal(row.provider_user_id, await hmac(KEY_B, 'fake:rot-1'));
+  assert.equal(rot.prepare('SELECT COUNT(*) AS n FROM sessions WHERE token_hash = ?').get(await hmac(KEY_B, back.token)).n, 1, 'New sessions use the current key');
+
+  // Dropping the previous key while p2 has not come back would lose p2: accounts refuse to run
+  // (503, and sign-ins go back to the game) instead of sending anyone to signup.
+  const logError = console.error;
+  const logged = [];
+  console.error = (...args) => logged.push(args.join(' '));
+  try {
+    for (const broken of [at([KEY_B]), at([KEY_C])]) {
+      r = await call('/api/account', { token: back.token, e: broken });
+      assert.equal(r.status, 503);
+      assert.equal(r.data.error, 'accounts_unavailable');
+      const refused = await nav('/auth/fake/start?challenge=' + CH.challenge + '&return=' + encodeURIComponent(RETURN), { e: broken });
+      assert.equal(refused.headers.get('Location'), RETURN + '#rb_error=provider_unavailable', 'Sign-in goes back to the game');
+      assert.equal((await call('/api/scores', { method: 'POST', body: run(90), token: back.token, e: broken })).status, 503, 'A signed-in run waits instead of posting as a guest');
+      assert.equal((await call('/api/scores', { e: broken })).status, 200, 'The leaderboard itself keeps working');
+    }
+  } finally { console.error = logError; }
+  assert.ok(logged.some(line => /AUTH_SIGNING_KEY_PREVIOUS/.test(line)), 'The log says what to restore');
+  assert.equal(rot.prepare("SELECT COUNT(*) AS n FROM auth_pending WHERE kind = 'signup'").get().n, 0, 'Nobody was sent to signup');
+
+  // p2 comes back while both keys are set; then the old key can go.
+  const p2back = await fakeLogin('rot-2', { e: at([KEY_B, KEY_A]) });
+  assert.equal(p2back.account.id, p2.account.id);
+  const envBOnly = at([KEY_B]);
+  r = await call('/api/account', { token: p2back.token, e: envBOnly });
+  assert.equal(r.status, 200, 'Every identity migrated: the new key alone works');
+  assert.equal((await fakeLogin('rot-1', { e: envBOnly })).account.id, p1.account.id);
+  assert.equal((await call('/api/account', { token: p1.token, e: envBOnly })).status, 200, 'The re-hashed old session too');
+  assert.deepEqual((await call('/api/auth/providers', { e: { ...envBOnly, AUTH_SIGNING_KEY_PREVIOUS: 'short' } })).data, { providers: ['fake', 'fake2'] }, 'A short previous key is ignored');
+}
+console.log('PASS key rotation: AUTH_SIGNING_KEY_PREVIOUS finds old identities, sessions and codes and re-hashes them; a key change without the old key answers 503 (never signup).');
+
+// ---- opportunistic purge ---------------------------------------------------------------------------------
+{
+  const purgeDb = openDatabase(':memory:', 'drizzle', fs);
+  const first = { ...env, DB: createD1(purgeDb) };
+  assert.equal((await call('/api/account', { e: first })).status, 401); // tables ready, first purge done
+  const now = Date.now();
+  const insertPending = purgeDb.prepare('INSERT INTO auth_pending (key, kind, data, expires_at) VALUES (?, ?, ?, ?)');
+  insertPending.run('old-state', 'state', '{}', now - 1);
+  insertPending.run('live-state', 'state', '{}', now + 60000);
+  const insertLimit = purgeDb.prepare('INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)');
+  insertLimit.run('old-window', now - 3 * 3600000, 5);
+  insertLimit.run('live-window', now - 60000, 5);
+  const insertSession = purgeDb.prepare('INSERT INTO sessions (token_hash, account_id, created_at, expires_at, last_seen) VALUES (?, ?, ?, ?, ?)');
+  insertSession.run('expired', 'x', now - 10 * DAY, now - 1, now - 10 * DAY);
+  insertSession.run('year-old', 'x', now - 366 * DAY, now + 10 * DAY, now - DAY);
+  insertSession.run('live', 'x', now - DAY, now + 100 * DAY, now - DAY);
+  // The same database behind a new binding (a new isolate): its first request purges.
+  assert.equal((await call('/api/account', { e: { ...first, DB: createD1(purgeDb) } })).status, 401);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(purgeDb.prepare('SELECT key FROM auth_pending').all().map(r => r.key), ['live-state'], 'Expired sign-in values are deleted');
+  assert.deepEqual(purgeDb.prepare('SELECT key FROM rate_limits').all().map(r => r.key), ['live-window'], 'Limiter windows over two hours old are deleted');
+  assert.deepEqual(purgeDb.prepare('SELECT token_hash FROM sessions').all().map(r => r.token_hash), ['live'], 'Expired and year-old sessions are deleted');
+}
+console.log('PASS purge: expired sign-in values, old limiter windows, expired and year-old sessions are cleaned up.');
 
 console.log('PASS accounts: all flows.');

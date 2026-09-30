@@ -41,6 +41,9 @@ jobs:
           # Optional (Riftborn accounts, v2.2): OAuth app credentials per platform and the HMAC
           # signing key (32+ random bytes). A platform missing its ID or secret stays unavailable.
           # GitHub forbids secret names starting with GITHUB_, hence GH_CLIENT_* for the GitHub app.
+          # AUTH_SIGNING_KEY_PREVIOUS: only after a key rotation (the old key, kept for lookups).
+          # ACCOUNTS_LIVE (repository variable, 1 once players have accounts): a deploy without
+          # AUTH_SIGNING_KEY then fails instead of switching accounts off.
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
@@ -48,4 +51,6 @@ jobs:
           GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
           GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
           AUTH_SIGNING_KEY: ${{ secrets.AUTH_SIGNING_KEY }}
+          AUTH_SIGNING_KEY_PREVIOUS: ${{ secrets.AUTH_SIGNING_KEY_PREVIOUS }}
+          ACCOUNTS_LIVE: ${{ vars.ACCOUNTS_LIVE }}
         run: node scripts/cloudflare-worker-upload.mjs

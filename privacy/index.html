@@ -102,11 +102,11 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--rule);
 <section class="short" aria-labelledby="short">
   <h2 id="short">The short version</h2>
   <ul>
-    <li><strong>Guests</strong> share nothing with the server except the scores they choose to post and any feedback they choose to send.</li>
+    <li><strong>Guests</strong> share nothing with the server except the scores they choose to post, any feedback they choose to send, and the names they type for a run, which are sent to be checked against account usernames (the check stores nothing).</li>
     <li><strong>A Riftborn account</strong> is a username you pick, plus a scrambled form of your Google, Discord or GitHub account number, plus your saved game progress.</li>
     <li>We <strong>never</strong> store your email, real name, profile picture or a password. We do not store IP addresses.</li>
     <li>No ads, no analytics, no trackers. Your data is never sold or shared.</li>
-    <li>You can delete everything yourself: <strong>Settings &gt; Account &gt; Delete account</strong>.</li>
+    <li>You can delete your account and saved progress yourself: <strong>Settings &gt; Account &gt; Delete account</strong>. Your leaderboard rows stay, anonymised.</li>
   </ul>
 </section>
 
@@ -116,22 +116,22 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--rule);
 <h2>What is stored if you have a Riftborn account</h2>
 <p>A &ldquo;Riftborn account&rdquo; means you signed in with Google, Discord or GitHub and then chose a username. We store:</p>
 <ul>
-  <li><strong>Your Riftborn username.</strong> You choose it yourself. We never copy a name from Google, Discord or GitHub. It is public: it appears on the leaderboard, so do not use your real name if you would rather not.</li>
-  <li><strong>For each platform you link, a scrambled, one-way form of that platform&rsquo;s account number.</strong> During sign-in the platform tells us your account number. We run it through a secret-keyed one-way scramble (a keyed hash) and keep only the result. It lets us recognise you when you come back, and it cannot be turned back into your real account number.</li>
-  <li><strong>Your saved game progress:</strong> cosmetics, characters and palettes, Journal, records and synced preferences. The server keeps this as a single block of data and does not read it.</li>
+  <li><strong>Your Riftborn username.</strong> You choose it yourself. We never copy a name from Google, Discord or GitHub. It is public: it appears on the leaderboard, so do not use your real name if you would rather not. Next to it we keep a simplified form (lower case, look-alike letters merged, separators removed), used only to stop guests from posting under a name that looks like yours.</li>
+  <li><strong>For each platform you link, a scrambled, one-way form of that platform&rsquo;s account number.</strong> During sign-in the platform tells us your account number. We run it through a one-way scramble keyed with a secret that only our server holds (a keyed hash) and keep only the result. It lets us recognise you when you come back. Without that secret key it cannot be turned back into your account number.</li>
+  <li><strong>Your saved game progress:</strong> the cosmetics you unlocked and equipped, characters and palettes, Journal entries, records and recent runs, mastery and your tracked goal, stats, redeemed codes and the last name you used for a run. Settings such as sound, graphics and controls stay on each device and are not synced. The server keeps your progress as a single block of data and does not read it.</li>
   <li><strong>Leaderboard scores:</strong> your name and run stats (score, stage, kills, time, ruleset, game version and the date). Scores you post while signed in are attached to your account, so if you change your username your past rows show the new one.</li>
-  <li><strong>Sign-in session records</strong> for each device you are signed in on: a scrambled form of a random sign-in token, and the dates it was created, last used and expires (180 days after you last use it). No device details are recorded. Signing out ends the session.</li>
+  <li><strong>Sign-in session records</strong> for each device you are signed in on: a scrambled form of a random sign-in token, and the dates it was created, last used and expires (180 days after you last use it, and never more than a year after you signed in). No device details are recorded. Signing out ends the session. <strong>Settings &gt; Account &gt; Sign out other devices</strong> ends every session except the one you are using, and so does linking or unlinking a platform.</li>
   <li><strong>Dates</strong> your account was created and your username last changed (usernames can change once every 30 days).</li>
 </ul>
-<p>Signing in creates a few short-lived working records (for example, while you are choosing a username). They expire within minutes and are deleted when used or cleaned up soon after.</p>
+<p>Signing in creates a few short-lived working records (for example, while you are choosing a username). They expire within 15 minutes at most, and are deleted when used or by the server&rsquo;s routine cleanup, which runs about every 10 minutes while accounts are in use.</p>
 
 <h2>What is not stored</h2>
 <ul>
   <li>No email address, real name, profile picture or avatar, from any platform.</li>
   <li>No password. We never see your Google, Discord or GitHub password; you type it only on that platform&rsquo;s own page.</li>
   <li>No contacts, friends, servers, repositories or anything else from your platform account.</li>
-  <li>No IP addresses. Like every website, our server sees your IP address while it answers a request. We use it only to slow down abuse: the server keeps a scrambled, one-way version of it as a counter key, never the address itself.</li>
-  <li><strong>Guests:</strong> nothing on the server except scores they post (a name they typed and the run stats) and any feedback they send. Checking whether a name is free sends that typed name to the server; it is not kept.</li>
+  <li>No IP addresses. Like every website, our server sees your IP address while it answers a request. We use it only to slow down abuse: the server keeps a scrambled, one-way version of it (for newer IPv6 addresses, of the network part only) as a counter key for at most a few hours, never the address itself.</li>
+  <li><strong>Guests:</strong> nothing on the server except scores they post (a name they typed and the run stats) and any feedback they send. When you type a name for a run, the game asks the server whether that name belongs to a Riftborn account, so the name is sent; it is not stored.</li>
 </ul>
 
 <h2>The sign-in platforms and what we ask for</h2>
@@ -145,18 +145,19 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--rule);
 
 <h2>How the data is used</h2>
 <p>Only to sign you in, keep your progress and cosmetics with your Riftborn account, and show your username on the leaderboard. It is never sold, never shared with anyone else, and never used for advertising or profiling. There are no analytics or tracking scripts in the game or on this page.</p>
-<p>The game is hosted on GitHub Pages, and the leaderboard and accounts run on Cloudflare (a Worker and its database). Those services handle your requests in the normal way and may keep their own standard logs under their own policies.</p>
+<p>The game is hosted on GitHub Pages, and the leaderboard and accounts run on Cloudflare (a Worker and its database). Those services handle your requests in the normal way and may keep their own standard logs under their own policies. Cloudflare&rsquo;s short-lived operational logs for our Worker record each request, including its web address: a name being checked for availability, or the one-time codes of a sign-in (useless minutes later), can appear there. We read those logs only to fix problems.</p>
 
 <h2>Feedback messages</h2>
 <p>The game&rsquo;s <strong>FEEDBACK</strong> form is optional and sends nothing until you press SEND. A message includes what you write, a category, an optional star rating and an optional <strong>contact</strong> line (Discord or email, only if you type one and want a reply). To help fix bugs it also adds basic technical context: game version, browser and operating system name, screen size, whether you used touch, mouse or a controller, average frame rate, a few game settings and a short summary of your last run. The form shows the exact data under &ldquo;WHAT GETS SENT&rdquo;. Your IP address is not stored, and feedback is not linked to your account. Please do not put private details in the message text.</p>
 
 <h2>Storage on your own device</h2>
-<p>Riftborn uses your browser&rsquo;s local storage, not cookies. It holds: your settings, your saved progress on this device, scores and boards saved on this device, scores or feedback waiting to be sent, the last name you used, your sign-in token if you are signed in, and small flags such as which intro or notes you have seen. It stays on your device until you clear this site&rsquo;s data in your browser settings.</p>
+<p>Riftborn keeps its data in your browser&rsquo;s local storage. It holds: your settings, your saved progress on this device, scores and boards saved on this device, scores or feedback waiting to be sent, the last name you used, your sign-in token if you are signed in, a random one-time check value while a sign-in is in progress (deleted when the sign-in finishes, or after 10 minutes), and small flags such as which intro or notes you have seen. It stays on your device until you clear this site&rsquo;s data in your browser settings.</p>
+<p><strong>Cookies:</strong> no tracking or advertising cookies, and the game itself sets none. The only cookie is a sign-in security cookie: when you press <em>Continue with</em> Google, Discord or GitHub, the Riftborn sign-in server sets one short-lived cookie (10 minutes) on its own domain. It holds a random value and nothing about you, and makes sure the sign-in finishes in the same browser that started it.</p>
 
 <h2>Deleting your data</h2>
 <ul>
   <li><strong>Riftborn account:</strong> Settings &gt; Account &gt; Delete account. You confirm by typing your username. This removes the account, its linked platform records, its sign-in sessions and its saved progress. Your past leaderboard rows stay but are cut loose from you and renamed to an anonymous guest name.</li>
-  <li><strong>Unlink a platform:</strong> Settings &gt; Account, if you have more than one linked.</li>
+  <li><strong>Unlink a platform:</strong> Settings &gt; Account, if you have more than one linked. Its scrambled account number is deleted, and your other devices are signed out.</li>
   <li><strong>Anything else</strong> (a guest score, a feedback message, or if you cannot get into the game): ask through the in-game FEEDBACK form and say what to remove.</li>
   <li><strong>On your device:</strong> clear this site&rsquo;s data in your browser settings.</li>
 </ul>
