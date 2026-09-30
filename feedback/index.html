@@ -2,6 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- GitHub Pages cannot send headers, so the policy is here. No inline script or style: the module
+     and stylesheet are same-origin files, and any inline script added later must be listed by its
+     sha256 hash (tests/security-hardening.mjs checks). The key only ever goes to the Worker hosts. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src data:; connect-src https://riftborn-leaderboard.chanmanc10.workers.dev https://api.riftborn.us; base-uri 'none'; form-action 'none'; object-src 'none'">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 <meta name="referrer" content="no-referrer">
@@ -22,7 +26,7 @@
 <main>
   <section id="login" class="panel login" hidden>
     <h2>ADMIN KEY</h2>
-    <p class="hint">Enter the <code>FEEDBACK_ADMIN_KEY</code> secret you set for the leaderboard Worker.</p>
+    <p class="hint">Enter the <code>FEEDBACK_ADMIN_KEY</code> secret you set for the leaderboard Worker (24+ random characters). It is kept for this tab only, unless you tick <b>Remember on this device</b>; leave that off on any browser you share.</p>
     <form id="loginForm" autocomplete="off">
       <input id="keyInput" type="password" autocomplete="current-password" spellcheck="false" autocapitalize="off" aria-label="Admin key" required>
       <label class="check"><input id="remember" type="checkbox"> Remember on this device</label>

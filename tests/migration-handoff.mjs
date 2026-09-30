@@ -195,7 +195,7 @@ try {
   assert.equal(liveRoot.status, 200);
   assert.match(liveRoot.headers.get('content-security-policy'), /^default-src 'self'; script-src 'self' 'sha256-/);
   assert.equal(liveRoot.headers.get('cache-control'), 'no-cache');
-  assert.equal(liveRoot.headers.get('strict-transport-security'), 'max-age=31536000');
+  assert.equal(liveRoot.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains', 'HSTS covers dev. and api. too (no preload)');
   assert.match(liveRoot.text, /<script type="module" src="js\/riftborn\.[0-9a-f]+\.js">/);
   assert.equal((await get(LIVE, '/classic/')).status, 200);
   assert.equal((await get(LIVE, '/privacy/')).status, 200);

@@ -28,7 +28,7 @@ const walk = (dir, base = dir) => fs.readdirSync(dir, { withFileTypes: true }).f
 }).sort();
 
 const REQUIRED = {
-  'strict-transport-security': 'max-age=31536000',
+  'strict-transport-security': 'max-age=31536000; includeSubDomains',
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'strict-origin-when-cross-origin',
   'cross-origin-opener-policy': 'same-origin'

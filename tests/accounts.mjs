@@ -132,12 +132,14 @@ console.log('PASS accounts CORS: preflight headers and methods, Authorization al
   assert.equal(r.data.error, 'provider_unavailable');
 
   // Fake OAuth is impossible in production, whatever FAKE_OAUTH says, and needs a loopback host.
+  // (Production answers only over https, so these reach the loopback address over https.)
   const production = { ...env, ENVIRONMENT: 'production' };
-  assert.deepEqual((await call('/api/auth/providers', { e: production })).data, { providers: [] });
-  assert.equal((await nav('/auth/fake/start?return=' + encodeURIComponent(RETURN), { e: production })).status, 404);
-  assert.equal((await nav('/auth/fake/callback?state=x&code=y', { e: production })).status, 404);
+  const httpsLoopback = BASE.replace('http:', 'https:');
+  assert.deepEqual((await call('/api/auth/providers', { e: production, base: httpsLoopback })).data, { providers: [] });
+  assert.equal((await nav('/auth/fake/start?return=' + encodeURIComponent(RETURN), { e: production, base: httpsLoopback })).status, 404);
+  assert.equal((await nav('/auth/fake/callback?state=x&code=y', { e: production, base: httpsLoopback })).status, 404);
   for (const path of ['/auth/fake2/start?return=' + encodeURIComponent(RETURN), '/auth/fake2/callback?state=x&code=y']) {
-    assert.equal((await nav(path, { e: production })).status, 404, 'fake2 is gated exactly like fake: ' + path);
+    assert.equal((await nav(path, { e: production, base: httpsLoopback })).status, 404, 'fake2 is gated exactly like fake: ' + path);
     assert.equal((await nav(path, { base: 'https://riftborn-leaderboard.chanmanc10.workers.dev' })).status, 404);
   }
   assert.equal(fakeEnabled(production, BASE + '/auth/fake/start'), false);
@@ -540,7 +542,9 @@ console.log('PASS profile: GET/PUT with rev check, 409 conflict with the stored 
     assert.equal(r.data.error, 'name_taken');
   }
   r = await post(run(11, { name: 'Alyx_Two' }), 'q'.repeat(43));
-  assert.equal(r.status, 409, 'An invalid session posts as a guest');
+  assert.equal(r.status, 401, 'A token that proves no session is refused, never filed as a guest run (security fix)');
+  assert.equal(r.data.error, 'unauthorized');
+  assert.equal(one('SELECT COUNT(*) AS n FROM scores WHERE id = ?', uid(11)).n, 0);
   r = await post(run(12, { name: 'Free Name' }));
   assert.equal(r.status, 200);
 
@@ -1138,5 +1142,155 @@ console.log('PASS key rotation: AUTH_SIGNING_KEY_PREVIOUS finds old identities, 
   assert.deepEqual(purgeDb.prepare('SELECT token_hash FROM sessions').all().map(r => r.token_hash), ['live'], 'Expired and year-old sessions are deleted');
 }
 console.log('PASS purge: expired sign-in values, old limiter windows, expired and year-old sessions are cleaned up.');
+
+// ---- guest name protection: more scripts (Cherokee, small capitals, Lisu, Canadian Syllabics, IPA) (security fix) ----
+{
+  // Account skeletons are ASCII and never change: the old rule (lower case, I/1/| -> l, 0 -> o,
+  // separators dropped) still gives the same result for every ASCII username.
+  const oldSkeleton = text => text.replace(/[I1|]/g, 'l').replace(/0/g, 'o').toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (const name of ['VictimName', 'Illidan', 'B0B', 'a_b-c', 'Zz9', 'IIl1|', 'Kai', 'Kal', 'x-Y_z']) assert.equal(nameSkeleton(name), oldSkeleton(name), 'ASCII skeleton unchanged: ' + name);
+  assert.equal(nameSkeleton(U(0x13D9) + 'ictim'), 'victim', 'Cherokee capital DO reads as V');
+  assert.equal(nameSkeleton(U(0xABA9) + 'ictim'), 'victim', 'Cherokee small letters are folded to the capitals');
+  assert.equal(nameSkeleton(U(0x1D20, 0x026A, 0x1D04, 0x1D1B, 0x026A, 0x1D0D)), 'victim', 'Small capitals');
+  assert.equal(nameSkeleton(U(0xA4E6, 0xA4F2, 0xA4DA, 0xA4D4, 0xA4F2, 0xA4DF), true), 'victim', 'Lisu, capital-I shapes read as i');
+
+  const victim = await register('victim-2', 'Victim');
+  const post = (n, name) => call('/api/scores', { method: 'POST', body: run(n, { name }) });
+  const guestCheck = async name => (await call('/api/username-available?guest=1&name=' + encodeURIComponent(name))).data;
+  const probes = [
+    U(0x13D9) + 'ictim', // Cherokee
+    U(0xABA9) + 'ICTIM', // Cherokee small letter
+    U(0x1D20) + 'ICTIM', // small capital V
+    U(0x1D20, 0x026A, 0x1D04, 0x1D1B, 0x026A, 0x1D0D), // all small capitals
+    U(0xA4E6, 0xA4F2, 0xA4DA, 0xA4D4, 0xA4F2, 0xA4DF), // all Lisu
+    U(0x142F) + 'ictim', // Canadian Syllabics PE
+    'V' + U(0x026A) + 'ctim', // IPA small capital I
+    'Vi' + U(0x2CA5) + 'tim', // Coptic small sima
+    'Victi' + U(0x0436) // a letter the table does not know, mixed with Latin: any one character
+  ];
+  let n = 400;
+  for (const name of probes) {
+    const r = await post(n++, name);
+    assert.equal(r.status, 409, 'Look-alike of "Victim" refused: ' + JSON.stringify(name));
+    assert.equal(r.data.error, 'name_taken');
+    assert.deepEqual(await guestCheck(name), { available: false, reason: 'taken' }, 'Guest check agrees: ' + JSON.stringify(name));
+  }
+  assert.equal(one('SELECT COUNT(*) AS n FROM scores WHERE id >= ? AND id < ?', uid(400), uid(n)).n, 0, 'None of them reached the board');
+  // Names in other scripts, and mixed names that are not near an account, stay free.
+  for (const name of [U(0x0414, 0x0438, 0x043C, 0x0430), U(0x6771, 0x4EAC), U(0x13E3, 0x13B3, 0x13A9), 'Viktor', 'Stra' + U(0xDF) + 'e', U(0x0416) + 'enya', 'Vic ' + U(0x0436)]) {
+    assert.deepEqual(await guestCheck(name), { available: true }, 'Free: ' + name);
+    assert.equal((await post(n++, name)).status, 200, 'Allowed: ' + name);
+  }
+  assert.equal((await call('/api/scores', { method: 'POST', body: run(n++), token: victim.token })).status, 200, 'The account itself posts as usual');
+}
+console.log('PASS guest names (more scripts): Cherokee, small capitals, Lisu, Canadian Syllabics, IPA and Coptic look-alikes refused; unknown letters mixed with Latin count as any character; ASCII skeletons unchanged.');
+
+// ---- stale sessions never turn a queued run into a guest run; hooks fail closed (security fix) ----
+{
+  const first = await register('stale-1', 'StaleRunner');
+  const second = await fakeLogin('stale-1'); // the same account on a second device
+  assert.ok(second.token && second.token !== first.token);
+  // Device 2 renames the account, then signs out every other device.
+  sqlite.prepare('UPDATE accounts SET username_changed_at = ? WHERE id = ?').run(Date.now() - 31 * DAY, first.account.id);
+  assert.equal((await call('/api/account', { method: 'PATCH', body: { username: 'FreshRunner' }, token: second.token })).status, 200);
+  assert.equal((await call('/auth/logout', { method: 'POST', body: { all: true }, token: second.token })).data.revoked, 1);
+  // Device 1 still holds a run queued under the old name and its (now revoked) token.
+  let r = await call('/api/scores', { method: 'POST', body: run(500, { name: 'StaleRunner' }), token: first.token });
+  assert.equal(r.status, 401, 'A revoked session is refused, not filed as a guest run');
+  assert.equal(r.data.error, 'unauthorized');
+  assert.equal(r.headers.get('WWW-Authenticate'), 'Bearer');
+  assert.equal(r.headers.get('Access-Control-Allow-Origin'), GAME, 'The game can read the 401');
+  assert.equal(one('SELECT COUNT(*) AS n FROM scores WHERE id = ?', uid(500)).n, 0, 'Nothing stored under the old name');
+  // A deleted account's session: refused, and no row carries the deleted name.
+  const gone = await register('stale-2', 'GoneRunner');
+  assert.equal((await call('/api/account', { method: 'DELETE', token: gone.token })).status, 200);
+  r = await call('/api/scores', { method: 'POST', body: run(501, { name: 'GoneRunner' }), token: gone.token });
+  assert.equal(r.status, 401, 'A deleted account session is refused');
+  assert.equal(one("SELECT COUNT(*) AS n FROM scores WHERE name = 'GoneRunner'").n, 0);
+  // A malformed Authorization header proves nothing either.
+  assert.equal((await call('/api/scores', { method: 'POST', body: run(502, { name: 'Header Only' }), headers: { Authorization: 'Bearer not-a-token' } })).status, 401);
+  // No Authorization header at all (every pre-2.2 client): a guest post, exactly as before.
+  r = await call('/api/scores', { method: 'POST', body: run(503, { name: 'StaleRunner' }) });
+  assert.equal(r.status, 200, 'Guest posts without a header are unchanged');
+  assert.equal(one('SELECT account_id FROM scores WHERE id = ?', uid(503)).account_id, null);
+  // The live session still posts under the current username.
+  assert.equal((await call('/api/scores', { method: 'POST', body: run(504, { name: 'Anything' }), token: second.token })).status, 200);
+  assert.equal(one('SELECT name FROM scores WHERE id = ?', uid(504)).name, 'FreshRunner');
+
+  // A database error in either hook answers 503 (the game keeps the run and retries), never a guest
+  // row and never a false name_taken.
+  const failing = pattern => ({ ...DB, prepare(sql) {
+    if (!pattern.test(sql)) return DB.prepare(sql);
+    const broken = { sql, values: [], bind() { return broken; }, async run() { throw new Error('D1 hiccup'); }, async all() { throw new Error('D1 hiccup'); }, async first() { throw new Error('D1 hiccup'); } };
+    return broken;
+  } });
+  const sessionDown = { ...env, DB: failing(/FROM sessions s JOIN accounts a/) };
+  r = await call('/api/scores', { method: 'POST', body: run(510, { name: 'Anything' }), token: second.token, e: sessionDown });
+  assert.equal(r.status, 503, 'Session lookup failure: 503, not a guest post');
+  r = await call('/api/scores', { method: 'POST', body: run(511, { name: 'Guest Runner' }), e: sessionDown });
+  assert.equal(r.status, 200, 'Guests do not need the session lookup');
+  const namesDown = { ...env, DB: failing(/username_skeleton IN/) };
+  r = await call('/api/scores', { method: 'POST', body: run(512, { name: 'Guest Runner' }), e: namesDown });
+  assert.equal(r.status, 503, 'Name check failure: 503, not 200 and not 409');
+  r = await call('/api/scores', { method: 'POST', body: run(513, { name: 'FreshRunner' }), e: namesDown });
+  assert.equal(r.status, 503, 'Not even for an account name');
+  assert.equal(one('SELECT COUNT(*) AS n FROM scores WHERE id IN (?, ?, ?)', uid(510), uid(512), uid(513)).n, 0, 'No row written while the hooks were down');
+  assert.equal((await call('/api/scores', { method: 'POST', body: run(514, { name: 'Anything' }), token: second.token, e: namesDown })).status, 200, 'A signed-in post needs no name check');
+}
+console.log('PASS stale sessions: revoked/deleted/malformed tokens get 401 on POST /api/scores (never a guest row), no header = guest as before, hook database errors answer 503.');
+
+// ---- failed session proofs are limited per IP (security fix) ----------------------------------
+{
+  const allowance = new Map();
+  const keysSeen = [];
+  const limiter = { async limit({ key }) { keysSeen.push(key); const used = (allowance.get(key) || 0) + 1; allowance.set(key, used); return { success: used <= 3 }; } };
+  let lookups = 0;
+  const counted = { ...DB, prepare(sql) { if (/FROM sessions s JOIN accounts a/.test(sql)) lookups++; return DB.prepare(sql); } };
+  const limited = { ...env, DB: counted, ACCOUNTS_RATE_LIMITER: limiter };
+  const good = await register('flood-1', 'FloodVictim');
+  const ip = '198.51.100.201';
+  const random = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+  for (let i = 0; i < 3; i++) assert.equal((await call('/api/account', { token: random(), ip, e: limited })).status, 401);
+  let r = await call('/api/profile', { token: random(), ip, e: limited });
+  assert.equal(r.status, 429, 'The 4th bogus token from one address: 429');
+  assert.equal(r.data.error, 'rate_limited');
+  assert.equal(r.headers.get('Retry-After'), '60');
+  const before = lookups;
+  for (let i = 0; i < 5; i++) assert.equal((await call('/api/account', { token: random(), ip, e: limited })).status, 429);
+  assert.equal((await call('/api/account', { token: good.token, ip, e: limited })).status, 429, 'That address waits a minute');
+  assert.equal(lookups, before, 'A blocked address costs no session lookups');
+  assert.equal((await call('/auth/logout', { method: 'POST', token: random(), ip, e: limited })).status, 429, 'Logout is gated the same way');
+  assert.equal((await call('/api/account', { token: good.token, e: limited })).status, 200, 'Other addresses are unaffected');
+  assert.ok(keysSeen.every(key => /^[A-Za-z0-9_-]{43}$/.test(key) && !key.includes('198.51.100')), 'Hashed keys only');
+  // Logout with a token that is no session counts as a failure; a real logout does not.
+  const ip2 = '198.51.100.202';
+  for (let i = 0; i < 3; i++) assert.deepEqual((await call('/auth/logout', { method: 'POST', token: random(), ip: ip2, e: limited })).data, { ok: true });
+  assert.equal((await call('/auth/logout', { method: 'POST', token: random(), ip: ip2, e: limited })).status, 429);
+  const ip3 = '198.51.100.203';
+  for (let i = 0; i < 5; i++) {
+    const s = await fakeLogin('flood-1');
+    assert.deepEqual((await call('/auth/logout', { method: 'POST', token: s.token, ip: ip3, e: limited })).data, { ok: true }, 'Real logouts are never limited');
+  }
+  // Without the binding (local harness) failures are not counted, and never written to D1.
+  const rowsBefore = one('SELECT COUNT(*) AS n FROM rate_limits').n;
+  for (let i = 0; i < 40; i++) assert.equal((await call('/api/account', { token: random(), ip: '198.51.100.204' })).status, 401);
+  assert.equal(one('SELECT COUNT(*) AS n FROM rate_limits').n, rowsBefore, 'No D1 write per bogus token');
+}
+console.log('PASS failed session proofs: bogus tokens on GET /api/account, /api/profile and /auth/logout limited per hashed IP (binding only), blocked addresses cost no lookups, real logouts unaffected.');
+
+// ---- rate-limit keys are hashed for scores too (privacy fix) ------------------------------------
+{
+  const keys = [];
+  const SCORE_RATE_LIMITER = { async limit({ key }) { keys.push(key); return { success: true }; } };
+  assert.equal((await call('/api/scores', { method: 'POST', body: run(600, { name: 'Hash Check' }), ip: '203.0.113.150', e: { ...env, SCORE_RATE_LIMITER } })).status, 200);
+  assert.equal(keys.length, 1);
+  assert.equal(keys[0], await hmac(KEY, 'rl:score:ip:203.0.113.150'), 'Scores key their limiter by a keyed hash of the address');
+  assert.equal((await call('/api/scores', { method: 'POST', body: run(601, { name: 'Hash Check' }), ip: '2001:db8:5:6::9', e: { ...env, SCORE_RATE_LIMITER } })).status, 200);
+  assert.equal(keys[1], await hmac(KEY, 'rl:score:ip:2001:db8:5:6::/64'), 'IPv6 by its /64');
+  const noKey = { ...env, AUTH_SIGNING_KEY: undefined, SCORE_RATE_LIMITER };
+  assert.equal((await call('/api/scores', { method: 'POST', body: run(602, { name: 'Hash Check' }), ip: '203.0.113.151', e: noKey })).status, 200);
+  assert.equal(keys[2], '203.0.113.151', 'Without a signing key (accounts off) the address is the key, as before');
+}
+console.log('PASS score limiter keys: keyed hash of the address (IPv6 /64) when the Worker has its signing key.');
 
 console.log('PASS accounts: all flows.');

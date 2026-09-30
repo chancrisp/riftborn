@@ -267,4 +267,60 @@ assert.equal((await worker.fetch(new Request('https://api.test/elsewhere'), env)
   bare.exec(fs.readFileSync('drizzle/0004_feedback.sql', 'utf8')); // the migration, applied later, is a no-op
 }
 
+// ---- the Discord ping carries only what the privacy page says (privacy fix) -------------------------
+{
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { sent.push(JSON.parse(init.body)); return new Response('{}'); };
+  const waits = [];
+  const r = await post({ ...good, contact: 'me@example.com', message: 'Contact me about the quarry wall clipping.' }, {
+    e: { ...env, DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/1/abc' }, ctx: { waitUntil: p => waits.push(p) }
+  });
+  await Promise.all(waits);
+  globalThis.fetch = realFetch;
+  assert.equal(r.status, 201);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].content, /quarry wall/, 'The start of the message is posted');
+  for (const privateBit of ['me@example.com', 'Chrome', 'Windows', '1920x1080', 'keepers-2']) {
+    assert.ok(!sent[0].content.includes(privateBit), 'Never in the Discord post: ' + privateBit);
+  }
+}
+
+// ---- admin routes: per-IP limit before the key check, hashed limiter keys (security fix) ------------
+{
+  const refuse = { async limit() { return { success: false } } };
+  const seen = [];
+  const allow = { async limit({ key }) { seen.push(key); return { success: true }; } };
+  const limitedEnv = { ...env, ACCOUNTS_RATE_LIMITER: refuse };
+  for (const [path, opts] of [['/api/feedback', {}], ['/api/feedback.csv', {}], ['/api/feedback/' + clientId, { method: 'PATCH', body: { status: 'read' } }]]) {
+    const r = await admin(path, { ...opts, e: limitedEnv });
+    assert.equal(r.status, 429, 'Limited even with the right key: ' + path);
+    assert.equal(r.headers.get('Retry-After'), '60');
+    assert.equal(r.headers.get('Access-Control-Allow-Origin'), ORIGIN, 'The inbox can read the 429');
+  }
+  assert.equal((await admin('/api/feedback', { e: { ...env, ACCOUNTS_RATE_LIMITER: allow }, ip: '198.51.100.240' })).status, 200, 'Under the limit: normal answers');
+  assert.equal(seen.at(-1), 'feedback-admin:198.51.100.240', 'Without a signing key the admin bucket is keyed by address, apart from every other bucket');
+  // With the signing key (the deployed Worker with accounts) the key is a keyed hash of the address.
+  const signed = { ...env, AUTH_SIGNING_KEY: 'k'.repeat(43), ACCOUNTS_RATE_LIMITER: allow };
+  assert.equal((await admin('/api/feedback', { e: signed, ip: '198.51.100.241' })).status, 200);
+  assert.ok(/^[A-Za-z0-9_-]{43}$/.test(seen.at(-1)) && !seen.at(-1).includes('198.51.100'), 'Hashed admin limiter key');
+  // Player submissions never touch the admin bucket.
+  const before = seen.length;
+  assert.equal((await post(good, { e: { ...env, ACCOUNTS_RATE_LIMITER: allow } })).status, 201);
+  assert.equal(seen.length, before, 'POST /api/feedback does not consult the admin limiter');
+  // Guessing: the 31st request from one address in a minute is refused, right key or wrong.
+  const counts = new Map();
+  const perMinute = { async limit({ key }) { const n = (counts.get(key) || 0) + 1; counts.set(key, n); return { success: n <= 30 }; } };
+  const guessEnv = { ...env, ACCOUNTS_RATE_LIMITER: perMinute };
+  for (let i = 0; i < 30; i++) assert.equal((await call('/api/feedback', { e: guessEnv, ip: '203.0.113.250', headers: { Authorization: 'Bearer guess-' + i } })).status, 401);
+  assert.equal((await admin('/api/feedback', { e: guessEnv, ip: '203.0.113.250' })).status, 429, 'Past the limit the right key waits too');
+  assert.equal((await admin('/api/feedback', { e: guessEnv, ip: '203.0.113.251' })).status, 200, 'Other addresses are unaffected');
+  // The players' feedback limiter is keyed by a hash too once the signing key is set.
+  const fbKeys = [];
+  const FEEDBACK_RATE_LIMITER = { async limit({ key }) { fbKeys.push(key); return { success: true }; } };
+  assert.equal((await post(good, { e: { ...signed, FEEDBACK_RATE_LIMITER }, ip: '203.0.113.252' })).status, 201);
+  assert.ok(/^[A-Za-z0-9_-]{43}$/.test(fbKeys[0]) && !fbKeys[0].includes('203.0.113'), 'Hashed feedback limiter key');
+}
+console.log('PASS feedback hardening: admin routes limited per IP before the key check (429 even for the right key), hashed limiter keys, Discord post without contact or context.');
+
 console.log('PASS feedback: validation, honeypot, rate limit, no IPs, Discord ping, admin auth, filters, paging, status, CSV, CORS, self-bootstrap.');
