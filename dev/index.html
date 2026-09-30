@@ -1,12 +1,32 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-title-theme="molten">
 <head>
 <meta name="robots" content="noindex,nofollow">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Riftborn</title>
-<meta name="description" content="A PS1-style survival shooter. Cross five fractured worlds and defeat the Rift Warden.">
-<meta name="theme-color" content="#10141e">
+<title>Riftborn – a PS1-style browser shooter</title>
+<meta name="description" content="A PS1-style survival shooter you play in your browser. Blast through five fractured worlds, break the Keepers and take down the Rift Warden. Free, no download.">
+<meta name="theme-color" content="#8F5BFF">
+<link rel="canonical" href="https://riftborn.us/">
+<!-- SOCIAL CARD (tests/social-card.test.mjs): how a shared link shows up in Discord, X/Twitter, Slack, Facebook
+and messengers. Kept up here so a crawler finds it in the first bytes. The image is assets/riftborn-card.jpg
+(1200x630); platforms cache a card by its image URL, so bump ?v= whenever the art changes. The github.io
+handoff pages (site repo scripts/pages-templates.mjs) carry the same tags: keep the two in step. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Riftborn">
+<meta property="og:url" content="https://riftborn.us/">
+<meta property="og:title" content="Riftborn – a PS1-style browser shooter">
+<meta property="og:description" content="A PS1-style survival shooter you play in your browser. Blast through five fractured worlds, break the Keepers and take down the Rift Warden. Free, no download.">
+<meta property="og:image" content="https://riftborn.us/assets/riftborn-card.jpg?v=1">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Riftborn logo and title over a game screenshot: a lone survivor fires green bolts into a horde of monsters around a skull shrine and lava pools. Text: PS1-style browser shooter. Free, no download, play at riftborn.us.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Riftborn – a PS1-style browser shooter">
+<meta name="twitter:description" content="A PS1-style survival shooter you play in your browser. Blast through five fractured worlds, break the Keepers and take down the Rift Warden. Free, no download.">
+<meta name="twitter:image" content="https://riftborn.us/assets/riftborn-card.jpg?v=1">
+<meta name="twitter:image:alt" content="Riftborn logo and title over a game screenshot: a lone survivor fires green bolts into a horde of monsters around a skull shrine and lava pools. Text: PS1-style browser shooter. Free, no download, play at riftborn.us.">
 <script>/* MOVE CAPTURE (v2.2, src/meta/migration.js): the old address (chancrisp.github.io/riftborn/) hands
 this device's saved data over in #rb_migrate=<payload>. It leaves the address bar at once (never
 bookmarked, shared or kept in history) and waits for main.js in window.RIFTBORN_MIGRATION_PAYLOAD and,
@@ -24,7 +44,7 @@ so a reload before it lands can't lose it, in this tab's sessionStorage. Runs be
 <script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
 the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
 makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
-window.RIFTBORN_BUILD = "e6d59d9980";
+window.RIFTBORN_BUILD = "5eaa2d7def";
 (function () {
   var b = window.RIFTBORN_BUILD;
   if (b === "dev" || !window.fetch || !window.URL) return;
@@ -45,16 +65,20 @@ nothing from the bundle. Everything that moves animates only transform or opacit
 the compositor keeps it moving while boot blocks the main thread. The progress bar (scaleX) and the skull
 riding its leading edge (translateX) share one transition: --p is the progress (0..1) and --rl-dur how
 long the current stage eases toward it. Over everything but the hand-over question (96), the "moved"
-toast (95) and the dev password gate; hidden while that gate is up. */
-#riftLoader{--p:.3;--rl-dur:10s;--rl-ease:cubic-bezier(.16,.7,.3,1);--sk:40px;position:fixed;inset:0;z-index:94;display:grid;place-items:center;padding:16px;overflow:hidden;contain:strict;color:#ded6be;font-family:"Crypt Pixel","Courier New",monospace;text-align:center;background:radial-gradient(ellipse 80% 42% at 50% 104%,rgba(255,90,20,.2),transparent 70%),radial-gradient(ellipse 55% 45% at 50% 42%,rgba(92,40,140,.2),transparent 75%),#0b0c10;transition:opacity .4s ease-out}
+toast (95) and the dev password gate; hidden while that gate is up. Its title colours are the title
+theme's (--title-*, src/ui/title-theme.js; the fallbacks here are the molten look), and a theme with
+an SVG wordmark swaps it into .rl-mark (.rl-svg) when main.js starts. */
+#riftLoader{--p:.3;--rl-dur:10s;--rl-ease:cubic-bezier(.16,.7,.3,1);--sk:40px;position:fixed;inset:0;z-index:94;display:grid;place-items:center;padding:16px;overflow:hidden;contain:strict;color:#ded6be;font-family:"Crypt Pixel","Courier New",monospace;text-align:center;background:radial-gradient(ellipse 80% 42% at 50% 104%,var(--title-floor,rgba(255,90,20,.2)),transparent 70%),radial-gradient(ellipse 55% 45% at 50% 42%,rgba(92,40,140,.2),transparent 75%),#0b0c10;transition:opacity .4s ease-out}
 #riftLoader::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%,transparent 40%,rgba(0,0,0,.6) 100%),repeating-conic-gradient(rgba(0,0,0,.2) 0 25%,transparent 0 50%) 0 0/4px 4px}
 #riftLoader.rl-out{opacity:0;pointer-events:none}
 body:has(#devGate) #riftLoader{display:none}
 .rl-stage{position:relative;display:grid;justify-items:center;width:100%}
 .rl-mark{position:relative;padding:.3em .35em;font-size:clamp(46px,12vw,120px);line-height:1.12;letter-spacing:-2px;white-space:nowrap;font-kerning:none;font-variant-ligatures:none;transform-origin:50% 50%;transition:transform .45s cubic-bezier(.4,0,.2,1)}
-.rl-word{display:block;color:#1c1918;text-shadow:0 0 1px #ffb347,0 0 3px #ff7a1a,0 0 12px rgba(255,84,10,.7),0 0 28px rgba(255,50,0,.35),4px 6px 0 #070608}
-.rl-heat{position:absolute;inset:0;padding:inherit;color:#3a1a0c;text-shadow:0 0 2px #ffc266,0 0 6px #ff8a1a,0 0 18px rgba(255,90,10,.85),0 0 40px rgba(255,60,0,.45);opacity:0;animation:rlHeat 2.8s ease-in-out infinite}
-.rl-sweep{position:absolute;inset:0;padding:inherit;color:#ffe9b0;text-shadow:0 0 2px #ffd27a,0 0 8px #ff9a2a,0 0 20px rgba(255,90,10,.8),4px 6px 0 #070608}
+.rl-word{display:block;color:var(--title-ink,#1c1918);text-shadow:var(--title-glow,0 0 1px #ffb347,0 0 3px #ff7a1a,0 0 12px rgba(255,84,10,.7),0 0 28px rgba(255,50,0,.35),4px 6px 0 #070608)}
+.rl-heat{position:absolute;inset:0;padding:inherit;color:var(--title-heat-ink,#3a1a0c);text-shadow:var(--title-heat-glow,0 0 2px #ffc266,0 0 6px #ff8a1a,0 0 18px rgba(255,90,10,.85),0 0 40px rgba(255,60,0,.45));opacity:0;animation:rlHeat 2.8s ease-in-out infinite}
+.rl-sweep{position:absolute;inset:0;padding:inherit;color:var(--title-sweep-ink,#ffe9b0);text-shadow:var(--title-sweep-glow,0 0 2px #ffd27a,0 0 8px #ff9a2a,0 0 20px rgba(255,90,10,.8),4px 6px 0 #070608)}
+.rl-svg{display:block;width:auto;overflow:visible;fill:var(--title-ink,#1c1918);filter:var(--title-svg-glow,drop-shadow(0 0 1px #ffb347) drop-shadow(0 0 3px #ff7a1a) drop-shadow(0 0 12px rgba(255,84,10,.7)) drop-shadow(4px 6px 0 #070608))}
+.rl-heat .rl-svg{fill:var(--title-heat-ink,#3a1a0c);filter:var(--title-svg-heat-glow,drop-shadow(0 0 2px #ffc266) drop-shadow(0 0 6px #ff8a1a) drop-shadow(0 0 18px rgba(255,90,10,.85)) drop-shadow(0 0 40px rgba(255,60,0,.45)))}
 .rl-sweep i{display:inline-block;font-style:normal;opacity:0;animation:rlGlint 3.6s ease-in-out .5s infinite}
 .rl-sweep i:nth-child(2){animation-delay:.66s}
 .rl-sweep i:nth-child(3){animation-delay:.82s}
@@ -65,7 +89,7 @@ body:has(#devGate) #riftLoader{display:none}
 .rl-sweep i:nth-child(8){animation-delay:1.62s}
 .rl-track{position:relative;width:min(360px,calc(100vw - 112px));height:10px;margin-top:clamp(40px,9vh,76px)}
 .rl-bar{position:absolute;inset:0;overflow:hidden;background:#0d0f13;border:2px solid;border-color:#111318 #8e9180 #8e9180 #111318;box-shadow:0 0 0 2px #000}
-.rl-fill{position:absolute;inset:0;transform-origin:0 50%;transform:scaleX(var(--p));transition:transform var(--rl-dur) var(--rl-ease);will-change:transform;background:linear-gradient(90deg,#4a1606,#b8380c 45%,#ff7a1a 88%,#ffd27a)}
+.rl-fill{position:absolute;inset:0;transform-origin:0 50%;transform:scaleX(var(--p));transition:transform var(--rl-dur) var(--rl-ease);will-change:transform;background:var(--title-bar,linear-gradient(90deg,#4a1606,#b8380c 45%,#ff7a1a 88%,#ffd27a))}
 .rl-bar::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(0,0,0,.35) 0 2px,transparent 2px 4px)}
 .rl-rider{position:absolute;left:2px;right:2px;top:50%;height:0;transform:translateX(calc((var(--p) - 1) * 100%));transition:transform var(--rl-dur) var(--rl-ease);will-change:transform}
 .rl-skull{position:absolute;right:calc(var(--sk) * -.5);bottom:calc(var(--sk) * -.3);width:var(--sk)}
@@ -83,7 +107,7 @@ body:has(#devGate) #riftLoader{display:none}
 .rl-help{display:none;max-width:34em;margin:10px auto 0;font-size:12px;line-height:1.6;color:#c9c4a8}
 .rl-help a{display:inline-block;margin-top:10px;padding:8px 14px;color:#15151e;background:#d4bc78;border:2px solid;border-color:#f2e3b0 #7a6a3e #7a6a3e #f2e3b0;letter-spacing:.1em;text-decoration:none}
 .rl-embers{position:absolute;inset:0;pointer-events:none}
-.rl-embers i{position:absolute;bottom:-8px;left:50%;width:3px;height:3px;background:#ffb347;box-shadow:0 0 4px #ff7a1a;opacity:0;animation:rlEmberA 5s linear infinite}
+.rl-embers i{position:absolute;bottom:-8px;left:50%;width:3px;height:3px;background:var(--title-ember,#ffb347);box-shadow:0 0 4px var(--title-ember-glow,#ff7a1a);opacity:0;animation:rlEmberA 5s linear infinite}
 .rl-embers i:nth-child(1){left:8%;animation-duration:6.2s;animation-delay:-1s}
 .rl-embers i:nth-child(2){left:17%;width:4px;height:4px;animation-name:rlEmberB;animation-duration:7s;animation-delay:-4.2s}
 .rl-embers i:nth-child(3){left:26%;animation-duration:5.4s;animation-delay:-2.6s}
@@ -91,7 +115,7 @@ body:has(#devGate) #riftLoader{display:none}
 .rl-embers i:nth-child(5){left:43%;animation-duration:5.8s;animation-delay:-3.7s}
 .rl-embers i:nth-child(6){left:51%;width:4px;height:4px;animation-name:rlEmberB;animation-duration:6.4s;animation-delay:-5.1s}
 .rl-embers i:nth-child(7){left:58%;animation-duration:5.2s;animation-delay:-1.8s}
-.rl-embers i:nth-child(8){left:66%;background:#ffd27a;animation-name:rlEmberB;animation-duration:7.4s;animation-delay:-2.9s}
+.rl-embers i:nth-child(8){left:66%;background:var(--title-ember-hot,#ffd27a);animation-name:rlEmberB;animation-duration:7.4s;animation-delay:-2.9s}
 .rl-embers i:nth-child(9){left:74%;width:4px;height:4px;animation-duration:6s;animation-delay:-4.6s}
 .rl-embers i:nth-child(10){left:82%;background:#e07cff;box-shadow:0 0 4px #a02fe0;animation-duration:5.6s;animation-delay:-.9s}
 .rl-embers i:nth-child(11){left:90%;animation-name:rlEmberB;animation-duration:6.8s;animation-delay:-3.3s}
@@ -124,7 +148,7 @@ body:has(#devGate) #riftLoader{display:none}
 /* Reduced motion: a calm, still screen; the bar and skull step between stages, the eyes just switch on. */
 @media (prefers-reduced-motion:reduce){.rl-embers,.rl-heat,.rl-sweep,.rl-dots{display:none}#riftLoader .rl-ring,#riftLoader .rl-bob,#riftLoader .rl-rift-glow{animation:none}.rl-fill,.rl-rider,.rl-mark{transition:none}#riftLoader.rl-lit .rl-eyes{animation:none;opacity:1}#riftLoader.rl-lit .rl-rift-glow{animation:none;opacity:.9}#riftLoader{transition-duration:.25s}}
 </style>
-<link rel="stylesheet" href="css/riftborn.12aac50236.css">
+<link rel="stylesheet" href="css/riftborn.7217c1d23f.css">
 </head>
 <body class="menu-open">
 <div id="riftLoader" role="dialog" aria-modal="true" aria-label="Loading Riftborn">
@@ -384,7 +408,7 @@ checks this table before every deploy. */
 (function () {
   var HASH = "6057f115a0d917397c72f5ca48b752fd27cf76370e923af446247ab2f525b87c";
   var KEY = "riftborn-dev-gate";
-  var GAME = "js/riftborn.e6d59d9980.js";
+  var GAME = "js/riftborn.5eaa2d7def.js";
   var gate = document.getElementById("devGate");
   var form = document.getElementById("devGateForm");
   var input = document.getElementById("devGatePass");

@@ -1,0 +1,20 @@
+{
+  "version": "2.2.1",
+  "build": "5eaa2d7def",
+  "files": {
+    ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "assets/crypt-pixel.ttf": "529e9a9ea192a56f2ded07ab699ad7ddf95f5836cd7317c3d70d89f044294210",
+    "assets/death-skull.png": "4f3425e328ff404f7c33889dc344f6c259c37588b4dc13d6ed5891cd0d568bbd",
+    "assets/ps1-atlas.png": "065604d7c84a1f2ad12a80ca57320a831e44ae4b2de90c7d09b8df000575eb17",
+    "assets/riftborn-card.jpg": "7a1d842c03947a456c1270dbca23406b59b8c0c4b8631c14744f038bec2cd1ea",
+    "assets/weapon-0.png": "da5ff48c92b0641d3c21311f7d76040a5653115c56f50cbad3de6ebdb7089cca",
+    "assets/weapon-1.png": "2521d31193c31c37276654990d98c21a184997b6ba3c2cf1f0d1ff9c96a1738b",
+    "assets/weapon-2.png": "de7c4d11d03777c571f7fcb835bc61ec1f804ddb671e7816f12637a4f6f58e5a",
+    "assets/weapon-3.png": "6bd55a9ea48ba40c6a0d9bb167475618ae8f52e217d153b2ca1adeff322dc61e",
+    "assets/weapon-4.png": "0d87cf314fd65ad19ac0122dd4279beaab7db3cb02ec71b6ced264597565ee77",
+    "css/riftborn.7217c1d23f.css": "7217c1d23f30ecf10c60f0f7039000538a3410ad3e5c0c8c0a6c2c47832744ec",
+    "index.html": "483310ca0c100f01095f73fa294cf95d90ba21d6032415ced3b275f45384757e",
+    "js/riftborn.5eaa2d7def.js": "5eaa2d7defd50552a569931ced486d68ecd46a60153e09dd6977369c3dea309d",
+    "version.json": "88937a7fa18e50bb8a5562fecbde630d449026a75850c75af90247ebb8f62acc"
+  }
+}
