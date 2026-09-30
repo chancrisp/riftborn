@@ -6,10 +6,24 @@
 <title>Riftborn</title>
 <meta name="description" content="A PS1-style survival shooter. Cross five fractured worlds and defeat the Rift Warden.">
 <meta name="theme-color" content="#10141e">
+<script>/* MOVE CAPTURE (v2.2, src/meta/migration.js): the old address (chancrisp.github.io/riftborn/) hands
+this device's saved data over in #rb_migrate=<payload>. It leaves the address bar at once (never
+bookmarked, shared or kept in history) and waits for main.js in window.RIFTBORN_MIGRATION_PAYLOAD and,
+so a reload before it lands can't lose it, in this tab's sessionStorage. Runs before anything else. */
+(function () {
+  var h = location.hash, m = "#rb_migrate=";
+  if (h.slice(0, m.length) !== m) return;
+  try { history.replaceState(history.state, "", location.pathname + location.search); } catch (e) {}
+  var v = h.slice(m.length);
+  if (!v || v.length > 3000000) return;
+  window.RIFTBORN_MIGRATION_PAYLOAD = v;
+  try { sessionStorage.setItem("riftborn-migration-pending", v); } catch (e) {}
+})();
+</script>
 <script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
 the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
 makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
-window.RIFTBORN_BUILD = "33c9a9ab13";
+window.RIFTBORN_BUILD = "26ad511789";
 (function () {
   var b = window.RIFTBORN_BUILD;
   if (b === "dev" || !window.fetch || !window.URL) return;
@@ -25,10 +39,107 @@ window.RIFTBORN_BUILD = "33c9a9ab13";
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23161c42'/%3E%3Cpath d='m18 2-12 17h9l-2 11 13-18h-9z' fill='%238effd1'/%3E%3C/svg%3E">
 <link rel="preload" href="assets/ps1-atlas.png" as="image" crossorigin="anonymous">
 <link rel="preload" href="assets/crypt-pixel.ttf" as="font" type="font/ttf" crossorigin>
-<link rel="modulepreload" href="js/riftborn.33c9a9ab13.js">
-<link rel="stylesheet" href="css/riftborn.81171492da.css">
+<style>/* LOADING SCREEN (#riftLoader, src/ui/boot-loader.js): inline so it is in the very first paint and needs
+nothing from the bundle. Everything that moves animates only transform or opacity on its own layer, so
+the compositor keeps it moving while boot blocks the main thread. The progress bar (scaleX) and the skull
+riding its leading edge (translateX) share one transition: --p is the progress (0..1) and --rl-dur how
+long the current stage eases toward it. Over everything but the hand-over question (96), the "moved"
+toast (95) and the dev password gate; hidden while that gate is up. */
+#riftLoader{--p:.3;--rl-dur:10s;--rl-ease:cubic-bezier(.16,.7,.3,1);--sk:40px;position:fixed;inset:0;z-index:94;display:grid;place-items:center;padding:16px;overflow:hidden;contain:strict;color:#ded6be;font-family:"Crypt Pixel","Courier New",monospace;text-align:center;background:radial-gradient(ellipse 80% 42% at 50% 104%,rgba(255,90,20,.2),transparent 70%),radial-gradient(ellipse 55% 45% at 50% 42%,rgba(92,40,140,.2),transparent 75%),#0b0c10;transition:opacity .4s ease-out}
+#riftLoader::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%,transparent 40%,rgba(0,0,0,.6) 100%),repeating-conic-gradient(rgba(0,0,0,.2) 0 25%,transparent 0 50%) 0 0/4px 4px}
+#riftLoader.rl-out{opacity:0;pointer-events:none}
+body:has(#devGate) #riftLoader{display:none}
+.rl-stage{position:relative;display:grid;justify-items:center;width:100%}
+.rl-mark{position:relative;padding:.3em .35em;font-size:clamp(46px,12vw,120px);line-height:1.12;letter-spacing:-2px;white-space:nowrap;font-kerning:none;font-variant-ligatures:none;transform-origin:50% 50%;transition:transform .45s cubic-bezier(.4,0,.2,1)}
+.rl-word{display:block;color:#1c1918;text-shadow:0 0 1px #ffb347,0 0 3px #ff7a1a,0 0 12px rgba(255,84,10,.7),0 0 28px rgba(255,50,0,.35),4px 6px 0 #070608}
+.rl-heat{position:absolute;inset:0;padding:inherit;color:#3a1a0c;text-shadow:0 0 2px #ffc266,0 0 6px #ff8a1a,0 0 18px rgba(255,90,10,.85),0 0 40px rgba(255,60,0,.45);opacity:0;animation:rlHeat 2.8s ease-in-out infinite}
+.rl-sweep{position:absolute;inset:0;padding:inherit;color:#ffe9b0;text-shadow:0 0 2px #ffd27a,0 0 8px #ff9a2a,0 0 20px rgba(255,90,10,.8),4px 6px 0 #070608}
+.rl-sweep i{display:inline-block;font-style:normal;opacity:0;animation:rlGlint 3.6s ease-in-out .5s infinite}
+.rl-sweep i:nth-child(2){animation-delay:.66s}
+.rl-sweep i:nth-child(3){animation-delay:.82s}
+.rl-sweep i:nth-child(4){animation-delay:.98s}
+.rl-sweep i:nth-child(5){animation-delay:1.14s}
+.rl-sweep i:nth-child(6){animation-delay:1.30s}
+.rl-sweep i:nth-child(7){animation-delay:1.46s}
+.rl-sweep i:nth-child(8){animation-delay:1.62s}
+.rl-track{position:relative;width:min(360px,calc(100vw - 112px));height:10px;margin-top:clamp(40px,9vh,76px)}
+.rl-bar{position:absolute;inset:0;overflow:hidden;background:#0d0f13;border:2px solid;border-color:#111318 #8e9180 #8e9180 #111318;box-shadow:0 0 0 2px #000}
+.rl-fill{position:absolute;inset:0;transform-origin:0 50%;transform:scaleX(var(--p));transition:transform var(--rl-dur) var(--rl-ease);will-change:transform;background:linear-gradient(90deg,#4a1606,#b8380c 45%,#ff7a1a 88%,#ffd27a)}
+.rl-bar::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(0,0,0,.35) 0 2px,transparent 2px 4px)}
+.rl-rider{position:absolute;left:2px;right:2px;top:50%;height:0;transform:translateX(calc((var(--p) - 1) * 100%));transition:transform var(--rl-dur) var(--rl-ease);will-change:transform}
+.rl-skull{position:absolute;right:calc(var(--sk) * -.5);bottom:calc(var(--sk) * -.3);width:var(--sk)}
+.rl-bob{position:relative;animation:rlBob .5s steps(1) infinite}
+.rl-bob img{display:block;width:100%;height:auto}
+.rl-eyes{position:absolute;inset:0;width:100%;height:100%;opacity:0;transform-origin:50% 45%}
+.rl-rift{position:absolute;right:calc(2px - var(--sk) * .9);top:calc(5px - var(--sk) * 1.2125);width:calc(var(--sk) * 1.8);height:calc(var(--sk) * 1.8)}
+.rl-rift-glow{position:absolute;inset:-40%;background:radial-gradient(circle,rgba(160,47,224,.55),rgba(91,24,150,.2) 40%,transparent 68%);opacity:.6;animation:rlPulse 2.4s ease-in-out infinite alternate}
+.rl-ring{position:absolute;inset:0;width:100%;height:100%;animation:rlSpin 3.6s steps(24) infinite}
+.rl-ring-in{animation:rlSpin 2.4s steps(16) infinite reverse;opacity:.85}
+.rl-status{margin:clamp(26px,5vh,40px) 0 0;font-size:13px;line-height:1.4;letter-spacing:.16em;color:#d4bc78;text-shadow:2px 2px #000}
+.rl-dots{position:absolute;margin-left:1px}.rl-dots i{font-style:normal;opacity:0;animation:rlDot 1.5s linear infinite}
+.rl-dots i:nth-child(2){animation-delay:.25s}
+.rl-dots i:nth-child(3){animation-delay:.5s}
+.rl-help{display:none;max-width:34em;margin:10px auto 0;font-size:12px;line-height:1.6;color:#c9c4a8}
+.rl-help a{display:inline-block;margin-top:10px;padding:8px 14px;color:#15151e;background:#d4bc78;border:2px solid;border-color:#f2e3b0 #7a6a3e #7a6a3e #f2e3b0;letter-spacing:.1em;text-decoration:none}
+.rl-embers{position:absolute;inset:0;pointer-events:none}
+.rl-embers i{position:absolute;bottom:-8px;left:50%;width:3px;height:3px;background:#ffb347;box-shadow:0 0 4px #ff7a1a;opacity:0;animation:rlEmberA 5s linear infinite}
+.rl-embers i:nth-child(1){left:8%;animation-duration:6.2s;animation-delay:-1s}
+.rl-embers i:nth-child(2){left:17%;width:4px;height:4px;animation-name:rlEmberB;animation-duration:7s;animation-delay:-4.2s}
+.rl-embers i:nth-child(3){left:26%;animation-duration:5.4s;animation-delay:-2.6s}
+.rl-embers i:nth-child(4){left:34%;background:#e07cff;box-shadow:0 0 4px #a02fe0;animation-name:rlEmberB;animation-duration:6.6s;animation-delay:-.4s}
+.rl-embers i:nth-child(5){left:43%;animation-duration:5.8s;animation-delay:-3.7s}
+.rl-embers i:nth-child(6){left:51%;width:4px;height:4px;animation-name:rlEmberB;animation-duration:6.4s;animation-delay:-5.1s}
+.rl-embers i:nth-child(7){left:58%;animation-duration:5.2s;animation-delay:-1.8s}
+.rl-embers i:nth-child(8){left:66%;background:#ffd27a;animation-name:rlEmberB;animation-duration:7.4s;animation-delay:-2.9s}
+.rl-embers i:nth-child(9){left:74%;width:4px;height:4px;animation-duration:6s;animation-delay:-4.6s}
+.rl-embers i:nth-child(10){left:82%;background:#e07cff;box-shadow:0 0 4px #a02fe0;animation-duration:5.6s;animation-delay:-.9s}
+.rl-embers i:nth-child(11){left:90%;animation-name:rlEmberB;animation-duration:6.8s;animation-delay:-3.3s}
+.rl-embers i:nth-child(12){left:96%;animation-duration:5s;animation-delay:-2.2s}
+/* READY: the bar fills, the skull's eyes flare rift violet, hold, settle (1.5 s), then the fade. */
+#riftLoader.rl-lit .rl-eyes{animation:rlEyes 1.5s linear both}
+#riftLoader.rl-lit .rl-rift-glow{animation:rlRiftLit 1.5s ease-out both}
+#riftLoader.rl-lit .rl-dots,#riftLoader.rl-failed .rl-dots{display:none}
+/* Boot failed: everything stops, the bar goes cold, the reason and RELOAD show. */
+#riftLoader.rl-failed .rl-embers,#riftLoader.rl-failed .rl-heat,#riftLoader.rl-failed .rl-sweep{display:none}
+#riftLoader.rl-failed .rl-ring,#riftLoader.rl-failed .rl-bob,#riftLoader.rl-failed .rl-rift-glow{animation:none}
+#riftLoader.rl-failed .rl-rift{opacity:.35}
+#riftLoader.rl-failed .rl-fill{background:#5a1c22}
+#riftLoader.rl-failed .rl-status{color:#e0707a}
+#riftLoader.rl-failed .rl-help{display:block}
+@starting-style{#riftLoader .rl-fill{transform:scaleX(0)}#riftLoader .rl-rider{transform:translateX(-100%)}}
+@keyframes rlHeat{0%,100%{opacity:0}50%{opacity:.55}}
+@keyframes rlGlint{0%{opacity:0}7%,12%{opacity:1}26%,100%{opacity:0}}
+@keyframes rlBob{0%{transform:translateY(0)}50%{transform:translateY(-2px)}}
+@keyframes rlSpin{to{transform:rotate(360deg)}}
+@keyframes rlPulse{from{opacity:.45;transform:scale(.92)}to{opacity:.85;transform:scale(1.04)}}
+@keyframes rlDot{0%,15%{opacity:0}25%,80%{opacity:1}90%,100%{opacity:0}}
+@keyframes rlEmberA{0%{opacity:0;transform:translate3d(0,0,0)}12%{opacity:1}50%{transform:translate3d(-14px,-34vh,0)}78%{opacity:.7}100%{opacity:0;transform:translate3d(10px,-70vh,0)}}
+@keyframes rlEmberB{0%{opacity:0;transform:translate3d(0,0,0)}12%{opacity:.9}50%{transform:translate3d(16px,-30vh,0)}80%{opacity:.6}100%{opacity:0;transform:translate3d(-12px,-62vh,0)}}
+@keyframes rlEyes{0%{opacity:0;transform:scale(.6)}9%{opacity:1;transform:scale(1.22)}20%{transform:scale(1)}60%{opacity:1}100%{opacity:.88;transform:scale(1)}}
+@keyframes rlRiftLit{0%{opacity:.6;transform:scale(1)}12%{opacity:1;transform:scale(1.35)}100%{opacity:.9;transform:scale(1.12)}}
+@media (min-width:900px) and (min-height:620px){#riftLoader{--sk:52px}.rl-status{font-size:15px}}
+@media (min-width:1800px) and (min-height:1000px){#riftLoader{--sk:68px}.rl-track{width:500px}.rl-status{font-size:18px}}
+@media (max-height:420px){.rl-mark{font-size:clamp(40px,9vw,72px)}.rl-track{margin-top:28px}.rl-status{margin-top:18px}}
+/* Reduced motion: a calm, still screen; the bar and skull step between stages, the eyes just switch on. */
+@media (prefers-reduced-motion:reduce){.rl-embers,.rl-heat,.rl-sweep,.rl-dots{display:none}#riftLoader .rl-ring,#riftLoader .rl-bob,#riftLoader .rl-rift-glow{animation:none}.rl-fill,.rl-rider,.rl-mark{transition:none}#riftLoader.rl-lit .rl-eyes{animation:none;opacity:1}#riftLoader.rl-lit .rl-rift-glow{animation:none;opacity:.9}#riftLoader{transition-duration:.25s}}
+</style>
+<link rel="modulepreload" href="js/riftborn.26ad511789.js">
+<link rel="stylesheet" href="css/riftborn.fa5dd6c231.css">
 </head>
 <body class="menu-open">
+<div id="riftLoader" role="dialog" aria-modal="true" aria-label="Loading Riftborn">
+  <div class="rl-embers" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="rl-stage">
+    <div class="rl-mark" aria-hidden="true"><span class="rl-word">RIFTBORN</span><span class="rl-word rl-heat">RIFTBORN</span><span class="rl-word rl-sweep"><i>R</i><i>I</i><i>F</i><i>T</i><i>B</i><i>O</i><i>R</i><i>N</i></span></div>
+    <div class="rl-track" id="rlBar" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div class="rl-rift" aria-hidden="true"><i class="rl-rift-glow"></i><svg class="rl-ring" viewBox="0 0 32 32" shape-rendering="crispEdges"><path fill="#2a0845" d="M13 1h1v1H13zM15 1h1v1H15zM17 1h3v1H17zM18 2h5v1H18zM21 3h3v1H21zM20 4h1v1H20zM22 4h4v1H22zM21 5h1v1H21zM23 5h4v1H23zM9 6h1v1H9zM22 6h5v1H22zM6 7h3v1H6zM23 7h5v1H23zM5 8h3v1H5zM24 8h4v1H24zM3 9h4v1H3zM25 9h3v1H25zM2 10h4v1H2zM26 10h2v1H26zM2 11h4v1H2zM26 11h2v1H26zM1 12h4v1H1zM27 12h1v1H27zM1 13h4v1H1zM27 13h1v1H27zM1 14h4v1H1zM27 14h1v1H27zM1 15h3v1H1zM1 16h4v1H1zM1 17h1v1H1zM3 17h1v1H3zM1 18h2v1H1zM4 18h1v1H4zM30 18h1v1H30zM1 19h1v1H1zM2 20h1v1H2zM29 21h1v1H29zM2 22h1v1H2zM28 22h2v1H28zM3 23h1v1H3zM4 24h1v1H4zM24 24h1v1H24zM26 24h2v1H26zM23 25h1v1H23zM25 25h1v1H25zM27 25h1v1H27zM11 26h1v1H11zM20 26h3v1H20zM24 26h3v1H24zM12 27h10v1H12zM23 27h3v1H23zM13 28h11v1H13zM15 29h8v1H15zM18 30h2v1H18z"/><path fill="#5b1896" d="M12 1h1v1H12zM14 1h1v1H14zM16 1h1v1H16zM9 2h9v1H9zM9 3h1v1H9zM15 3h1v1H15zM17 3h4v1H17zM6 4h1v1H6zM14 4h6v1H14zM21 4h1v1H21zM5 5h1v1H5zM20 5h1v1H20zM22 5h1v1H22zM4 6h1v1H4zM30 12h1v1H30zM30 14h1v1H30zM4 15h1v1H4zM30 16h1v1H30zM2 17h1v1H2zM4 17h1v1H4zM30 17h1v1H30zM3 18h1v1H3zM2 19h3v1H2zM29 19h2v1H29zM3 20h3v1H3zM26 20h1v1H26zM28 20h2v1H28zM2 21h4v1H2zM27 21h2v1H27zM3 22h4v1H3zM25 22h3v1H25zM4 23h2v1H4zM7 23h1v1H7zM24 23h5v1H24zM5 24h2v1H5zM8 24h1v1H8zM23 24h1v1H23zM25 24h1v1H25zM4 25h2v1H4zM22 25h1v1H22zM24 25h1v1H24zM26 25h1v1H26zM5 26h2v1H5zM23 26h1v1H23zM6 27h2v1H6zM22 27h1v1H22zM8 28h1v1H8zM9 29h1v1H9zM12 30h1v1H12z"/><path fill="#a02fe0" d="M8 3h1v1H8zM10 3h5v1H10zM16 3h1v1H16zM7 4h2v1H7zM10 4h4v1H10zM6 5h2v1H6zM9 5h1v1H9zM11 5h1v1H11zM5 6h1v1H5zM8 6h1v1H8zM27 6h1v1H27zM3 8h1v1H3zM28 8h1v1H28zM2 9h1v1H2zM29 9h1v1H29zM29 10h1v1H29zM29 11h1v1H29zM29 12h1v1H29zM29 13h2v1H29zM27 15h1v1H27zM29 15h2v1H29zM27 16h3v1H27zM27 17h1v1H27zM29 17h1v1H29zM27 18h3v1H27zM27 19h2v1H27zM27 20h1v1H27zM26 21h1v1H26zM6 23h1v1H6zM7 24h1v1H7zM6 25h2v1H6zM9 25h1v1H9zM7 26h2v1H7zM10 26h1v1H10zM8 27h2v1H8zM9 28h2v1H9zM10 29h2v1H10zM13 30h4v1H13z"/><path fill="#e07cff" d="M9 4h1v1H9zM8 5h1v1H8zM10 5h1v1H10zM6 6h2v1H6zM4 7h2v1H4zM4 8h1v1H4zM28 9h1v1H28zM28 10h1v1H28zM28 11h1v1H28zM28 12h1v1H28zM28 13h1v1H28zM28 14h2v1H28zM28 15h1v1H28zM28 17h1v1H28zM8 25h1v1H8zM9 26h1v1H9zM10 27h2v1H10zM11 28h2v1H11zM12 29h3v1H12zM17 30h1v1H17z"/></svg><svg class="rl-ring rl-ring-in" viewBox="0 0 32 32" shape-rendering="crispEdges"><path fill="#2a0845" d="M15 6h2v1H15zM12 7h2v1H12zM15 7h1v1H15zM17 7h1v1H17zM19 7h1v1H19zM10 8h5v1H10zM18 8h1v1H18zM9 9h3v1H9zM9 10h2v1H9zM8 11h2v1H8zM8 12h1v1H8zM8 13h1v1H8zM8 14h1v1H8zM23 17h1v1H23zM23 18h1v1H23zM23 19h1v1H23zM22 20h2v1H22zM21 21h2v1H21zM20 22h3v1H20zM17 23h5v1H17zM12 24h1v1H12zM14 24h1v1H14zM16 24h4v1H16zM15 25h2v1H15z"/><path fill="#5b1896" d="M14 7h1v1H14zM16 7h1v1H16zM18 7h1v1H18zM17 8h1v1H17zM19 8h3v1H19zM20 9h3v1H20zM21 10h3v1H21zM24 12h1v1H24zM25 15h1v1H25zM6 16h1v1H6zM7 19h1v1H7zM8 20h1v1H8zM8 21h1v1H8zM9 22h3v1H9zM10 23h5v1H10zM13 24h1v1H13zM15 24h1v1H15z"/><path fill="#a02fe0" d="M8 10h1v1H8zM22 11h2v1H22zM23 12h1v1H23zM23 13h2v1H23zM23 14h2v1H23zM6 15h1v1H6zM25 16h1v1H25zM7 17h2v1H7zM7 18h2v1H7zM8 19h1v1H8zM9 20h1v1H9zM9 21h2v1H9z"/><path fill="#e07cff" d="M7 12h1v1H7zM7 13h1v1H7zM7 14h1v1H7zM7 15h1v1H7zM24 15h1v1H24zM7 16h1v1H7zM24 16h1v1H24zM24 17h1v1H24zM24 18h1v1H24zM24 19h1v1H24zM23 21h1v1H23z"/></svg></div>
+      <div class="rl-bar"><i class="rl-fill"></i></div>
+      <div class="rl-rider" aria-hidden="true"><div class="rl-skull"><div class="rl-bob"><img src="assets/death-skull.png" width="40" height="49" alt="" draggable="false"><svg class="rl-eyes" viewBox="0 0 40 49" shape-rendering="crispEdges"><defs><radialGradient id="rlEyeGlow"><stop offset="0" stop-color="#e07cff" stop-opacity=".9"/><stop offset=".45" stop-color="#a02fe0" stop-opacity=".45"/><stop offset="1" stop-color="#5b1896" stop-opacity="0"/></radialGradient></defs><circle cx="12.5" cy="22.5" r="10" fill="url(#rlEyeGlow)" shape-rendering="auto"/><circle cx="27.5" cy="22" r="10" fill="url(#rlEyeGlow)" shape-rendering="auto"/><path fill="#a02fe0" d="M9 19h4v1H9zM8 20h7v1H8zM7 21h10v1H7zM7 22h11v1H7zM7 23h10v1H7zM8 24h8v1H8zM8 25h7v1H8zM9 26h3v1H9zM26 18h4v1H26zM24 19h7v1H24zM22 20h10v1H22zM22 21h11v1H22zM22 22h11v1H22zM22 23h10v1H22zM23 24h9v1H23zM24 25h7v1H24zM28 26h3v1H28z"/><path fill="#e07cff" d="M10 20h3v1H10zM9 21h6v1H9zM9 22h7v1H9zM9 23h6v1H9zM10 24h4v1H10zM24 20h6v1H24zM24 21h7v1H24zM24 22h7v1H24zM24 23h6v1H24zM25 24h5v1H25z"/><path fill="#fbeaff" d="M11 22h2v2h-2zM26 21h2v2h-2z"/></svg></div></div></div>
+    </div>
+    <p class="rl-status"><span id="rlStatus" role="status" aria-live="polite">DOWNLOADING</span><span class="rl-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span></p>
+    <p class="rl-help"><span id="rlHelp"></span><br><a href="">RELOAD</a></p>
+  </div>
+</div>
 <canvas id="game" aria-label="3D survival arena"></canvas>
 <div id="deathTint" aria-hidden="true"></div>
 <div id="topTags"><span id="clock">00:00</span><span id="hostiles">0 HOSTILES</span><div id="modeBadge" role="status"></div></div>
@@ -85,7 +196,7 @@ window.RIFTBORN_BUILD = "33c9a9ab13";
 
 <main id="menu">
   <button id="deathSkull" type="button" aria-label="Enter Death Mode" aria-pressed="false"><img src="assets/death-skull.png" width="80" height="98" alt="" draggable="false"></button>
-  <div class="menu-card">
+  <div class="menu-card ui-scaled">
     <h1 class="brand-title">RIFT<span>BORN</span></h1>
     <div class="edition"></div>
     <p id="runSummary"></p>
@@ -96,6 +207,7 @@ window.RIFTBORN_BUILD = "33c9a9ab13";
     <p id="scoreSave" role="status"></p>
     <button id="retryScore" type="button" class="secondary hidden">RETRY SAVING SCORE</button>
     <small id="loadNote">Building your world…</small>
+    <a id="menuPrivacy" class="menu-privacy" href="https://riftborn.us/privacy/" target="_blank" rel="noopener">PRIVACY</a>
   </div>
 </main>
 
@@ -108,6 +220,7 @@ window.RIFTBORN_BUILD = "33c9a9ab13";
       <details><summary>ON-SCREEN KEYBOARD</summary><div id="nameKeyboard" aria-label="Username characters"></div></details>
       <div id="rulesetRow" class="ruleset-row" role="group" aria-label="Ruleset"><span class="ruleset-label">RULESET</span><button id="rulesetKeepers" type="button" class="secondary" aria-pressed="true">KEEPERS</button><button id="rulesetOriginal" type="button" class="secondary" aria-pressed="false">ORIGINAL</button><small id="rulesetHint"></small></div>
       <label class="practice-option" for="practiceRun"><input id="practiceRun" type="checkbox"><span><strong>PRACTICE RUN</strong><small>Play the full game without saving scores or Journal progress.</small></span></label>
+      <p id="devRunNote" class="dev-run-note" role="status" hidden>DEVELOPER MODE: NOT SCORED OR SAVED</p>
       <p id="usernameError" role="alert"></p>
       <p id="assistNote" class="assist-note hidden" role="status"></p>
       <button id="beginRun" type="submit" class="primary">BEGIN RUN</button>
@@ -182,9 +295,61 @@ window.RIFTBORN_BUILD = "33c9a9ab13";
 <aside id="devTools" class="hidden" aria-label="Practice tools"></aside>
 
 <noscript><p class="noscript">Riftborn needs JavaScript and WebGL.</p></noscript>
-<script type="module" src="js/riftborn.33c9a9ab13.js"></script>
-<script>window.addEventListener("error",function(){if(!window.gameReady){var n=document.querySelector("#loadNote");if(n)n.textContent="The 3D game could not load. Enable WebGL / hardware acceleration and reload.";}});</script>
-<script>/* The live D1 board only for the live game at /riftborn/; previews (/dev/ etc.) keep scores on the device. */window.RIFTBORN_SCORE_API_BASE = window.RIFTBORN_SCORE_API_BASE || (location.hostname === "chancrisp.github.io" && (location.pathname === "/riftborn/" || location.pathname === "/riftborn/index.html") ? "https://riftborn-leaderboard.chanmanc10.workers.dev" : "");</script>
-<script>/* Player feedback goes to the same Worker from the live game and the /dev/ test build (context.source tells them apart); local builds keep it on the device. */window.RIFTBORN_FEEDBACK_API_BASE = window.RIFTBORN_FEEDBACK_API_BASE || (location.hostname === "chancrisp.github.io" ? "https://riftborn-leaderboard.chanmanc10.workers.dev" : "");</script>
+<script type="module" src="js/riftborn.26ad511789.js"></script>
+<script>/* Boot errors before the game is ready: the loading screen stops and says why (src/ui/boot-loader.js does
+the same for a boot that throws). Listening in the capture phase also catches the bundle failing to
+download, a <script> load error that never bubbles; other resources (an image, a font) are ignored. */
+window.addEventListener("error", function (e) {
+  var t = e && e.target, download = !!(t && t.tagName === "SCRIPT");
+  if (window.gameReady || (t && t !== window && !download)) return;
+  var text = download ? "Riftborn could not download. Check your connection and reload." : "The 3D game could not load. Enable WebGL / hardware acceleration and reload.";
+  var note = document.getElementById("loadNote"), loader = document.getElementById("riftLoader");
+  if (note) note.textContent = text;
+  if (!loader) return;
+  loader.classList.add("rl-failed");
+  document.getElementById("rlStatus").textContent = "THE RIFT COULD NOT OPEN";
+  document.getElementById("rlHelp").textContent = text;
+}, true);
+</script>
+<script>/* HOST CONFIG (v2.2): the one place that decides which services each address uses. Scores
+(RIFTBORN_SCORE_API_BASE), player feedback (RIFTBORN_FEEDBACK_API_BASE) and accounts
+(RIFTBORN_ACCOUNT_API_BASE, src/meta/account.js). "" turns a service off: scores and feedback stay on
+the device, accounts vanish (no welcome popup, no Account settings, no requests; the game plays like 2.1).
+  riftborn.us          the live game: all three through api.riftborn.us; scores only from the root
+                       game page, never /classic/ or any other path.
+  dev.riftborn.us      the password-gated test build: accounts and feedback through api.riftborn.us,
+                       NEVER scores.
+  chancrisp.github.io  the old address, before the move only: scores from /riftborn/ and feedback
+                       through the workers.dev URL, as in 2.1. Accounts OFF: never on a shared origin.
+  localhost etc.       nothing, unless ?accounts=local (kept for the tab, so the sign-in round trip
+                       returns to it) or localStorage "riftborn-reborn-dev-accounts" names a loopback
+                       accounts harness (site server/dev-accounts.mjs).
+  anywhere else        nothing (a claude.ai artifact, a copy on another host).
+A value set before this block (a test page) wins for scores and feedback. .tools/host-config.mjs
+checks this table before every deploy. */
+(function () {
+  var API = "https://api.riftborn.us", OLD_API = "https://riftborn-leaderboard.chanmanc10.workers.dev";
+  var h = location.hostname, p = location.pathname, scores = "", feedback = "", accounts = "";
+  if (h === "riftborn.us") {
+    accounts = feedback = API;
+    if (p === "/" || p === "/index.html") scores = API;
+  } else if (h === "dev.riftborn.us") {
+    accounts = feedback = API;
+  } else if (h === "chancrisp.github.io") {
+    feedback = OLD_API;
+    if (p === "/riftborn/" || p === "/riftborn/index.html") scores = OLD_API;
+  } else if (h === "localhost" || h === "127.0.0.1" || h === "[::1]") {
+    var key = "riftborn-reborn-dev-accounts", local = "";
+    try {
+      if (new URLSearchParams(location.search).get("accounts") === "local") sessionStorage.setItem(key, "http://127.0.0.1:8787");
+      local = sessionStorage.getItem(key) || localStorage.getItem(key) || "";
+    } catch (e) {}
+    if (/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$/.test(local)) accounts = local;
+  }
+  window.RIFTBORN_SCORE_API_BASE = window.RIFTBORN_SCORE_API_BASE || scores;
+  window.RIFTBORN_FEEDBACK_API_BASE = window.RIFTBORN_FEEDBACK_API_BASE || feedback;
+  window.RIFTBORN_ACCOUNT_API_BASE = accounts;
+})();
+</script>
 </body>
 </html>
