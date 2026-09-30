@@ -22,7 +22,21 @@ export const ACCOUNT_SECRETS = Object.freeze([
 ]);
 const SIGNING_KEYS = Object.freeze(['AUTH_SIGNING_KEY', 'AUTH_SIGNING_KEY_PREVIOUS']);
 // The accounts per-IP limiter (server/accounts-api.js IP_BINDING_LIMIT): no D1 write per request.
+// The feedback admin routes use it too, under their own key (server/feedback-api.js limitAdmin).
 export const ACCOUNTS_RATE_LIMITER = Object.freeze({ type: 'ratelimit', name: 'ACCOUNTS_RATE_LIMITER', namespace_id: '6184035', simple: { limit: 30, period: 60 } });
+
+// The feedback inbox key guards every player message and contact line: a long random value, not a
+// word. Shorter keys are refused when the repository variable FEEDBACK_KEY_STRICT is 1, and warned
+// about otherwise (so a deploy with today's key still goes through until it is rotated).
+export const FEEDBACK_ADMIN_KEY_MIN = 24;
+export const PRODUCTION_REF = 'refs/heads/main';
+
+/** Why this environment must not deploy the production Worker ([] when it may): in CI only main deploys. */
+export function workerDeployRefusals(env = process.env) {
+  return (env.CI || env.GITHUB_ACTIONS) && env.GITHUB_REF !== PRODUCTION_REF
+    ? [`Refusing to deploy ${env.GITHUB_REF || 'an unknown ref'} to the production Worker: only ${PRODUCTION_REF} deploys api.riftborn.us.`]
+    : [];
+}
 
 /**
  * The browser origins the Worker answers (CORS): riftborn.us, dev.riftborn.us and the GitHub Pages
@@ -42,7 +56,7 @@ export function allowedOrigins(siteOrigin) {
 }
 
 /** Build multipart metadata for the documented Workers Script Upload API. */
-export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, ...accountSecrets }) {
+export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, feedbackKeyStrict, warn = console.warn, ...accountSecrets }) {
   if (!/^[0-9a-f-]{36}$/i.test(databaseId || '')) throw new Error('Set CLOUDFLARE_D1_DATABASE_ID to the D1 database UUID.');
   const origins = allowedOrigins(siteOrigin);
 
@@ -77,6 +91,12 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
   // Optional secrets: bound only when set, so a deploy without them still succeeds (the
   // feedback inbox then answers 503 and the Discord ping is skipped).
   const adminKey = (feedbackAdminKey || '').trim();
+  if (adminKey && adminKey.length < FEEDBACK_ADMIN_KEY_MIN) {
+    const message = `FEEDBACK_ADMIN_KEY is ${adminKey.length} characters; use at least ${FEEDBACK_ADMIN_KEY_MIN} random characters ` +
+      '(generate it like AUTH_SIGNING_KEY) and update the GitHub secret.';
+    if (String(feedbackKeyStrict ?? '').trim() === '1') throw new Error(message + ' Refusing to deploy (FEEDBACK_KEY_STRICT=1).');
+    warn('WARNING: ' + message + ' Set the repository variable FEEDBACK_KEY_STRICT=1 to refuse short keys.');
+  }
   if (adminKey) metadata.bindings.push({ type: 'secret_text', name: 'FEEDBACK_ADMIN_KEY', text: adminKey });
   const webhook = (discordWebhookUrl || '').trim();
   if (webhook) {
@@ -100,7 +120,7 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
   return form;
 }
 
-export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, fetchImpl = fetch, ...accountSecrets }) {
+export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, feedbackKeyStrict, warn, fetchImpl = fetch, ...accountSecrets }) {
   if (!/^[0-9a-f]{32}$/i.test(accountId || '')) throw new Error('Set CLOUDFLARE_ACCOUNT_ID to the Cloudflare account ID.');
   if (!apiToken) throw new Error('Set the CLOUDFLARE_API_TOKEN GitHub secret.');
 
@@ -112,7 +132,7 @@ export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin
     target: 'es2022',
     minify: true,
   });
-  const form = createWorkerUpload(result.outputFiles[0].text, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, ...accountSecrets });
+  const form = createWorkerUpload(result.outputFiles[0].text, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, feedbackKeyStrict, warn, ...accountSecrets });
   const response = await fetchImpl(`${ACCOUNT_API}/${accountId}/workers/scripts/${WORKER_NAME}?bindings_inherit=strict`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${apiToken}` },
@@ -127,6 +147,8 @@ export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin
 }
 
 async function main() {
+  const refusals = workerDeployRefusals(process.env);
+  if (refusals.length) throw new Error(refusals.join(' '));
   const result = await deployWorker({
     accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
     apiToken: process.env.CLOUDFLARE_API_TOKEN,
@@ -135,6 +157,7 @@ async function main() {
     feedbackAdminKey: process.env.FEEDBACK_ADMIN_KEY,
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
     accountsLive: process.env.ACCOUNTS_LIVE,
+    feedbackKeyStrict: process.env.FEEDBACK_KEY_STRICT,
     ...Object.fromEntries(ACCOUNT_SECRETS.map(([option, , envName]) => [option, process.env[envName]])),
   });
   console.log(`Deployed ${WORKER_NAME}; version ${result?.id || 'created'}.`);

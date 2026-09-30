@@ -276,10 +276,31 @@ export function keyId(secret) {
 // A guest cannot post under a name that renders like an account's username. Both sides are reduced
 // to a skeleton: compatibility forms folded (NFKD: fullwidth, ligatures, styled letters), accents
 // and other combining marks dropped, common Cyrillic, Greek and Latin look-alikes mapped to one
-// Latin letter (capital I, 1 and | read as l; 0 as o), lower-cased, and separators, symbols and
-// invisible characters dropped: "Victim_Name", "VictimName" with a Cyrillic small ie for the e,
-// and the same name in fullwidth letters all meet at "victimname". Accounts store theirs
-// (username_skeleton) at create and rename.
+// Latin letter (capital I, 1 and | read as l; 0 as o; a few symbols that read as a letter too),
+// lower-cased, and separators, other symbols and invisible characters dropped: "Victim_Name",
+// "VictimName" with a Cyrillic small ie for the e, and the same name in fullwidth letters all meet
+// at "victimname". Accounts store theirs (username_skeleton) at create and rename.
+// Symbols that read as one letter (UTS #39 confusables, a conservative few): mapped in the table
+// below, before the other symbols are dropped, so an inverted exclamation mark for the i of
+// "Victim" or a logical-or sign for its V no longer vanishes into "ictim". None is ASCII: an ASCII
+// name's skeleton (every account's) is exactly what it was, so no stored skeleton needs a backfill.
+// nameProtected also reads a guest name with these left out (see there).
+const SYMBOL_LOOKALIKES = Object.freeze({
+  a: '\u237A', // APL alpha
+  c: '\u00A2', // cent sign
+  e: '\u212E', // estimated symbol
+  i: '\u00A1\u2373', // inverted exclamation mark, APL iota
+  l: '\u2223\u2502\u2758\u23FD\u05C0', // divides, box-drawing vertical, light vertical bar, power-on symbol, Hebrew paseq
+  n: '\u2229\u22C2', // intersection, n-ary intersection
+  o: '\u25CB\u25EF\u3007', // white circle, large circle, ideographic number zero
+  p: '\u2374', // APL rho
+  t: '\u22A4\u27D9', // down tack, large down tack
+  u: '\u222A\u22C3', // union, n-ary union
+  v: '\u2228\u22C1\u02C5', // logical or, n-ary logical or, modifier down arrowhead
+  w: '\u2375', // APL omega
+  x: '\u00D7\u2A2F\u2573' // multiplication sign, vector cross product, box-drawing diagonal cross
+});
+const SYMBOL_LOOKALIKE_CHARS = new Set(Object.values(SYMBOL_LOOKALIKES).join(''));
 const CONFUSABLES = Object.freeze({
   // Latin and digits (case matters here: a capital I looks like l, a small i does not)
   I: 'l', '1': 'l', '|': 'l', '0': 'o', '\u0131': 'i', '\u0237': 'j', '\u0269': 'i', '\u01C0': 'l',
@@ -298,16 +319,72 @@ const CONFUSABLES = Object.freeze({
   '\u03B1': 'a', '\u03BF': 'o', '\u03B9': 'i', '\u03BA': 'k', '\u03BD': 'v', '\u03C1': 'p', '\u03C5': 'u',
   '\u03C7': 'x', '\u03F2': 'c', '\u03F3': 'j', '\u03B5': 'e', '\u03C4': 't',
   // Armenian
-  '\u0585': 'o', '\u0570': 'h', '\u057D': 'u', '\u0578': 'n'
+  '\u0585': 'o', '\u0570': 'h', '\u057D': 'u', '\u0578': 'n',
+  // More look-alikes of one ASCII letter or digit, by target (UTS #39 confusables for these scripts,
+  // plus a few house rules): Latin letters with a stroke or hook, small capitals and IPA letters,
+  // more Cyrillic, Greek and Armenian, Cherokee (capitals; small letters are folded to them), Lisu,
+  // Canadian Syllabics, Coptic, Runic, Tifinagh, and letters/digits that read as l, o or v. Every
+  // account username is ASCII, so this only ever makes guest names stricter.
+  ...lookalikes({
+    a: '\u0251\u1D00\u13AA\uA4EE\u15C5\u2C80\u2C81',
+    b: '\u0180\u0243\u0181\u0185\u0184\u0299\u0432\u044C\u042C\u03B2\u13CF\u13F4\uA4D0\u1472\u15F7\u2C82\u2C83\u16D2',
+    c: '\u03c2\u0188\u0187\u023C\u023B\u1D04\u13DF\uA4DA\u1455\u2CA4\u2CA5',
+    d: '\u0111\u0110\u0257\u0256\u018A\u0189\u1D05\u13A0\u13E7\uA4D3\u146F\u15DE\u15EA',
+    e: '\u0247\u0246\u1D07\u13AC\uA4F0\u2C88\u2C89\u2D39',
+    f: '\u0192\u0191\uA730\u03DC\uA4DD\u15B4\u16A0',
+    g: '\u01E5\u01E4\u0260\u0261\u0262\u0581\u13C0\u13F3\uA4D6',
+    h: '\u0127\u0126\u0266\u029C\u043D\u04BA\u13BB\u13C2\uA4E7\u157C\u2C8E\u2C8F\u16BB',
+    i: '\u0268\u026A\u13A5\uA647',
+    j: '\u0249\u0248\u029D\u1D0A\u13AB\uA4D9\u148D',
+    k: '\u0199\u0198\u1D0B\u03CF\u13E6\uA4D7\u2C94\u2C95\u16D5',
+    l: '\u0142\u0141\u019A\u026B\u026C\u026D\u023D\u029F\u0197\uA7AE\u053C\u13DE\uA4E1\uA4F2\u14AA\u2C92\u16C1\u2D4F' +
+      '\u1175\u4E28\u0627\u0661',
+    m: '\u0271\u1D0D\u043C\u03FA\u13B7\uA4DF\u2C98\u2C99\u16D6',
+    n: '\u0272\u0273\u019E\u019D\u0274\u043F\u03B7\uA4E0\u144E\u2C9A\u2C9B',
+    o: '\u00F8\u00D8\u0275\u019F\u1D0F\u0555\uA4F3\u2C9E\u2C9F\u2D54\u110B\u0647\u0665\u0966\u09E6\u0A66\u0AE6' +
+      '\u0B20\u0B66\u0BE6\u0C66\u0CE6\u0D66\u0E50\u0ED0\u1040\u101D',
+    p: '\u01A5\u01A4\u1D7D\u1D18\u13E2\uA4D1\u146D\u2CA2\u2CA3',
+    q: '\u024B\u024A\u02A0\uA7AF\u0566',
+    r: '\u024D\u024C\u027D\u027C\u0280\u13A1\u13D2\uA4E3\u1587\u16B1',
+    s: '\u0282\u023F\uA731\u054F\u13D5\u13DA\uA4E2\u1515',
+    t: '\u0167\u0166\u01AB\u01AD\u01AC\u0288\u01AE\u1D1B\u0442\u13A2\uA4D4\u2CA6\u2CA7',
+    u: '\u0289\u0244\u1D1C\u054D\u03BC\u144C',
+    v: '\u028B\u01B2\u1D20\u0474\u0475\u13D9\uA4E6\u142F\u0667\u06F7',
+    w: '\u1D21\u2C73\u2C72\u03C9\u13B3\u13D4\uA4EA\u15EF',
+    x: '\uA4EB\u166D\u1541\u166E\u2CAC\u2CAD\u16EA\u16B7',
+    y: '\u028F\u024F\u024E\u01B4\u01B3\u04B0\u04B1\u03B3\u10E7\u13A9\u13BD\uA4EC\u2CA8\u2CA9',
+    z: '\u01B6\u01B5\u0225\u0224\u0290\u0291\u1D22\u13C3\uA4DC\u1614\u2C8C\u2C8D',
+    2: '\u01A7\u01A8\u14BF',
+    3: '\u0292\u01B7\u021D\u021C\u025C\u0437\u04E0\u04E1',
+    4: '\u13CE',
+    5: '\u01BC\u01BD',
+    6: '\u0431\u13EE'
+  }),
+  // Symbols that read as one letter (SYMBOL_LOOKALIKES above).
+  ...lookalikes(SYMBOL_LOOKALIKES)
 });
+function lookalikes(groups) {
+  const out = {};
+  for (const [ascii, chars] of Object.entries(groups)) for (const char of chars) out[char] = ascii;
+  return out;
+}
+// Shapes of a capital I. They read as l (the rule above), but a name written wholly in a caseless
+// script ("\uA4E6\uA4F2\uA4DA\uA4D4\uA4F2\uA4DF" in Lisu) has no lower-case form to compare, so nameProtected also reads them as i.
+const CAPITAL_I_SHAPES = new Set(['I', '\u0399', '\u0406', '\u04C0', '\u01C0', '\u0197', '\uA7AE', '\uA4F2', '\u2C92', '\u16C1', '\u2D4F']);
+// Cherokee small letters look like the capitals: folded to them before the table.
+const CHEROKEE_SMALL = /^[\u13F8-\u13FD\uAB70-\uABBF]$/u;
 // Dropped: punctuation, symbols, spaces, control and format characters, and letters that render as
 // blank space (Hangul fillers, the braille blank).
 const SKELETON_DROP = /[\p{P}\p{S}\p{Z}\p{C}\u115F\u1160\u3164\uFFA0\u2800]/gu;
 
-export function nameSkeleton(raw) {
+// iShapesAsI: read the capital-I shapes as i instead of l (see CAPITAL_I_SHAPES).
+export function nameSkeleton(raw, iShapesAsI = false) {
   const text = String(raw ?? '').normalize('NFKD').replace(/\p{M}/gu, '');
   let out = '';
-  for (const char of text) out += CONFUSABLES[char] ?? char;
+  for (let char of text) {
+    if (CHEROKEE_SMALL.test(char)) char = char.toUpperCase();
+    out += iShapesAsI && CAPITAL_I_SHAPES.has(char) ? 'i' : CONFUSABLES[char] ?? char;
+  }
   return out.toLowerCase().replace(SKELETON_DROP, '');
 }
 
@@ -558,9 +635,39 @@ async function findSession(db, keys, token, now) {
   return { accountId: row.account_id, username: row.username, tokenHash };
 }
 
-async function requireSession(db, keys, request, now) {
+// Failed session proofs per IP (a bogus, revoked or expired token): counted in the rate-limit binding
+// only, never with a D1 write per bogus token (without the binding, the local harness, they are not
+// counted). Past the binding's limit this isolate answers 429 for that address for a minute without
+// looking any token up, so a flood of random tokens stops costing database reads.
+const authBlocked = new Map(); // hashed address -> blocked until (ms), per isolate
+const authSubject = (keys, request) => hmac(keys.current, 'rl:auth:ip:' + clientIp(request));
+
+async function refuseBlockedAuth(keys, request, now) {
+  if (!authBlocked.size) return;
+  const subject = await authSubject(keys, request);
+  const until = authBlocked.get(subject);
+  if (until > now) tooMany(Math.max(1, Math.ceil((until - now) / 1000)));
+  if (until) authBlocked.delete(subject);
+}
+
+async function countAuthFailure(env, keys, request, now) {
+  const binding = env?.ACCOUNTS_RATE_LIMITER;
+  if (!binding || typeof binding.limit !== 'function') return;
+  const subject = await authSubject(keys, request);
+  const { success } = await binding.limit({ key: subject });
+  if (success) return;
+  if (authBlocked.size >= 10000) authBlocked.clear();
+  authBlocked.set(subject, now + IP_BINDING_LIMIT.period * 1000);
+  tooMany(IP_BINDING_LIMIT.period);
+}
+
+async function requireSession(env, db, keys, request, now) {
+  await refuseBlockedAuth(keys, request, now);
   const session = await findSession(db, keys, bearerToken(request), now);
-  if (!session) fail('unauthorized', 401, {}, { 'WWW-Authenticate': 'Bearer' });
+  if (!session) {
+    await countAuthFailure(env, keys, request, now);
+    fail('unauthorized', 401, {}, { 'WWW-Authenticate': 'Bearer' });
+  }
   return session;
 }
 
@@ -635,12 +742,40 @@ async function usernameOwner(db, name) {
 // Guest name protection: an account whose username equals the name (any letter case) or renders
 // like it. The skeleton keeps "capital I reads as l", so the name is compared as typed, all lower
 // case and all upper case ("VICTIM-NAME" meets "VictimName", "lllidan" meets "Illidan", while
-// "Kal" does not meet "Kai").
+// "Kal" does not meet "Kai"), and with capital-I shapes read as i (a caseless script).
+// Defence in depth for a name that is mostly Latin but carries one letter the table does not know
+// ("Victi" + a letter from some other script): that letter may look like a Latin one, so it counts
+// as any single character (LIKE "_"). Only for a skeleton with at least 3 Latin letters and exactly
+// one unknown character: a short or mostly non-Latin guest name ("A" + two kana, "Z" + five
+// Cyrillic letters) is not read as a Latin name with a hole in it, so it no longer collides with
+// any short account name of the same length. The letters are counted in the skeleton, not in the
+// name as typed, so spelling the Latin letters with mapped look-alikes (Cyrillic i, c, t) does not
+// get a name past the fallback.
+// Names written wholly in another script (Cyrillic, Cherokee, Japanese, ...) are only ever compared
+// through the table, on purpose: a name the table does not fully map (say, a Cherokee and Canadian
+// Syllabics spelling of an account name) is not chased any further. The leaderboard shows every
+// account row with its verified mark, so a guest row imitating an account's name is visibly
+// unverified; the table covers the look-alikes that would pass for the name itself.
+// The name is also read with the symbol look-alikes left out, as skeletons did before those were
+// mapped, so a name decorated with them ("!Victim!" with inverted marks, "xVictimx" with
+// multiplication signs) is refused as well. Guest side only: account skeletons are ASCII, so this
+// can only make the check stricter.
+const FALLBACK_MIN_LATIN_LETTERS = 3;
 async function nameProtected(db, name) {
   const trimmed = String(name).trim();
-  const skeletons = [...new Set([trimmed, trimmed.toLowerCase(), trimmed.toUpperCase()].map(nameSkeleton))].filter(Boolean);
-  const row = await db.prepare(`SELECT id FROM accounts WHERE username = ?${skeletons.length ? ` OR username_skeleton IN (${skeletons.map(() => '?').join(', ')})` : ''} LIMIT 1`)
-    .bind(trimmed, ...skeletons).first();
+  const folded = trimmed.normalize('NFKD');
+  const bare = [...folded].filter(char => !SYMBOL_LOOKALIKE_CHARS.has(char)).join('');
+  const texts = bare === folded ? [trimmed] : [trimmed, bare];
+  const skeletons = [...new Set(texts.flatMap(text => [text, text.toLowerCase(), text.toUpperCase()].map(variant => nameSkeleton(variant))
+    .concat(nameSkeleton(text, true))))].filter(Boolean);
+  const latinLetters = skeleton => (skeleton.match(/[a-z]/g) || []).length;
+  const oneUnknown = skeleton => [...skeleton.replace(/[a-z0-9]/g, '')].length === 1;
+  const patterns = [...new Set(skeletons.filter(skeleton => oneUnknown(skeleton) && latinLetters(skeleton) >= FALLBACK_MIN_LATIN_LETTERS)
+    .map(skeleton => skeleton.replace(/[^a-z0-9]/gu, '_')))];
+  const sql = 'SELECT id FROM accounts WHERE username = ?' +
+    (skeletons.length ? ` OR username_skeleton IN (${skeletons.map(() => '?').join(', ')})` : '') +
+    patterns.map(() => ' OR username_skeleton LIKE ?').join('') + ' LIMIT 1';
+  const row = await db.prepare(sql).bind(trimmed, ...skeletons, ...patterns).first();
   return Boolean(row);
 }
 
@@ -1171,12 +1306,16 @@ async function api(request, env, ctx, route, url, origin, now) {
       const body = (request.headers.get('Content-Type') || '').toLowerCase().startsWith('application/json') ? await readJson(request, SMALL_BODY_MAX) : {};
       if (body.all === true) {
         // "Sign out other devices": every other session of the account ends; this one stays.
-        const session = await requireSession(db, keys, request, now);
+        const session = await requireSession(env, db, keys, request, now);
         await limitAccount(db, keys, 'revoke', session.accountId, now);
         return json({ ok: true, revoked: await revokeOtherSessions(db, session) }, 200, origin);
       }
+      // A token that was no session counts as a failed proof (see countAuthFailure); logging out
+      // twice still answers ok.
+      await refuseBlockedAuth(keys, request, now);
       const hashes = await Promise.all(keyList(keys).map(secret => sessionHash(secret, token)));
-      await db.prepare(`DELETE FROM sessions WHERE token_hash IN (${hashes.map(() => '?').join(', ')})`).bind(...hashes).run();
+      const ended = changes(await db.prepare(`DELETE FROM sessions WHERE token_hash IN (${hashes.map(() => '?').join(', ')})`).bind(...hashes).run());
+      if (!ended) await countAuthFailure(env, keys, request, now);
       return json({ ok: true }, 200, origin);
     }
     case 'check': {
@@ -1202,7 +1341,7 @@ async function api(request, env, ctx, route, url, origin, now) {
     }
     case 'account': {
       if (method === 'POST') return json(await createAccount(request, env, db, keys, now), 200, origin);
-      const session = await requireSession(db, keys, request, now);
+      const session = await requireSession(env, db, keys, request, now);
       if (method === 'GET') {
         const account = await loadAccount(db, session.accountId, now);
         if (!account) fail('unauthorized', 401, {}, { 'WWW-Authenticate': 'Bearer' });
@@ -1212,17 +1351,17 @@ async function api(request, env, ctx, route, url, origin, now) {
       return json(await deleteAccount(db, keys, session, now), 200, origin);
     }
     case 'ticket': {
-      const session = await requireSession(db, keys, request, now);
+      const session = await requireSession(env, db, keys, request, now);
       await limitAccount(db, keys, 'ticket', session.accountId, now);
       const { raw, expiresAt } = await putPending(db, keys, 'link', { accountId: session.accountId }, now);
       return json({ ticket: raw, expiresAt }, 200, origin);
     }
     case 'unlink': {
-      const session = await requireSession(db, keys, request, now);
+      const session = await requireSession(env, db, keys, request, now);
       return json(await unlinkProvider(db, keys, session, route.provider, now), 200, origin);
     }
     case 'profile': {
-      const session = await requireSession(db, keys, request, now);
+      const session = await requireSession(env, db, keys, request, now);
       if (method === 'GET') return json(await readProfile(db, session), 200, origin);
       return json(await writeProfile(request, db, keys, session, now), 200, origin);
     }
@@ -1263,7 +1402,19 @@ export async function handleAccounts(request, env, ctx) {
 
 // ---- hooks for server/scores-api.js ------------------------------------------------------------
 // scores-api.js is also concatenated into the old Sites build, so it cannot import this module;
-// cloudflare/worker.js hands these in instead. None of them ever throws.
+// cloudflare/worker.js hands these in instead. None of them ever throws: a database error comes
+// back as { unavailable: true }, which the score route answers with 503 (the game keeps the run
+// and retries), never as a verdict on the run.
+
+// The rate-limit key for this request's address (IPv6 by its /64): a keyed hash, never the address
+// itself. null when no signing key is configured (the caller then keys by the address, as before).
+// Used by the score and feedback limiters and the feedback admin limiter.
+export async function ipLimitKey(request, env, scope) {
+  const keys = signingKeys(env);
+  if (!keys) return null;
+  try { return await hmac(keys.current, `rl:${scope}:ip:${clientIp(request)}`); } catch { return null; }
+}
+
 export const scoreAccounts = Object.freeze({
   // Account tables exist (created lazily), so reads can join usernames.
   async ready(env) {
@@ -1273,25 +1424,32 @@ export const scoreAccounts = Object.freeze({
       return false;
     }
   },
-  // The signed-in account behind this request's Bearer token: { id, username } or null, or
-  // { unavailable: true } while the signing keys are out of step (the score should wait, not post
-  // as a guest).
+  // The signed-in account behind this request's Authorization header:
+  // - no Authorization header: null (a guest post, exactly as before accounts existed);
+  // - a live session: { id, username };
+  // - a header that proves no session (malformed, unknown, revoked or expired token):
+  //   { unauthorized: true } (401: a run queued by an account never turns into a guest run);
+  // - the lookup cannot be made (database error, no signing key, keys out of step):
+  //   { unavailable: true } (503: the run waits and is retried, never posted as a guest).
   async session(request, env) {
-    const keys = signingKeys(env);
+    if (!(request.headers.get('Authorization') || '').trim()) return null;
     const token = bearerToken(request);
-    if (!keys || !env.DB || !token) return null;
+    if (!token) return { unauthorized: true };
+    const keys = signingKeys(env);
+    if (!keys || !env.DB) return { unavailable: true };
     try {
       await ensureAccountTables(env.DB);
       if (!(await keysUsable(env.DB, keys, Date.now()))) return { unavailable: true };
       const session = await findSession(env.DB, keys, token, Date.now());
-      return session ? { id: session.accountId, username: session.username } : null;
+      return session ? { id: session.accountId, username: session.username } : { unauthorized: true };
     } catch (error) {
       console.error('Accounts session lookup failed', error?.message || 'unknown error');
-      return null;
+      return { unavailable: true };
     }
   },
   // Whether a Riftborn account's username is this name in any letter case, or renders like it
-  // (the same skeleton, see nameSkeleton): guest name protection.
+  // (the same skeleton, see nameSkeleton): guest name protection. true / false, or
+  // { unavailable: true } when the check cannot be made (never "free" by default).
   async owns(env, name) {
     if (!env.DB || typeof name !== 'string' || !name.trim()) return false;
     try {
@@ -1299,7 +1457,8 @@ export const scoreAccounts = Object.freeze({
       return await nameProtected(env.DB, name);
     } catch (error) {
       console.error('Accounts name check failed', error?.message || 'unknown error');
-      return false;
+      return { unavailable: true };
     }
-  }
+  },
+  limitKey: ipLimitKey
 });

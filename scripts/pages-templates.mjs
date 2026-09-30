@@ -270,12 +270,20 @@ export function notFoundPage() {
  * - Decoded and checked exactly like the rebuilt game (src/meta/migration.js): same payload kinds,
  *   keys, caps and limits (MIGRATION, MIGRATION.receive). A malformed payload is ignored without a
  *   word; nothing is logged.
- * - A key this device lacks is set (the classic saves and the rebuilt game's alike). A key it has
- *   keeps its value. Rebuilt-game data this device already has (the Journal, runs, boards, outboxes)
- *   is never folded in here: the payload stays pending in this tab for the rebuilt game on this same
- *   origin, whose importer merges it by its own rules (profile.js's monotonic merge, and its
- *   question for links that did not come from the old address) when the player opens it.
- * - The "moved" toast shows once per device (the game's done key). Importing again is harmless.
+ * - The same trust rule as the rebuilt game: anyone can write a riftborn.us/classic/#rb_migrate=
+ *   link, so a hand-over lands here only when the browser says it came from the old address
+ *   (document.referrer's origin is https://chancrisp.github.io; the hand-over page's referrer
+ *   policy is strict-origin). This page has no question to ask, so any other hand-over writes
+ *   nothing at all here.
+ * - Only the classic edition's own saves (MIGRATION.extra: its profile and preferences) are taken
+ *   here: a key this device lacks is set, a key it has keeps its value. The rebuilt game's keys
+ *   (the Journal, runs, boards, the score and feedback outboxes, its flags) are never written by
+ *   this page, trusted or not. After a trusted hand-over the payload stays pending in this tab for
+ *   the rebuilt game on this same origin, whose importer applies its own rules (profile.js's
+ *   monotonic merge and so on) when the player opens it from here. An untrusted payload is dropped
+ *   at once, so it can never be picked up later by a page load that looks trusted.
+ * - The "moved" toast shows once per device (the game's done key, which only stops a second toast)
+ *   and only after a trusted hand-over. Importing again is harmless.
  * hosts: the host names that accept a hand-over (riftborn.us and local test servers).
  */
 export function classicImportScript({ migration, hosts }) {
@@ -284,6 +292,8 @@ export function classicImportScript({ migration, hosts }) {
     fragment: '#' + migration.param + '=',
     version: migration.version,
     from: migration.from,
+    // The origin a trusted hand-over comes from (the game's MIGRATION_REFERRER_ORIGIN).
+    trusted: 'https://' + migration.from,
     prefix: migration.prefix,
     exclude: migration.exclude,
     extra: migration.extra,
@@ -369,7 +379,13 @@ function allowed(key) {
   if (C.extra.indexOf(key) !== -1) return true;
   return key.indexOf(C.prefix) === 0 && key.length > C.prefix.length && C.exclude.indexOf(key) === -1;
 }
-function apply(data) {
+function fromOldAddress() {
+  try { return typeof URL === "function" && new URL(String(document.referrer || "")).origin === C.trusted; } catch (e) { return false; }
+}
+// Caps are counted over every allowed key in the game's order (the Journal first), so a classic
+// save is kept or dropped exactly as the rebuilt game's importer would. Only classic saves are
+// written, and only for a trusted hand-over; anything else is left for the rebuilt game (held).
+function apply(data, trusted) {
   var r = { set: 0, kept: 0, held: false }, total = 0, accepted = 0;
   var names = Object.keys(data.keys).sort(function (a, b) { return (b === C.profile) - (a === C.profile); });
   for (var i = 0; i < names.length; i++) {
@@ -378,9 +394,10 @@ function apply(data) {
     if (accepted >= C.maxKeys || total + value.length > C.maxTotal) continue;
     accepted++;
     total += value.length;
+    if (!trusted || C.extra.indexOf(key) === -1) { r.held = true; continue; }
     try {
       if (local.getItem(key) === null) { local.setItem(key, value); r.set++; }
-      else { r.kept++; if (C.extra.indexOf(key) === -1) r.held = true; }
+      else r.kept++;
     } catch (e) { r.held = true; }
   }
   return r;
@@ -406,8 +423,11 @@ var late = false;
 var work = decode(payload).then(function (data) {
   if (late) return;
   if (!data) { forget(); return; }
-  var r = apply(data);
-  if (!r.held) forget();
+  var trusted = fromOldAddress();
+  var r = apply(data, trusted);
+  // Only a trusted hand-over's leftovers wait in this tab for the rebuilt game: an untrusted payload
+  // is dropped here, so a later trusted page load in this tab can't pick it up as trusted.
+  if (!trusted || !r.held) forget();
   if (r.set || r.kept) moved();
 }).then(null, function () {});
 w.RIFTBORN_CLASSIC_IMPORT = new Promise(function (resolve) {

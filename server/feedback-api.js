@@ -1,6 +1,9 @@
 // Player feedback API on the leaderboard Worker. Players POST from the game's FEEDBACK form;
 // the private inbox page (feedback/) lists, triages and exports it with a bearer admin key.
-// No IP address is ever stored: CF-Connecting-IP is only a rate-limit key.
+// No IP address is ever stored: CF-Connecting-IP only becomes a rate-limit key, as a keyed hash
+// (ipLimitKey) wherever the Worker has its signing key.
+import { ipLimitKey } from './accounts-api.js';
+
 export const CATEGORIES = ['bug', 'balance', 'idea', 'other'];
 export const STATUSES = ['new', 'read', 'archived'];
 export const SOURCES = ['live', 'dev', 'unknown'];
@@ -160,6 +163,20 @@ async function sameSecret(given, expected) {
   let diff = 0;
   for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
   return diff === 0;
+}
+
+// Every admin request (list, CSV, status change), right or wrong key, first takes a slot in the
+// per-IP limiter shared with the accounts API (ACCOUNTS_RATE_LIMITER, 30 a minute, under its own
+// key), so the admin key cannot be guessed at speed. Checked before the key: counting only failures
+// would never slow down a guess that is right.
+export const ADMIN_LIMIT = Object.freeze({ scope: 'feedback-admin', retryAfter: 60 });
+async function limitAdmin(request, env, origin) {
+  const limiter = env.ACCOUNTS_RATE_LIMITER;
+  if (!limiter || typeof limiter.limit !== 'function') return null;
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const key = (await ipLimitKey(request, env, ADMIN_LIMIT.scope)) || `${ADMIN_LIMIT.scope}:${ip}`;
+  const { success } = await limiter.limit({ key });
+  return success ? null : json({ error: 'Too many requests. Wait a minute and try again.' }, 429, origin, { 'Retry-After': String(ADMIN_LIMIT.retryAfter) });
 }
 
 async function authorize(request, env, origin) {
@@ -324,7 +341,9 @@ async function readJson(request, origin) {
 }
 
 // Optional Discord ping; never blocks or fails the submission. allowed_mentions stops player
-// text from pinging @everyone or roles.
+// text from pinging @everyone or roles. It carries the category, rating, source and the first 300
+// characters of the message, never the contact line or the technical context: the privacy page
+// (privacy/index.html, "Feedback messages") says exactly this, so change both together.
 function notifyDiscord(env, ctx, entry) {
   const hook = env.DISCORD_WEBHOOK_URL;
   if (!hook || !/^https:\/\//i.test(hook)) return;
@@ -342,7 +361,7 @@ function notifyDiscord(env, ctx, entry) {
 async function submitFeedback(request, env, ctx, db, origin) {
   if (env.FEEDBACK_RATE_LIMITER) {
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-    const limit = await env.FEEDBACK_RATE_LIMITER.limit({ key: ip });
+    const limit = await env.FEEDBACK_RATE_LIMITER.limit({ key: (await ipLimitKey(request, env, 'feedback')) || ip });
     if (!limit.success) return json({ error: 'Too much feedback at once. Try again in a minute.' }, 429, origin);
   }
   const body = await readJson(request, origin);
@@ -418,7 +437,7 @@ export async function handleFeedback(request, env, ctx) {
 
   try {
     if (route !== 'submit') {
-      const denied = await authorize(request, env, origin);
+      const denied = (await limitAdmin(request, env, origin)) || (await authorize(request, env, origin));
       if (denied) return denied;
     }
     if (!env.DB) throw new Error('Feedback database unavailable');

@@ -46,10 +46,11 @@ assert.ok(metadata.bindings.some(binding => binding.type === 'ratelimit' && bind
 assert.ok(!metadata.bindings.some(binding => binding.type === 'secret_text'), 'Unset feedback secrets are not bound (deploys still work without them)');
 assert.equal(await payload.get('riftborn-worker.mjs').text(), 'export default {}');
 
-const withSecrets = uploadModule.createWorkerUpload('export default {}', { databaseId, siteOrigin, feedbackAdminKey: ' admin-key ', discordWebhookUrl: 'https://discord.com/api/webhooks/1/abc' });
+const quiet = () => {}; // short fixture keys below only warn (FEEDBACK_KEY_STRICT unset)
+const withSecrets = uploadModule.createWorkerUpload('export default {}', { databaseId, siteOrigin, feedbackAdminKey: ' admin-key ', discordWebhookUrl: 'https://discord.com/api/webhooks/1/abc', warn: quiet });
 const secretBindings = JSON.parse(await withSecrets.get('metadata').text()).bindings.filter(binding => binding.type === 'secret_text');
 assert.deepEqual(secretBindings.map(binding => [binding.name, binding.text]), [['FEEDBACK_ADMIN_KEY', 'admin-key'], ['DISCORD_WEBHOOK_URL', 'https://discord.com/api/webhooks/1/abc']]);
-const onlyKey = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, feedbackAdminKey: 'k', discordWebhookUrl: '' }).get('metadata').text());
+const onlyKey = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, feedbackAdminKey: 'k', discordWebhookUrl: '', warn: quiet }).get('metadata').text());
 assert.deepEqual(onlyKey.bindings.filter(binding => binding.type === 'secret_text').map(binding => binding.name), ['FEEDBACK_ADMIN_KEY']);
 assert.throws(() => uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, discordWebhookUrl: 'http://insecure.example/hook' }), /https/);
 
@@ -60,6 +61,7 @@ const deployed = await uploadModule.deployWorker({
   databaseId,
   siteOrigin,
   feedbackAdminKey: 'deploy-key',
+  warn: quiet,
   fetchImpl: async (url, init) => {
     uploadRequest = { url, ...init };
     return new Response(JSON.stringify({ success: true, result: { id: 'test-version' } }), { status: 200 });
@@ -140,4 +142,32 @@ assert.ok(workflow.includes("- 'site.hosts.mjs'"), 'The Worker redeploys when th
 }
 assert.ok(!/FAKE_OAUTH/.test(wrangler + workflow), 'FAKE_OAUTH never reaches a deployed configuration');
 
-console.log('PASS Cloudflare Worker upload: entry module, D1, production origin, and score rate limit, feedback rate limit and optional feedback secrets, optional account secrets, previous signing key, ACCOUNTS_LIVE guard, accounts rate limiter.');
+// Security fixes (2.2 review): only main deploys the production Worker, and the feedback admin key
+// has a minimum length (refused with FEEDBACK_KEY_STRICT=1, a loud warning otherwise).
+{
+  const { workerDeployRefusals, FEEDBACK_ADMIN_KEY_MIN } = uploadModule;
+  assert.deepEqual(workerDeployRefusals({ GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main' }), []);
+  assert.match(workerDeployRefusals({ GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/v2.2' }).join(), /Refusing to deploy refs\/heads\/v2\.2 to the production Worker/);
+  assert.match(workerDeployRefusals({ CI: 'true' }).join(), /Refusing to deploy an unknown ref/);
+  assert.deepEqual(workerDeployRefusals({}), [], 'Local runs are not CI');
+  const flow = workflow.replace(/\r\n/g, '\n');
+  assert.match(flow, /\n  deploy:\n(    #.*\n)*    if: github\.ref == 'refs\/heads\/main'\n/, 'The Worker job runs only on main');
+  assert.ok(flow.includes('FEEDBACK_KEY_STRICT: ${{ vars.FEEDBACK_KEY_STRICT }}'), 'The workflow passes FEEDBACK_KEY_STRICT');
+  const source = fs.readFileSync('scripts/cloudflare-worker-upload.mjs', 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/async function main\(\) \{\n  const refusals = workerDeployRefusals\(process\.env\);\n  if \(refusals\.length\) throw/.test(source), 'main() checks the ref before deploying');
+  assert.equal(FEEDBACK_ADMIN_KEY_MIN, 24);
+  const warnings = [];
+  const warn = message => warnings.push(message);
+  const short = 'x'.repeat(FEEDBACK_ADMIN_KEY_MIN - 1), long = 'y'.repeat(FEEDBACK_ADMIN_KEY_MIN);
+  assert.ok(uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, feedbackAdminKey: short, warn }), 'Not strict: a short key still deploys');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /WARNING: FEEDBACK_ADMIN_KEY is 23 characters; use at least 24/);
+  assert.ok(!warnings[0].includes(short), 'The warning never prints the key');
+  uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, feedbackAdminKey: long, warn });
+  uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, warn });
+  assert.equal(warnings.length, 1, 'No warning for a long key or no key');
+  assert.throws(() => uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, feedbackAdminKey: short, feedbackKeyStrict: '1', warn }), /FEEDBACK_KEY_STRICT=1/);
+  assert.ok(uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, feedbackAdminKey: long, feedbackKeyStrict: '1', warn }), 'Strict with a long key deploys');
+}
+
+console.log('PASS Cloudflare Worker upload: entry module, D1, production origin, and score rate limit, feedback rate limit and optional feedback secrets, optional account secrets, previous signing key, ACCOUNTS_LIVE guard, accounts rate limiter, main-only deploys, admin key length.');

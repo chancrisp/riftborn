@@ -26,6 +26,10 @@ Create a repository secret named `CLOUDFLARE_API_TOKEN`. Use a Cloudflare API to
 
 The Pages workflow runs on pushes to `main` and manually. The Worker deploys on changes to its API/configuration files or manually. D1 migrations remain manual so a gameplay push cannot change production score data unexpectedly.
 
+Only `main` deploys to production: the Worker job and the Cloudflare Pages job skip any other branch, and both deploy scripts refuse any other ref in CI. Keep the Cloudflare and account secrets as **environment secrets of `cloudflare-production`** (Settings → Environments → cloudflare-production, with Deployment branches set to `main` only), not repository secrets, so a workflow on another branch cannot read them.
+
+`FEEDBACK_ADMIN_KEY` (secret) unlocks the feedback inbox, which holds every player message and contact line. Make it 24 or more random characters, generated the same way as `AUTH_SIGNING_KEY` (never a word or phrase). A shorter key prints a warning on every Worker deploy; once the key is long, set the repository variable `FEEDBACK_KEY_STRICT` to `1` so a short key fails the deploy instead. Every admin request is also limited to 30 a minute per network.
+
 ## Cloudflare setup
 
 1. Set the repository variables and `CLOUDFLARE_API_TOKEN` secret above. The token needs Cloudflare Workers Scripts Write and D1 read/write permissions for this account.

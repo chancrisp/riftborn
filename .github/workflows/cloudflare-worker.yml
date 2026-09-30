@@ -21,6 +21,9 @@ permissions:
 
 jobs:
   deploy:
+    # Only main ever deploys api.riftborn.us (a manual run on another branch skips this job, and
+    # scripts/cloudflare-worker-upload.mjs refuses any other ref in CI as well).
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: cloudflare-production
     steps:
@@ -41,6 +44,9 @@ jobs:
           # Optional: the feedback inbox key and a Discord webhook for new-feedback pings.
           FEEDBACK_ADMIN_KEY: ${{ secrets.FEEDBACK_ADMIN_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # FEEDBACK_KEY_STRICT (repository variable, 1 once the admin key is 24+ random characters):
+          # a shorter FEEDBACK_ADMIN_KEY then fails the deploy instead of only warning.
+          FEEDBACK_KEY_STRICT: ${{ vars.FEEDBACK_KEY_STRICT }}
           # Optional (Riftborn accounts, v2.2): OAuth app credentials per platform and the HMAC
           # signing key (32+ random bytes). A platform missing its ID or secret stays unavailable.
           # GitHub forbids secret names starting with GITHUB_, hence GH_CLIENT_* for the GitHub app.

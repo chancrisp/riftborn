@@ -1,6 +1,10 @@
 // Riftborn feedback inbox: reads the leaderboard Worker's /api/feedback with the admin key.
-// The key never leaves this page except as the Authorization header to API below; it lives in
-// sessionStorage, or localStorage when "Remember on this device" is ticked.
+// The key never leaves this page except as the Authorization header to API below. It lives in
+// sessionStorage only (this tab; closing it forgets the key): this origin is shared with other
+// pages, so the key is never kept on the device. A copy an older inbox kept in localStorage (its
+// "Remember on this device" option) is deleted as the page starts. A refused key (401) is wiped.
+// Every field the Worker returns is player-written or player-influenced: it is only ever shown with
+// textContent, class names and URL parts come from fixed lists, and index.html sets a CSP.
 const API = 'https://riftborn-leaderboard.chanmanc10.workers.dev';
 const STORE_KEY = 'riftborn-feedback-admin-key';
 const FILTER_KEY = 'riftborn-feedback-filters';
@@ -8,7 +12,7 @@ const PAGE = 50;
 
 const $ = selector => document.querySelector(selector);
 const el = {
-  login: $('#login'), loginForm: $('#loginForm'), keyInput: $('#keyInput'), remember: $('#remember'), loginError: $('#loginError'),
+  login: $('#login'), loginForm: $('#loginForm'), keyInput: $('#keyInput'), loginError: $('#loginError'),
   inbox: $('#inbox'), filters: $('#filters'), status: $('#status'), list: $('#list'), more: $('#more'),
   unread: $('#unread'), lock: $('#lock'), refresh: $('#refresh'), csv: $('#csv'),
   f: { status: $('#fStatus'), category: $('#fCategory'), source: $('#fSource'), rating: $('#fRating') }
@@ -18,7 +22,9 @@ const storage = kind => { try { return window[kind]; } catch { return null; } };
 const read = (kind, key) => { try { return storage(kind)?.getItem(key) || ''; } catch { return ''; } };
 const write = (kind, key, value) => { try { value ? storage(kind)?.setItem(key, value) : storage(kind)?.removeItem(key); } catch { /* storage blocked */ } };
 
-let key = read('sessionStorage', STORE_KEY) || read('localStorage', STORE_KEY);
+// Older inboxes could keep the key in localStorage: never read, always deleted.
+write('localStorage', STORE_KEY, '');
+let key = read('sessionStorage', STORE_KEY);
 let cursor = null;
 let loading = false;
 
@@ -60,8 +66,17 @@ function node(tag, className, text) {
   return n;
 }
 
-const when = ms => new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-const stars = rating => (rating ? '★'.repeat(rating) + '☆'.repeat(5 - rating) : '');
+const CATEGORIES = ['bug', 'balance', 'idea', 'other'];
+const STATUSES = ['new', 'read', 'archived'];
+const known = (value, list) => (list.includes(value) ? value : 'other');
+const when = ms => {
+  const date = new Date(Number(ms));
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+};
+const stars = rating => {
+  const n = Number.isInteger(rating) ? Math.min(5, Math.max(0, rating)) : 0;
+  return n ? '★'.repeat(n) + '☆'.repeat(5 - n) : '';
+};
 
 function statusButton(item, next, label, card) {
   const button = node('button', null, label);
@@ -69,7 +84,7 @@ function statusButton(item, next, label, card) {
   button.addEventListener('click', async () => {
     button.disabled = true;
     try {
-      await api(`/api/feedback/${item.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: next }) });
+      await api(`/api/feedback/${encodeURIComponent(item.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: next }) });
       const was = item.status;
       item.status = next;
       bumpUnread(was, next);
@@ -85,25 +100,27 @@ function statusButton(item, next, label, card) {
 }
 
 function renderItem(item, open = false) {
-  const card = node('li', `item is-${item.status}`);
+  const status = known(item.status, STATUSES);
+  const category = known(item.category, CATEGORIES);
+  const card = node('li', `item is-${status}`);
   const details = node('details');
   details.open = open;
   const summary = node('summary');
   const meta = node('div', 'meta');
-  meta.append(node('span', `chip ${item.category}`, item.category.toUpperCase()));
+  meta.append(node('span', `chip ${category}`, String(item.category ?? '').toUpperCase()));
   if (item.rating) meta.append(node('span', 'stars', stars(item.rating)));
-  meta.append(node('span', null, when(item.created_at)), node('span', null, item.source === 'dev' ? '/dev/' : item.source));
-  if (item.build) meta.append(node('span', null, item.build));
-  meta.append(node('span', `chip state ${item.status}`, item.status.toUpperCase()));
-  summary.append(meta, node('div', 'preview', item.message));
+  meta.append(node('span', null, when(item.created_at)), node('span', null, item.source === 'dev' ? '/dev/' : String(item.source ?? '')));
+  if (item.build) meta.append(node('span', null, String(item.build)));
+  meta.append(node('span', `chip state ${status}`, status.toUpperCase()));
+  summary.append(meta, node('div', 'preview', String(item.message ?? '')));
   const body = node('div', 'body');
-  body.append(node('p', 'message', item.message));
-  if (item.contact) body.append(node('p', 'contact', 'Contact: ' + item.contact));
+  body.append(node('p', 'message', String(item.message ?? '')));
+  if (item.contact) body.append(node('p', 'contact', 'Contact: ' + String(item.contact)));
   body.append(node('pre', 'context', JSON.stringify(item.context ?? {}, null, 2)));
   const actions = node('div', 'actions');
-  if (item.status !== 'read') actions.append(statusButton(item, 'read', 'MARK READ', card));
-  if (item.status !== 'new') actions.append(statusButton(item, 'new', 'MARK NEW', card));
-  if (item.status !== 'archived') actions.append(statusButton(item, 'archived', 'ARCHIVE', card));
+  if (status !== 'read') actions.append(statusButton(item, 'read', 'MARK READ', card));
+  if (status !== 'new') actions.append(statusButton(item, 'new', 'MARK NEW', card));
+  if (status !== 'archived') actions.append(statusButton(item, 'archived', 'ARCHIVE', card));
   body.append(actions);
   details.append(summary, body);
   card.append(details);
@@ -113,8 +130,9 @@ function renderItem(item, open = false) {
 let counts = { new: 0 };
 function showUnread() {
   el.unread.hidden = false;
-  el.unread.textContent = `${counts.new} UNREAD`;
-  document.title = counts.new ? `(${counts.new}) Riftborn · Feedback inbox` : 'Riftborn · Feedback inbox';
+  const unread = Number.isInteger(counts.new) ? counts.new : 0;
+  el.unread.textContent = `${unread} UNREAD`;
+  document.title = unread ? `(${unread}) Riftborn · Feedback inbox` : 'Riftborn · Feedback inbox';
 }
 function bumpUnread(was, next) {
   if (was === next) return;
@@ -128,6 +146,10 @@ function bumpUnread(was, next) {
 function handleError(error) {
   if (error.status === 401) {
     lock('That key was not accepted.');
+    return;
+  }
+  if (error.status === 429) {
+    el.status.textContent = 'Too many requests from this network. Wait a minute and try again.';
     return;
   }
   el.status.textContent = error.message;
@@ -185,7 +207,6 @@ async function exportCsv() {
 function lock(message = '') {
   key = '';
   write('sessionStorage', STORE_KEY, '');
-  write('localStorage', STORE_KEY, '');
   el.inbox.hidden = true;
   el.lock.hidden = true;
   el.unread.hidden = true;
@@ -208,7 +229,6 @@ el.loginForm.addEventListener('submit', event => {
   key = el.keyInput.value.trim();
   if (!key) return;
   write('sessionStorage', STORE_KEY, key);
-  write('localStorage', STORE_KEY, el.remember.checked ? key : '');
   el.loginError.textContent = '';
   unlock();
 });

@@ -145,18 +145,8 @@ select {
   font-size: 13px;
 }
 
-.check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 12px 0;
-  font-size: 13px;
-}
-
-.check input {
-  width: 18px;
-  height: 18px;
-  accent-color: var(--mint);
+.login button {
+  margin-top: 12px;
 }
 
 button {

@@ -5,16 +5,20 @@
 // it imports nothing). With them, a signed-in POST stores account_id and the account's username,
 // guests cannot post under an account's username (or a name that renders like it: guest names are
 // NFKC-normalised, invisible characters are refused, and the hook compares look-alike skeletons),
-// and GET joins current usernames at read time. Without them (the Sites Worker) everything behaves
-// exactly as before.
+// and GET joins current usernames at read time. A post with no Authorization header is a guest post
+// exactly as before; one whose token proves no session gets 401 (a run queued by an account never
+// turns into a guest run), and one the accounts database cannot check gets 503 (retried later).
+// The hooks also key the rate limiter by a hash of the address instead of the address itself.
+// Without them (the Sites Worker) everything behaves exactly as before.
 const CORS_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
 const CORS_HEADERS = 'Content-Type, Authorization';
-const json = (value, status = 200, origin = null) => {
+const json = (value, status = 200, origin = null, extra = {}) => {
   const headers = {
     'Content-Type': 'application/json',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
-    Vary: 'Origin'
+    Vary: 'Origin',
+    ...extra
   };
   if (origin) {
     headers['Access-Control-Allow-Origin'] = origin;
@@ -179,7 +183,8 @@ export async function handleScores(request, env, accounts = null) {
 
     if (env.SCORE_RATE_LIMITER) {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-      const limit = await env.SCORE_RATE_LIMITER.limit({ key: ip });
+      const key = (accounts && typeof accounts.limitKey === 'function' && await accounts.limitKey(request, env, 'score')) || ip;
+      const limit = await env.SCORE_RATE_LIMITER.limit({ key });
       if (!limit.success) return json({ error: 'Too many score submissions' }, 429, origin);
     }
     if (!(request.headers.get('Content-Type') || '').startsWith('application/json')) {
@@ -191,8 +196,10 @@ export async function handleScores(request, env, accounts = null) {
     try { p = JSON.parse(text); } catch { return json({ error: 'Invalid JSON' }, 400, origin); }
     const integer = (value, max) => Number.isInteger(value) && value >= 0 && value <= max;
     // A signed-in run is posted under the account's username; the client-sent name is ignored.
-    const account = accounts && p && typeof p === 'object' ? await accounts.session(request, env) : null;
-    if (account && account.unavailable) return json({ error: 'Leaderboard temporarily unavailable' }, 503, origin);
+    const session = accounts && p && typeof p === 'object' ? await accounts.session(request, env) : null;
+    if (session && session.unavailable) return json({ error: 'Leaderboard temporarily unavailable' }, 503, origin);
+    if (session && session.unauthorized) return json({ error: 'unauthorized' }, 401, origin, { 'WWW-Authenticate': 'Bearer' });
+    const account = session && typeof session.id === 'string' && typeof session.username === 'string' ? session : null;
     // Guest names: trimmed; with accounts on, in NFKC form first (fullwidth and styled letters folded).
     const guestName = account || !p || typeof p !== 'object' || typeof p.name !== 'string' ? null : (accounts ? p.name.normalize('NFKC') : p.name).trim();
     if (!p || typeof p.id !== 'string' || !(/^[0-9a-f-]{36}$/i).test(p.id) || (!account && (!guestName || guestName.length > 16)) ||
@@ -216,7 +223,11 @@ export async function handleScores(request, env, accounts = null) {
     const name = account ? account.username : guestName;
     // Name protection: a guest cannot post under a Riftborn account's username, in any letter case
     // or in look-alike characters (accounts.owns compares skeletons).
-    if (!account && accounts && await accounts.owns(env, name)) return json({ error: 'name_taken' }, 409, origin);
+    if (!account && accounts) {
+      const owned = await accounts.owns(env, name);
+      if (owned && owned.unavailable) return json({ error: 'Leaderboard temporarily unavailable' }, 503, origin);
+      if (owned) return json({ error: 'name_taken' }, 409, origin);
+    }
 
     const now = Date.now();
     const insert = late => db.prepare('INSERT INTO scores (id,name,score,kills,wave,seconds,created_at,stage,played_at,death_mode,statue_count,statue_modifier,outcome,gameplay_version' +
