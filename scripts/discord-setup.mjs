@@ -912,7 +912,41 @@ async function phaseSettings(r, ctx) {
       if (done !== FAIL) iconNote = 'icon set to the Rift Portal';
     }
   }
-  r.notice(`${settingsNote}; ${iconNote}`);
+  const joinNote = await joinReport(ctx, general, flags);
+  r.notice(`${settingsNote}; ${iconNote}; ${joinNote}`);
+}
+
+// Join messages ("Glad you're here, ...") go to the system channel, and Discord posts one only when
+// a new member is fully in: with Onboarding on, once they finish its questions. Counts only, never
+// names or ids: these annotations are public.
+const MEMBER_COMPLETED_ONBOARDING = 2, MEMBER_STARTED_ONBOARDING = 8;
+async function joinReport(ctx, general, flags) {
+  if (!general) return 'join messages: no #general';
+  const parts = [`join messages ${flags & SYS_SUPPRESS_JOIN ? 'off' : 'on'} in #general`];
+  let joins = null;
+  try {
+    const recent = await api('GET', `/channels/${general.id}/messages`, { query: { limit: '100' } });
+    joins = recent.filter((m) => m.type === 7);
+    parts[0] += ` (${joins.length} in its last ${recent.length} messages)`;
+  } catch (err) {
+    parts[0] += ` (recent messages unreadable: ${describe(err)})`;
+  }
+  try {
+    const members = (await api('GET', `/guilds/${ctx.gid}/members`, { query: { limit: '1000' } }))
+      .filter((m) => !m.user?.bot && m.user?.id !== ctx.me.id);
+    const onboarding = (m) => (m.flags & MEMBER_COMPLETED_ONBOARDING ? 'finished' : m.flags & MEMBER_STARTED_ONBOARDING ? 'answering' : 'before');
+    const count = (state) => members.filter((m) => onboarding(m) === state).length;
+    parts.push(`${members.length} ${members.length === 1 ? 'person' : 'people'}: ${count('finished')} finished onboarding, ${count('answering')} still answering its questions, ${count('before')} joined without it`);
+    const newest = [...members].sort((a, b) => String(b.joined_at ?? '').localeCompare(String(a.joined_at ?? '')))[0];
+    if (newest) {
+      const state = { finished: 'finished onboarding', answering: 'still answering the onboarding questions', before: 'joined without onboarding' }[onboarding(newest)];
+      const posted = joins?.some((m) => m.author?.id === newest.user?.id);
+      parts.push(`newest member ${state}, ${joins === null ? 'join message unknown' : posted ? 'join message posted' : 'no join message yet'}`);
+    }
+  } catch (err) {
+    parts.push(`member onboarding states unreadable (${describe(err)}): turn on Server Members Intent under Bot in the Discord Developer Portal to see them`);
+  }
+  return parts.join('; ');
 }
 
 async function phasePosts(r, ctx) {

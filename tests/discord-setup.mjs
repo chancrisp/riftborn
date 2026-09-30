@@ -78,6 +78,7 @@ function createFakeDiscord() {
     onboardingReject: false,
     iconReject: false,
     messagesReadDenied: false,
+    membersIntentOff: false,
   };
   const calls = [];
 
@@ -258,6 +259,10 @@ function createFakeDiscord() {
         for (const key of ['name', 'color', 'hoist', 'mentionable']) if (key in body) r[key] = body[key];
         if ('permissions' in body) r.permissions = String(BigInt(body.permissions));
         return [200, r];
+      }
+      if (sub === '/members' && method === 'GET') {
+        if (faults.membersIntentOff) return err(403, 'Missing Access', 50001);
+        return [200, [...state.members.values()]];
       }
       if ((s = sub.match(/^\/members\/(\d+)$/)) && method === 'GET') {
         const member = state.members.get(s[1]);
@@ -780,6 +785,26 @@ try {
   assert.equal(s.automod[mentionAt].trigger_metadata.mention_total_limit, 20, 'the system rule is unchanged');
   assert.deepEqual(writes().map((c) => `${c.method} ${c.route}`), [], 'nothing written');
   s.automod[mentionAt] = ourMention;
+
+  // 6c. Join messages: the settings step says where they go and, as counts only, who is still on the
+  // onboarding questions (Discord posts "Glad you're here" once a member finishes them).
+  const FRIEND = fake.sf(), EARLIER = fake.sf();
+  s.members.set(EARLIER, { user: { id: EARLIER }, roles: [], flags: 2, joined_at: '2026-09-30T18:00:00.000Z' });
+  s.members.set(FRIEND, { user: { id: FRIEND }, roles: [], flags: 8, joined_at: '2026-09-30T20:00:00.000Z' });
+  const generalId = byName('general').id;
+  s.messages.set(generalId, [...(s.messages.get(generalId) ?? []), { id: fake.sf(), type: 7, author: { id: EARLIER }, content: '' }]);
+  const joinsRun = await run(['settings'], env);
+  assert.equal(joinsRun.code, 0, `settings with members\n${joinsRun.text}`);
+  assert.match(joinsRun.stdout, /join messages on in #general \(1 in its last \d+ messages\); 3 people: 1 finished onboarding, 1 still answering its questions, 1 joined without it; newest member still answering the onboarding questions, no join message yet/, 'join report');
+  assert.ok(!joinsRun.stdout.includes(FRIEND) && !joinsRun.stdout.includes(EARLIER), 'no member ids in the report');
+  fake.faults.membersIntentOff = true;
+  const noIntent = await run(['settings'], env);
+  fake.faults.membersIntentOff = false;
+  assert.equal(noIntent.code, 0, 'a missing intent is not a failure');
+  assert.match(noIntent.stdout, /member onboarding states unreadable \(HTTP 403, code 50001: Missing Access\): turn on Server Members Intent/, 'says how to see member states');
+  s.members.delete(FRIEND);
+  s.members.delete(EARLIER);
+  s.messages.set(generalId, s.messages.get(generalId).filter((m) => m.type !== 7));
 
   // 7. Guards.
   let calls = fake.calls.length;
