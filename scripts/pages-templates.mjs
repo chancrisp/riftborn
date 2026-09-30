@@ -7,6 +7,10 @@
 // - prelaunchPage: riftborn.us before launch; sends visitors to the game on github.io.
 // - notFoundPage: unknown paths on the Cloudflare outputs; back to the game.
 // Every page works without JavaScript: it says where Riftborn is and links there.
+// The handoff pages that send players to the game's root can carry the social card (SOCIAL_CARD,
+// below): people still share the old github.io links, and link previews (Discord, X/Twitter, Slack,
+// Facebook, WhatsApp) read the page's HTML without running its script, so the preview a crawler
+// builds is the game's own card instead of a bare "has moved" page.
 import { scriptHash } from './pages-headers.mjs';
 
 // Plain query strings only (the same rule the Worker applies to sign-in return URLs): ?practice=...
@@ -20,11 +24,63 @@ const unicodeEscape = char => '\\u' + char.charCodeAt(0).toString(16).padStart(4
 const scriptJson = value => JSON.stringify(value).replace(/</g, unicodeEscape).replace(LINE_BREAKS, unicodeEscape);
 const hostLabel = url => new URL(url).host;
 
+/**
+ * The social card: the Open Graph + Twitter/X tags of the game page (the game repository's
+ * riftborn/index.html <head>, checked there by riftborn/tests/social-card.test.mjs) with the same
+ * copy and the same image: 1200x630 JPEG served from the game's assets folder, at
+ * https://riftborn.us/assets/riftborn-card.jpg. Platforms cache a card by its image URL, so
+ * imageVersion is bumped whenever the art changes (the game page's ?v= moves with it).
+ * tests/social-card.mjs compares these values with the game build published in live/, so the two
+ * cannot drift apart unnoticed.
+ */
+export const SOCIAL_CARD = Object.freeze({
+  title: 'Riftborn - a PS1-style browser shooter',
+  siteName: 'Riftborn',
+  description: 'A PS1-style survival shooter you play in your browser. Blast through five fractured worlds, break the Keepers and take down the Rift Warden. Free, no download.',
+  imagePath: '/assets/riftborn-card.jpg',
+  imageVersion: 1,
+  imageWidth: 1200,
+  imageHeight: 630,
+  imageType: 'image/jpeg',
+  imageAlt: 'Riftborn logo and title over a game screenshot: a lone survivor fires green bolts into a horde of monsters around a skull shrine and lava pools. Text: PS1-style browser shooter. Free, no download, play at riftborn.us.'
+});
+
+/**
+ * The card's tags for a page that stands for `url` (the game's root, e.g. https://riftborn.us/):
+ * the meta description, Open Graph (property=) and Twitter/X (name=) tags, every URL absolute.
+ * Meta tags only: nothing here loads anything, so the page's meta CSP (img-src data:) stays as is.
+ */
+export function socialTags(url, card = SOCIAL_CARD) {
+  const page = new URL(url);
+  if (!/^https?:$/.test(page.protocol) || page.pathname !== '/' || page.search || page.hash) throw new Error(`socialTags: ${url} is not the root of a host`);
+  const image = new URL(`${card.imagePath}?v=${card.imageVersion}`, page).href;
+  const meta = (attribute, key, content) => `<meta ${attribute}="${key}" content="${escapeHtml(content)}">`;
+  return [
+    meta('name', 'description', card.description),
+    meta('property', 'og:type', 'website'),
+    meta('property', 'og:site_name', card.siteName),
+    meta('property', 'og:url', page.href),
+    meta('property', 'og:title', card.title),
+    meta('property', 'og:description', card.description),
+    meta('property', 'og:image', image),
+    meta('property', 'og:image:type', card.imageType),
+    meta('property', 'og:image:width', card.imageWidth),
+    meta('property', 'og:image:height', card.imageHeight),
+    meta('property', 'og:image:alt', card.imageAlt),
+    meta('name', 'twitter:card', 'summary_large_image'),
+    meta('name', 'twitter:title', card.title),
+    meta('name', 'twitter:description', card.description),
+    meta('name', 'twitter:image', image),
+    meta('name', 'twitter:image:alt', card.imageAlt)
+  ].join('\n') + '\n';
+}
+
 const STYLE = `html{color-scheme:dark}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;box-sizing:border-box;background:#15151e;color:#ece7ca;font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;text-align:center}
 main{max-width:30em}h1{margin:0 0 8px;font:400 22px/1.3 "Courier New",monospace;letter-spacing:.08em;color:#d4bc78}p{margin:0 0 8px;color:#c9c4a8}
 a{color:#b8c49a}a:hover,a:focus-visible{color:#d4bc78}`;
 
-function page({ title, heading, body, script, canonical, robots = 'noindex' }) {
+// social: the root URL this page stands for (https://riftborn.us/) to add the social card, or null.
+function page({ title, heading, body, script, canonical, social = null, robots = 'noindex' }) {
   const hash = script ? scriptHash(script) : null;
   const csp = ["default-src 'none'", hash ? `script-src ${hash}` : "script-src 'none'", "style-src 'unsafe-inline'", 'img-src data:', "base-uri 'none'", "form-action 'none'"].join('; ');
   return `<!doctype html>
@@ -37,7 +93,7 @@ function page({ title, heading, body, script, canonical, robots = 'noindex' }) {
 <meta name="robots" content="${robots}">
 <meta name="color-scheme" content="dark">
 <title>${escapeHtml(title)}</title>
-${canonical ? `<link rel="canonical" href="${escapeHtml(canonical)}">\n` : ''}<link rel="icon" href="data:,">
+${canonical ? `<link rel="canonical" href="${escapeHtml(canonical)}">\n` : ''}${social ? socialTags(social) : ''}<link rel="icon" href="data:,">
 <style>${STYLE}</style>
 </head>
 <body>
@@ -53,8 +109,11 @@ ${script ? `<script>${script}</script>\n` : ''}</body>
 /**
  * The github.io handoff page. target: where this page moves the player (e.g. https://riftborn.us/,
  * https://riftborn.us/classic/, https://dev.riftborn.us/). migration: site.config.mjs MIGRATION.
+ * social: add the social card (SOCIAL_CARD) for `target`, which must then be the game's root. Only
+ * the pages that stand for the public game get it: not the classic edition (another game, another
+ * card) and never the password-gated test build.
  */
-export function handoffPage({ target, migration }) {
+export function handoffPage({ target, migration, social = false }) {
   const config = {
     target,
     from: migration.from,
@@ -207,7 +266,8 @@ try {
 <p id="rbNote">Taking your progress with you&hellip;</p>
 <noscript><p>Open the link above to keep playing.</p></noscript>`,
     script,
-    canonical: target
+    canonical: target,
+    social: social ? target : null
   });
 }
 

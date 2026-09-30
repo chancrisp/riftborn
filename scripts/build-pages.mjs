@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { HOSTS, MIGRATION, ciLaunchRefusals, resolveSiteConfig } from '../site.config.mjs';
 import { buildHeaders, inlineScripts } from './pages-headers.mjs';
-import { classicImportScript, classicLoaderScript, handoffPage, notFoundPage, prelaunchPage, redirectPage } from './pages-templates.mjs';
+import { SOCIAL_CARD, classicImportScript, classicLoaderScript, handoffPage, notFoundPage, prelaunchPage, redirectPage } from './pages-templates.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const inCi = Boolean(process.env.CI || process.env.GITHUB_ACTIONS);
@@ -171,16 +171,21 @@ if (!config.launched) {
 } else {
   // Handoff pages: each moves the player's saved data on this origin to the new host.
   const liveRoot = config.live + '/';
-  const handoff = (file, target) => {
+  // social: the page stands for the public game, so a link preview shows its card (riftborn.us's
+  // game page carries the same tags). Not the classic edition, the gated test build or the
+  // privacy redirect. Only once the game build in live/ publishes the card image: before that
+  // the image URL is a 404 at riftborn.us, and platforms would cache a card with no picture.
+  const cardShipped = hasLive && fs.existsSync(path.join(live, SOCIAL_CARD.imagePath));
+  const handoff = (file, target, { social = false } = {}) => {
     handoffTargets.add(target);
-    write(path.join(siteOut, file), handoffPage({ target, migration: MIGRATION }));
+    write(path.join(siteOut, file), handoffPage({ target, migration: MIGRATION, social }));
   };
-  handoff('index.html', liveRoot);
+  handoff('index.html', liveRoot, { social: cardShipped });
   handoff('classic/index.html', config.live + '/classic/');
   handoff('dev/index.html', config.dev + '/');
   write(path.join(siteOut, 'privacy', 'index.html'), redirectPage({ target: config.live + '/privacy/', title: 'Riftborn privacy policy has moved' }));
   // GitHub Pages serves a project's 404.html for every unknown path under /riftborn/.
-  handoff('404.html', liveRoot);
+  handoff('404.html', liveRoot, { social: cardShipped });
 }
 // The private player-feedback inbox (noindex; every read needs the Worker's admin key) stays on
 // github.io for good, away from the game origin.
