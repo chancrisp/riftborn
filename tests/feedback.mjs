@@ -242,4 +242,27 @@ r = await worker.fetch(new Request('https://api.test/api/scores', { method: 'OPT
 assert.equal(r.headers.get('Access-Control-Allow-Methods'), 'GET, POST, OPTIONS', 'Score CORS is unchanged');
 assert.equal((await worker.fetch(new Request('https://api.test/elsewhere'), env)).status, 404);
 
-console.log('PASS feedback: validation, honeypot, rate limit, no IPs, Discord ping, admin auth, filters, paging, status, CSV, CORS.');
+// ---- a database the migrations never reached (production today) bootstraps the table ----------
+{
+  const bare = new DatabaseSync(':memory:');
+  for (const file of fs.readdirSync('drizzle').filter(f => f.endsWith('.sql') && !f.startsWith('0004')).sort()) bare.exec(fs.readFileSync('drizzle/' + file, 'utf8'));
+  const scoresBefore = bare.prepare("PRAGMA table_info('scores')").all().map(c => c.name).join(',');
+  const bareDB = { prepare(sql) {
+    let values = [];
+    return {
+      bind(...v) { values = v; return this; },
+      async run() { const r = bare.prepare(sql).run(...values); return { success: true, meta: { changes: Number(r.changes) } }; },
+      async all() { return { results: bare.prepare(sql).all(...values) }; },
+      async first() { return bare.prepare(sql).get(...values) ?? null; }
+    };
+  } };
+  const bareEnv = { ...env, DB: bareDB, FEEDBACK_RATE_LIMITER: { async limit() { return { success: true }; } } };
+  const send = () => worker.fetch(new Request('https://api.test/api/feedback', { method: 'POST', headers: { Origin: ORIGIN, 'Content-Type': 'application/json' }, body: JSON.stringify({ category: 'idea', message: 'Bootstrapped on first use.' }) }), bareEnv);
+  assert.equal((await send()).status, 201, 'The first submission creates the table and saves');
+  assert.equal((await send()).status, 201, 'The bootstrap is idempotent');
+  assert.equal(bare.prepare('SELECT COUNT(*) AS n FROM feedback').get().n, 2);
+  assert.equal(bare.prepare("PRAGMA table_info('scores')").all().map(c => c.name).join(','), scoresBefore, 'Scores are untouched');
+  bare.exec(fs.readFileSync('drizzle/0004_feedback.sql', 'utf8')); // the migration, applied later, is a no-op
+}
+
+console.log('PASS feedback: validation, honeypot, rate limit, no IPs, Discord ping, admin auth, filters, paging, status, CSV, CORS, self-bootstrap.');

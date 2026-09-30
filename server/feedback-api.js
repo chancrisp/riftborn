@@ -171,6 +171,39 @@ async function authorize(request, env, origin) {
   return null;
 }
 
+// ---- schema ---------------------------------------------------------------------------------
+
+// The table bootstraps itself on the first feedback request, so the feature never depends on the
+// D1 migrations workflow (drizzle/0004_feedback.sql is the same schema, also IF NOT EXISTS).
+// Every statement is IF NOT EXISTS: it can only ever add the feedback table, never alter scores.
+const SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS feedback (
+    id TEXT PRIMARY KEY NOT NULL,
+    created_at INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    rating INTEGER,
+    message TEXT NOT NULL,
+    contact TEXT,
+    context_json TEXT,
+    source TEXT NOT NULL,
+    build TEXT,
+    status TEXT DEFAULT 'new' NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback (created_at, id)',
+  'CREATE INDEX IF NOT EXISTS idx_feedback_status_created ON feedback (status, created_at)'
+];
+const ready = new WeakMap(); // DB binding -> Promise, once per isolate
+
+export function ensureFeedbackTable(db) {
+  let promise = ready.get(db);
+  if (!promise) {
+    promise = (async () => { for (const sql of SCHEMA) await db.prepare(sql).run(); })();
+    ready.set(db, promise);
+    promise.catch(() => ready.delete(db)); // a failed bootstrap retries on the next request
+  }
+  return promise;
+}
+
 // ---- queries --------------------------------------------------------------------------------
 
 function parseFilters(params, maxLimit) {
@@ -389,6 +422,7 @@ export async function handleFeedback(request, env, ctx) {
       if (denied) return denied;
     }
     if (!env.DB) throw new Error('Feedback database unavailable');
+    await ensureFeedbackTable(env.DB);
     if (route === 'submit') return await submitFeedback(request, env, ctx, env.DB, origin);
     if (route === 'list') return await listFeedback(env.DB, url.searchParams, origin);
     if (route === 'csv') return await exportCsv(env.DB, url.searchParams, origin);

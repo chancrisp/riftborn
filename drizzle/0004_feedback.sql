@@ -1,4 +1,4 @@
-CREATE TABLE `feedback` (
+CREATE TABLE IF NOT EXISTS `feedback` (
 	`id` text PRIMARY KEY NOT NULL,
 	`created_at` integer NOT NULL,
 	`category` text NOT NULL,
@@ -11,5 +11,5 @@ CREATE TABLE `feedback` (
 	`status` text DEFAULT 'new' NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX `idx_feedback_created` ON `feedback` (`created_at`,`id`);--> statement-breakpoint
-CREATE INDEX `idx_feedback_status_created` ON `feedback` (`status`,`created_at`);
+CREATE INDEX IF NOT EXISTS `idx_feedback_created` ON `feedback` (`created_at`,`id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_feedback_status_created` ON `feedback` (`status`,`created_at`);
