@@ -26,16 +26,20 @@ jobs:
     steps:
       - name: Signing key is present
         if: always()
-        run: node -e 'process.exit(process.env.AUTH_SIGNING_KEY ? 0 : 1)'
+        run: |
+          node -e 'process.exit(process.env.AUTH_SIGNING_KEY ? 0 : 1)'
       - name: Signing key has no spaces or line breaks around it
         if: always()
-        run: node -e 'const k = process.env.AUTH_SIGNING_KEY || ""; process.exit(k && k === k.trim() ? 0 : 1)'
+        run: |
+          node -e 'const k = process.env.AUTH_SIGNING_KEY || ""; process.exit(k && k === k.trim() ? 0 : 1)'
       - name: Signing key is at least 32 characters
         if: always()
-        run: node -e 'process.exit((process.env.AUTH_SIGNING_KEY || "").trim().length >= 32 ? 0 : 1)'
-      - name: Signing key looks like the generated key (no PowerShell command text)
+        run: |
+          node -e 'process.exit((process.env.AUTH_SIGNING_KEY || "").trim().length >= 32 ? 0 : 1)'
+      - name: Signing key looks like the generated key (no command text)
         if: always()
-        run: node -e 'const k = (process.env.AUTH_SIGNING_KEY || "").trim(); process.exit(/^[A-Za-z0-9+/=]{40,}$/.test(k) ? 0 : 1)'
+        run: |
+          node -e 'const k = (process.env.AUTH_SIGNING_KEY || "").trim(); process.exit(/^[A-Za-z0-9+\/=]{40,}$/.test(k) ? 0 : 1)'
       - name: Discord
         if: always()
         run: |
