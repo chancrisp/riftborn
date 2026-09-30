@@ -692,7 +692,7 @@ const OAUTH = Object.freeze({
   },
   discord: {
     authorize: 'https://discord.com/oauth2/authorize',
-    token: 'https://discord.com/api/oauth2/token',
+    token: 'https://discord.com/api/v10/oauth2/token',
     scope: 'identify'
   },
   github: {
@@ -764,7 +764,7 @@ async function providerUserId(provider, creds, code, verifier, redirectUri, now)
     id = googleSubject(tokens.id_token, creds.id, now);
     if (!id) id = (await fetchUserJson('https://openidconnect.googleapis.com/v1/userinfo', tokens.access_token))?.sub;
   } else if (provider === 'discord') {
-    id = (await fetchUserJson('https://discord.com/api/users/@me', tokens.access_token))?.id;
+    id = (await fetchUserJson('https://discord.com/api/v10/users/@me', tokens.access_token))?.id;
   } else if (provider === 'github') {
     id = (await fetchUserJson('https://api.github.com/user', tokens.access_token, { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }))?.id;
   }

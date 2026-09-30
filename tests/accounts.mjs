@@ -353,8 +353,8 @@ function stubProviders({ fail = null } = {}) {
       const b64 = value => Buffer.from(JSON.stringify(value)).toString('base64url');
       return reply({ access_token: 'g-access', id_token: `${b64({ alg: 'RS256' })}.${b64(claims)}.sig`, token_type: 'Bearer' });
     }
-    if (href === 'https://discord.com/api/oauth2/token') return reply({ access_token: 'd-access', token_type: 'Bearer' });
-    if (href === 'https://discord.com/api/users/@me') return reply({ id: '80351110224678912', username: 'never_stored', email: 'x@y.z' });
+    if (href === 'https://discord.com/api/v10/oauth2/token') return reply({ access_token: 'd-access', token_type: 'Bearer' });
+    if (href === 'https://discord.com/api/v10/users/@me') return reply({ id: '80351110224678912', username: 'never_stored', email: 'x@y.z' });
     if (href === 'https://github.com/login/oauth/access_token') return reply({ access_token: 'h-access', token_type: 'bearer' });
     if (href === 'https://api.github.com/user') return reply({ id: 583231, login: 'never-stored', name: 'Never Stored' });
     throw new Error('Unexpected fetch ' + href);
@@ -402,14 +402,14 @@ async function providerRedirect(provider, { mode, ticket, e = withProviders, fai
   // Callback: server-side code exchange with the PKCE verifier; only the platform id is read.
   providerCalls.length = 0;
   const { target, location, verifier: discordVerifier } = await providerRedirect('discord');
-  const tokenCall = providerCalls.find(c => c.url === 'https://discord.com/api/oauth2/token');
+  const tokenCall = providerCalls.find(c => c.url === 'https://discord.com/api/v10/oauth2/token');
   const form = new URLSearchParams(tokenCall.init.body);
   assert.equal(form.get('code'), 'provider-code-123');
   assert.equal(form.get('client_secret'), 'd-secret');
   assert.equal(form.get('redirect_uri'), `${BASE}/auth/discord/callback`);
   const challenge = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(form.get('code_verifier')))).toString('base64url');
   assert.equal(challenge, target.searchParams.get('code_challenge'), 'The verifier matches the challenge');
-  assert.equal(providerCalls.find(c => c.url === 'https://discord.com/api/users/@me').init.headers.Authorization, 'Bearer d-access');
+  assert.equal(providerCalls.find(c => c.url === 'https://discord.com/api/v10/users/@me').init.headers.Authorization, 'Bearer d-access');
   const discordLogin = await call('/auth/session', { method: 'POST', body: { code: hashParam(location, 'rb_login'), verifier: discordVerifier } });
   assert.equal(discordLogin.data.needsUsername, true, 'A new Discord user chooses a username');
   const gh = await providerRedirect('github');
