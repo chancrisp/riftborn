@@ -1,6 +1,6 @@
 # One-off: connect riftborn.us and dev.riftborn.us to the Cloudflare Pages projects.
 # Writes Cloudflare's responses (status codes and error messages only, never the token) to
-# ops/pages-domains.json on the ops-log branch so the lead can read the outcome. Removed after use.
+# ops/pages-domains.json on the ops-log branch so the lead can read the outcome. Removed after use. (run 3)
 name: Cloudflare Pages domains
 
 on:
