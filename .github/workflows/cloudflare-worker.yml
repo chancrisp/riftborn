@@ -43,7 +43,7 @@ jobs:
           RIFTBORN_SITE_ORIGIN: ${{ vars.RIFTBORN_SITE_ORIGIN }}
           # Optional: the feedback inbox key and a Discord webhook for new-feedback pings.
           # Secrets are copied into the Worker only when it deploys: after changing one, redeploy with
-          # Actions > Deploy Worker > Run workflow (or push a change to a path listed above).
+          # Actions > Deploy Riftborn leaderboard Worker > Run workflow (or push a change to a path above).
           FEEDBACK_ADMIN_KEY: ${{ secrets.FEEDBACK_ADMIN_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           # FEEDBACK_KEY_STRICT (repository variable, 1 once the admin key is 24+ random characters):

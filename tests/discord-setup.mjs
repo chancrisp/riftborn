@@ -284,6 +284,8 @@ function createFakeDiscord() {
       if ((s = sub.match(/^\/auto-moderation\/rules\/(\d+)$/)) && method === 'PATCH') {
         const rule = state.automod.find((r) => r.id === s[1]);
         if (!rule) return err(404, 'Unknown auto moderation rule', 10066);
+        // Discord's own rules (made by the AutoMod system user) can be read but not changed.
+        if (rule.creator_id !== BOT) return err(404, '404: Not Found');
         Object.assign(rule, body);
         return [200, rule];
       }
@@ -728,6 +730,21 @@ try {
   fake.faults.echoSecret.clear();
   assert.equal(echoed.code, 1);
   assert.match(echoed.stdout, /::error title=AutoMod::HTTP 400, code 50001: Invalid token \*\*\* for \[webhook url\]/, 'secret scrubbed from the error');
+
+  // 6b. Discord's own Block Mention Spam rule can be read but not changed (PATCH 404) or replaced
+  // (one per server): the step leaves it as it is, says so, and passes.
+  const mentionAt = s.automod.findIndex((r) => r.trigger_type === 5);
+  const ourMention = s.automod[mentionAt];
+  s.automod[mentionAt] = { id: fake.sf(), guild_id: G, creator_id: fake.sf(), name: 'Block Mention Spam', event_type: 1, trigger_type: 5, enabled: true,
+    trigger_metadata: { mention_total_limit: 20, mention_raid_protection_enabled: true }, actions: [{ type: 1, metadata: {} }], exempt_roles: [], exempt_channels: [] };
+  fake.calls.length = 0;
+  const systemRule = await run(['automod'], env);
+  assert.equal(systemRule.code, 0, `Discord's own mention spam rule\n${systemRule.text}`);
+  assert.match(systemRule.stdout, /::notice title=AutoMod::AutoMod: 0 created, 0 updated, 2 unchanged \(words preset and spam\)\. Discord's own "Block Mention Spam" rule is on, limit 20, raid protection on, no alert channel\. Bots cannot change it/, 'says it was left as Discord made it');
+  assert.doesNotMatch(systemRule.stdout, /::error/, 'no error for the system rule');
+  assert.equal(s.automod[mentionAt].trigger_metadata.mention_total_limit, 20, 'the system rule is unchanged');
+  assert.deepEqual(writes().map((c) => `${c.method} ${c.route}`), [], 'nothing written');
+  s.automod[mentionAt] = ourMention;
 
   // 7. Guards.
   let calls = fake.calls.length;

@@ -825,7 +825,7 @@ async function phaseAutomod(r, ctx) {
   const modLog = channelByName(channels, 'mod-log');
   if (!modLog) r.error('#mod-log not found: the mention spam alert has nowhere to go until the channels step succeeds');
   const existing = await api('GET', `/guilds/${gid}/auto-moderation/rules`);
-  const n = { created: 0, updated: 0, same: 0 };
+  const n = { created: 0, updated: 0, same: 0, discord: [] };
   const actionsKey = (list) => (list ?? []).map((a) => `${a.type}:${a.metadata?.channel_id ?? ''}:${a.metadata?.custom_message ?? ''}`).sort().join('|');
   for (const want of automodRules(modLog?.id)) {
     const body = { ...want, enabled: true, exempt_roles: [], exempt_channels: [] };
@@ -843,10 +843,30 @@ async function phaseAutomod(r, ctx) {
       && sortedJson(found.exempt_roles) === '[]' && sortedJson(found.exempt_channels) === '[]';
     if (same) { n.same += 1; continue; }
     const { trigger_type: _ignored, ...patch } = body;
-    const done = await attempt(r, `update AutoMod rule ${want.name}`, () => api('PATCH', `/guilds/${gid}/auto-moderation/rules/${found.id}`, { body: patch }));
-    if (done !== FAIL) { n.updated += 1; r.log(`~ ${want.name}`); }
+    try {
+      await api('PATCH', `/guilds/${gid}/auto-moderation/rules/${found.id}`, { body: patch });
+      n.updated += 1;
+      r.log(`~ ${want.name}`);
+    } catch (err) {
+      // Discord makes its own "Block Mention Spam" rule on some servers (creator: the AutoMod system
+      // user). Bots can read it but PATCH answers 404, and a server holds only one mention spam rule,
+      // so it cannot be replaced either: leave it as Discord made it and say how to change it by hand.
+      if (err?.status !== 404 || !found.creator_id || found.creator_id === ctx.me.id) {
+        r.error(`update AutoMod rule ${want.name}: ${describe(err)}`);
+        continue;
+      }
+      n.discord.push(found);
+    }
   }
-  r.notice(`AutoMod: ${n.created} created, ${n.updated} updated, ${n.same} unchanged (words preset, spam, mention spam 6 + raid protection with alerts in #mod-log)`);
+  const kept = n.discord.map((rule) => {
+    const meta = rule.trigger_metadata ?? {};
+    const limit = meta.mention_total_limit ? `, limit ${meta.mention_total_limit}` : '';
+    const raid = meta.mention_raid_protection_enabled === undefined ? '' : `, raid protection ${meta.mention_raid_protection_enabled ? 'on' : 'off'}`;
+    const alerts = (rule.actions ?? []).some((a) => a.type === 2) ? ', alerts on' : ', no alert channel';
+    return `Discord's own "${rule.name}" rule is ${rule.enabled ? 'on' : 'off'}${limit}${raid}${alerts}. Bots cannot change it, so it was left as it is (to send its alerts to #mod-log: Server Settings > AutoMod > ${rule.name})`;
+  });
+  const managed = n.discord.length ? 'words preset and spam' : 'words preset, spam, mention spam 6 + raid protection with alerts in #mod-log';
+  r.notice(`AutoMod: ${n.created} created, ${n.updated} updated, ${n.same} unchanged (${managed})${kept.length ? `. ${kept.join('. ')}` : ''}`);
 }
 
 async function phaseSettings(r, ctx) {
