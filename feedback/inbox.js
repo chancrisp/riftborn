@@ -1,8 +1,8 @@
 // Riftborn feedback inbox: reads the leaderboard Worker's /api/feedback with the admin key.
 // The key never leaves this page except as the Authorization header to API below. It lives in
-// sessionStorage (this tab only) by default, and in localStorage only while "Remember on this
-// device" is ticked (the owner's choice; this origin is shared with other pages, so leave it off
-// on any shared browser). A refused key (401) is wiped from both.
+// sessionStorage only (this tab; closing it forgets the key): this origin is shared with other
+// pages, so the key is never kept on the device. A copy an older inbox kept in localStorage (its
+// "Remember on this device" option) is deleted as the page starts. A refused key (401) is wiped.
 // Every field the Worker returns is player-written or player-influenced: it is only ever shown with
 // textContent, class names and URL parts come from fixed lists, and index.html sets a CSP.
 const API = 'https://riftborn-leaderboard.chanmanc10.workers.dev';
@@ -12,7 +12,7 @@ const PAGE = 50;
 
 const $ = selector => document.querySelector(selector);
 const el = {
-  login: $('#login'), loginForm: $('#loginForm'), keyInput: $('#keyInput'), remember: $('#remember'), loginError: $('#loginError'),
+  login: $('#login'), loginForm: $('#loginForm'), keyInput: $('#keyInput'), loginError: $('#loginError'),
   inbox: $('#inbox'), filters: $('#filters'), status: $('#status'), list: $('#list'), more: $('#more'),
   unread: $('#unread'), lock: $('#lock'), refresh: $('#refresh'), csv: $('#csv'),
   f: { status: $('#fStatus'), category: $('#fCategory'), source: $('#fSource'), rating: $('#fRating') }
@@ -22,7 +22,9 @@ const storage = kind => { try { return window[kind]; } catch { return null; } };
 const read = (kind, key) => { try { return storage(kind)?.getItem(key) || ''; } catch { return ''; } };
 const write = (kind, key, value) => { try { value ? storage(kind)?.setItem(key, value) : storage(kind)?.removeItem(key); } catch { /* storage blocked */ } };
 
-let key = read('sessionStorage', STORE_KEY) || read('localStorage', STORE_KEY);
+// Older inboxes could keep the key in localStorage: never read, always deleted.
+write('localStorage', STORE_KEY, '');
+let key = read('sessionStorage', STORE_KEY);
 let cursor = null;
 let loading = false;
 
@@ -205,7 +207,6 @@ async function exportCsv() {
 function lock(message = '') {
   key = '';
   write('sessionStorage', STORE_KEY, '');
-  write('localStorage', STORE_KEY, '');
   el.inbox.hidden = true;
   el.lock.hidden = true;
   el.unread.hidden = true;
@@ -228,7 +229,6 @@ el.loginForm.addEventListener('submit', event => {
   key = el.keyInput.value.trim();
   if (!key) return;
   write('sessionStorage', STORE_KEY, key);
-  write('localStorage', STORE_KEY, el.remember.checked ? key : '');
   el.loginError.textContent = '';
   unlock();
 });

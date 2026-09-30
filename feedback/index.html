@@ -26,10 +26,9 @@
 <main>
   <section id="login" class="panel login" hidden>
     <h2>ADMIN KEY</h2>
-    <p class="hint">Enter the <code>FEEDBACK_ADMIN_KEY</code> secret you set for the leaderboard Worker (24+ random characters). It is kept for this tab only, unless you tick <b>Remember on this device</b>; leave that off on any browser you share.</p>
+    <p class="hint">Enter the <code>FEEDBACK_ADMIN_KEY</code> secret you set for the leaderboard Worker (24+ random characters). It is kept for this tab only (closing the tab forgets it).</p>
     <form id="loginForm" autocomplete="off">
       <input id="keyInput" type="password" autocomplete="current-password" spellcheck="false" autocapitalize="off" aria-label="Admin key" required>
-      <label class="check"><input id="remember" type="checkbox"> Remember on this device</label>
       <button type="submit" class="primary">UNLOCK</button>
     </form>
     <p id="loginError" class="error" role="alert"></p>

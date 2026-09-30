@@ -99,11 +99,27 @@ console.log('PASS Pages HSTS: includeSubDomains, no preload.');
   assert.ok(policy['connect-src'].every(source => source.startsWith('https://')), 'Only https API hosts');
   assert.ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function/.test(script), 'Nothing is rendered as HTML');
   assert.ok(!/style\s*=|<style/i.test(html.replace(meta[0], '')), 'No inline styles (style-src is same-origin only)');
-  // The key: sessionStorage by default, localStorage only while "Remember on this device" is ticked.
-  assert.ok(/<input id="remember" type="checkbox">/.test(html), 'Remember is optional and off by default');
-  assert.ok(script.includes("write('localStorage', STORE_KEY, el.remember.checked ? key : '')"), 'localStorage only when ticked, cleared otherwise');
+  // The key: sessionStorage only (this tab). No "Remember on this device" option any more, and a copy
+  // an older inbox kept in localStorage is deleted at startup, never read.
+  assert.ok(!/id="remember"|Remember on this device/i.test(html), 'No option to keep the key on the device');
+  assert.ok(!/el\.remember|#remember/.test(script), 'The script has no remember path');
+  const keyWrites = [...script.matchAll(/write\('(\w+)', STORE_KEY, ([^)]*)\)/g)].map(m => [m[1], m[2]]);
+  assert.deepEqual(keyWrites.filter(([kind]) => kind === 'localStorage'), [['localStorage', "''"]], 'localStorage: the key is only ever deleted');
+  assert.ok(!/read\('localStorage', STORE_KEY\)/.test(script), 'localStorage is never read for the key');
+  assert.ok(keyWrites.some(([kind, value]) => kind === 'sessionStorage' && value === 'key'), 'The key lives in sessionStorage');
+  // Run the start of the page against fake storages: an old remembered key is deleted, not used.
+  const start = script.slice(script.indexOf('const storage = kind =>'), script.indexOf('let cursor'));
+  const fake = (entries = {}) => ({ data: { ...entries }, getItem(k) { return k in this.data ? this.data[k] : null; }, setItem(k, v) { this.data[k] = String(v); }, removeItem(k) { delete this.data[k]; } });
+  const storeKey = /const STORE_KEY = '([^']+)'/.exec(script)[1];
+  for (const [local, session, expected] of [[{ [storeKey]: 'old-remembered' }, {}, ''], [{ [storeKey]: 'old-remembered', other: 'kept' }, { [storeKey]: 'this-tab' }, 'this-tab']]) {
+    const win = { localStorage: fake(local), sessionStorage: fake(session) };
+    const key = new Function('window', 'STORE_KEY', `${start}; return key;`)(win, storeKey);
+    assert.equal(key, expected, 'The key comes from this tab only');
+    assert.equal(win.localStorage.getItem(storeKey), null, 'An old remembered key is deleted at startup');
+    if (local.other) assert.equal(win.localStorage.getItem('other'), 'kept', 'Nothing else is touched');
+  }
 }
-console.log('PASS inbox: meta CSP (no inline code, inline scripts hashed, https API only), textContent rendering, key remembered only on request.');
+console.log('PASS inbox: meta CSP (no inline code, inline scripts hashed, https API only), textContent rendering, key kept for this tab only (an old remembered copy is deleted).');
 
 // ---- the privacy page matches the code ------------------------------------------------------------------
 {

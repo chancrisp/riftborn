@@ -1185,6 +1185,75 @@ console.log('PASS purge: expired sign-in values, old limiter windows, expired an
 }
 console.log('PASS guest names (more scripts): Cherokee, small capitals, Lisu, Canadian Syllabics, IPA and Coptic look-alikes refused; unknown letters mixed with Latin count as any character; ASCII skeletons unchanged.');
 
+// ---- guest name protection: symbol look-alikes, and the any-character fallback kept to mostly-Latin names (security re-check) ----
+{
+  // Every ASCII character still gives the skeleton it always did (no stored skeleton needs a backfill).
+  const oldSkeleton = text => text.replace(/[I1|]/g, 'l').replace(/0/g, 'o').toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (let c = 0x20; c < 0x7f; c++) assert.equal(nameSkeleton(String.fromCharCode(c)), oldSkeleton(String.fromCharCode(c)), 'ASCII skeleton unchanged: ' + String.fromCharCode(c));
+  // Symbols that read as a letter are mapped, not dropped.
+  const symbolic = [
+    U(0x2228) + 'ictim', // logical or
+    U(0x22C1) + 'ictim', // n-ary logical or
+    'V' + U(0xA1) + 'ctim', // inverted exclamation mark
+    'V' + U(0x2373) + 'ctim', // APL iota
+    'Vi' + U(0xA2) + 'tim', // cent sign
+    'Vic' + U(0x22A4) + 'im' // down tack
+  ];
+  for (const name of symbolic) assert.equal(nameSkeleton(name), 'victim', 'Skeleton of ' + JSON.stringify(name));
+  assert.equal(nameSkeleton('B' + U(0x25CB) + 'B'), 'bob', 'A white circle reads as o');
+  assert.equal(nameSkeleton('Wa' + U(0x2223) + 'ly'), 'wally', 'A divides sign reads as l');
+  assert.equal(nameSkeleton('Ma' + U(0xD7)), 'max', 'A multiplication sign reads as x');
+  assert.equal(nameSkeleton('Victim' + U(0x2605)), 'victim', 'Other symbols are still dropped');
+
+  const post = (n, name) => call('/api/scores', { method: 'POST', body: run(n, { name }) });
+  const guestCheck = async name => (await call('/api/username-available?guest=1&name=' + encodeURIComponent(name))).data;
+  let n = 450;
+  // "Victim" is an account (registered above).
+  for (const name of symbolic) {
+    const r = await post(n++, name);
+    assert.equal(r.status, 409, 'Symbol look-alike of "Victim" refused: ' + JSON.stringify(name));
+    assert.deepEqual(await guestCheck(name), { available: false, reason: 'taken' }, 'Guest check agrees: ' + JSON.stringify(name));
+  }
+  // The any-character fallback: only a name with 3+ ASCII letters and exactly one unknown character.
+  await register('short-axx', 'Axx');
+  await register('short-zxxxxx', 'Zxxxxx');
+  for (const name of ['A' + U(0x3055, 0x3093), 'Z' + U(0x0436).repeat(5), 'Ax' + U(0x0436), 'Zxxx' + U(0x0436, 0x0436), U(0x0416) + U(0x0436).repeat(5)]) {
+    assert.deepEqual(await guestCheck(name), { available: true }, 'Free (not a Latin name with one hole): ' + JSON.stringify(name));
+    assert.equal((await post(n++, name)).status, 200, 'Allowed: ' + JSON.stringify(name));
+  }
+  for (const name of ['Zxxxx' + U(0x0436), 'Axx', 'A' + U(0x0445) + 'x', 'Victi' + U(0x0436)]) {
+    assert.deepEqual(await guestCheck(name), { available: false, reason: 'taken' }, 'Still protected: ' + JSON.stringify(name));
+    assert.equal((await post(n++, name)).status, 409, 'Refused: ' + JSON.stringify(name));
+  }
+  // Re-check fixes: the fallback counts Latin letters in the skeleton, so Latin letters spelled with
+  // mapped look-alikes (no ASCII letter typed) still get it; Arabic-Indic sevens and Cyrillic iota
+  // are in the table; and a name decorated with symbol look-alikes is still read without them.
+  assert.equal(nameSkeleton(U(0x0667) + 'ictim'), 'victim', 'Arabic-Indic seven reads as v');
+  assert.equal(nameSkeleton(U(0x06F7) + 'ictim'), 'victim', 'Extended Arabic-Indic seven reads as v');
+  assert.equal(nameSkeleton('Vict' + U(0xA647) + 'm'), 'victim', 'Cyrillic small iota reads as i');
+  const recheck = [
+    U(0x0474, 0x0456, 0x0441, 0x0442, 0x0456, 0x0436), // "Victi" all in Cyrillic look-alikes + one unknown letter
+    U(0x0474, 0x0456, 0x0441, 0x0442, 0x0436) + 'm', // same, the hole in the middle
+    U(0x0667, 0x0456, 0x0441) + 't' + U(0x0456) + 'm', // Arabic-Indic seven, Cyrillic i and c
+    U(0x0667) + 'ict' + U(0xA647) + 'm', // two look-alikes the table did not know
+    U(0xA1) + 'Victim!', // decorated with an inverted exclamation mark
+    U(0xD7) + 'Victim' + U(0xD7), // multiplication signs
+    U(0x25CB) + 'Victim' + U(0x25CB), // white circles
+    U(0x2502) + 'Victim' + U(0x2502), // box-drawing verticals
+    'Victim' + U(0xA2) // cent sign
+  ];
+  for (const name of recheck) {
+    assert.deepEqual(await guestCheck(name), { available: false, reason: 'taken' }, 'Protected: ' + JSON.stringify(name));
+    assert.equal((await post(n++, name)).status, 409, 'Refused: ' + JSON.stringify(name));
+  }
+  // The re-check keeps innocent names free.
+  for (const name of ['Vic ' + U(0x0436), 'Viktor', 'Victim 2', U(0x0414, 0x0438, 0x043C, 0x0430), U(0x6771, 0x4EAC), 'A' + U(0x30AB, 0x30A4), 'Ax' + U(0x0436)]) {
+    assert.deepEqual(await guestCheck(name), { available: true }, 'Still free: ' + JSON.stringify(name));
+    assert.equal((await post(n++, name)).status, 200, 'Allowed: ' + JSON.stringify(name));
+  }
+}
+console.log('PASS guest names (symbols, fallback): symbol look-alikes mapped (logical or, inverted !, cent, APL iota, down tack, circles, bars, times), ASCII skeletons unchanged; the any-character fallback only for 3+ Latin letters (in the skeleton) with one unknown character; decorated names refused.');
+
 // ---- stale sessions never turn a queued run into a guest run; hooks fail closed (security fix) ----
 {
   const first = await register('stale-1', 'StaleRunner');

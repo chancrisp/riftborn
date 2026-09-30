@@ -276,10 +276,31 @@ export function keyId(secret) {
 // A guest cannot post under a name that renders like an account's username. Both sides are reduced
 // to a skeleton: compatibility forms folded (NFKD: fullwidth, ligatures, styled letters), accents
 // and other combining marks dropped, common Cyrillic, Greek and Latin look-alikes mapped to one
-// Latin letter (capital I, 1 and | read as l; 0 as o), lower-cased, and separators, symbols and
-// invisible characters dropped: "Victim_Name", "VictimName" with a Cyrillic small ie for the e,
-// and the same name in fullwidth letters all meet at "victimname". Accounts store theirs
-// (username_skeleton) at create and rename.
+// Latin letter (capital I, 1 and | read as l; 0 as o; a few symbols that read as a letter too),
+// lower-cased, and separators, other symbols and invisible characters dropped: "Victim_Name",
+// "VictimName" with a Cyrillic small ie for the e, and the same name in fullwidth letters all meet
+// at "victimname". Accounts store theirs (username_skeleton) at create and rename.
+// Symbols that read as one letter (UTS #39 confusables, a conservative few): mapped in the table
+// below, before the other symbols are dropped, so an inverted exclamation mark for the i of
+// "Victim" or a logical-or sign for its V no longer vanishes into "ictim". None is ASCII: an ASCII
+// name's skeleton (every account's) is exactly what it was, so no stored skeleton needs a backfill.
+// nameProtected also reads a guest name with these left out (see there).
+const SYMBOL_LOOKALIKES = Object.freeze({
+  a: '\u237A', // APL alpha
+  c: '\u00A2', // cent sign
+  e: '\u212E', // estimated symbol
+  i: '\u00A1\u2373', // inverted exclamation mark, APL iota
+  l: '\u2223\u2502\u2758\u23FD\u05C0', // divides, box-drawing vertical, light vertical bar, power-on symbol, Hebrew paseq
+  n: '\u2229\u22C2', // intersection, n-ary intersection
+  o: '\u25CB\u25EF\u3007', // white circle, large circle, ideographic number zero
+  p: '\u2374', // APL rho
+  t: '\u22A4\u27D9', // down tack, large down tack
+  u: '\u222A\u22C3', // union, n-ary union
+  v: '\u2228\u22C1\u02C5', // logical or, n-ary logical or, modifier down arrowhead
+  w: '\u2375', // APL omega
+  x: '\u00D7\u2A2F\u2573' // multiplication sign, vector cross product, box-drawing diagonal cross
+});
+const SYMBOL_LOOKALIKE_CHARS = new Set(Object.values(SYMBOL_LOOKALIKES).join(''));
 const CONFUSABLES = Object.freeze({
   // Latin and digits (case matters here: a capital I looks like l, a small i does not)
   I: 'l', '1': 'l', '|': 'l', '0': 'o', '\u0131': 'i', '\u0237': 'j', '\u0269': 'i', '\u01C0': 'l',
@@ -302,7 +323,7 @@ const CONFUSABLES = Object.freeze({
   // More look-alikes of one ASCII letter or digit, by target (UTS #39 confusables for these scripts,
   // plus a few house rules): Latin letters with a stroke or hook, small capitals and IPA letters,
   // more Cyrillic, Greek and Armenian, Cherokee (capitals; small letters are folded to them), Lisu,
-  // Canadian Syllabics, Coptic, Runic, Tifinagh, and letters/digits that read as l or o. Every
+  // Canadian Syllabics, Coptic, Runic, Tifinagh, and letters/digits that read as l, o or v. Every
   // account username is ASCII, so this only ever makes guest names stricter.
   ...lookalikes({
     a: '\u0251\u1D00\u13AA\uA4EE\u15C5\u2C80\u2C81',
@@ -313,7 +334,7 @@ const CONFUSABLES = Object.freeze({
     f: '\u0192\u0191\uA730\u03DC\uA4DD\u15B4\u16A0',
     g: '\u01E5\u01E4\u0260\u0261\u0262\u0581\u13C0\u13F3\uA4D6',
     h: '\u0127\u0126\u0266\u029C\u043D\u04BA\u13BB\u13C2\uA4E7\u157C\u2C8E\u2C8F\u16BB',
-    i: '\u0268\u026A\u13A5',
+    i: '\u0268\u026A\u13A5\uA647',
     j: '\u0249\u0248\u029D\u1D0A\u13AB\uA4D9\u148D',
     k: '\u0199\u0198\u1D0B\u03CF\u13E6\uA4D7\u2C94\u2C95\u16D5',
     l: '\u0142\u0141\u019A\u026B\u026C\u026D\u023D\u029F\u0197\uA7AE\u053C\u13DE\uA4E1\uA4F2\u14AA\u2C92\u16C1\u2D4F' +
@@ -328,7 +349,7 @@ const CONFUSABLES = Object.freeze({
     s: '\u0282\u023F\uA731\u054F\u13D5\u13DA\uA4E2\u1515',
     t: '\u0167\u0166\u01AB\u01AD\u01AC\u0288\u01AE\u1D1B\u0442\u13A2\uA4D4\u2CA6\u2CA7',
     u: '\u0289\u0244\u1D1C\u054D\u03BC\u144C',
-    v: '\u028B\u01B2\u1D20\u0474\u0475\u13D9\uA4E6\u142F',
+    v: '\u028B\u01B2\u1D20\u0474\u0475\u13D9\uA4E6\u142F\u0667\u06F7',
     w: '\u1D21\u2C73\u2C72\u03C9\u13B3\u13D4\uA4EA\u15EF',
     x: '\uA4EB\u166D\u1541\u166E\u2CAC\u2CAD\u16EA\u16B7',
     y: '\u028F\u024F\u024E\u01B4\u01B3\u04B0\u04B1\u03B3\u10E7\u13A9\u13BD\uA4EC\u2CA8\u2CA9',
@@ -338,7 +359,9 @@ const CONFUSABLES = Object.freeze({
     4: '\u13CE',
     5: '\u01BC\u01BD',
     6: '\u0431\u13EE'
-  })
+  }),
+  // Symbols that read as one letter (SYMBOL_LOOKALIKES above).
+  ...lookalikes(SYMBOL_LOOKALIKES)
 });
 function lookalikes(groups) {
   const out = {};
@@ -720,17 +743,35 @@ async function usernameOwner(db, name) {
 // like it. The skeleton keeps "capital I reads as l", so the name is compared as typed, all lower
 // case and all upper case ("VICTIM-NAME" meets "VictimName", "lllidan" meets "Illidan", while
 // "Kal" does not meet "Kai"), and with capital-I shapes read as i (a caseless script).
-// Defence in depth for a name that mixes ASCII letters with letters the table does not know
-// ("Victi" + a letter from some other script): each such letter may look like a Latin one, so it
-// counts as any single character (LIKE "_"). Account skeletons are ASCII, so names written wholly
-// in another script (Cyrillic, Japanese, ...) are only ever compared through the table.
+// Defence in depth for a name that is mostly Latin but carries one letter the table does not know
+// ("Victi" + a letter from some other script): that letter may look like a Latin one, so it counts
+// as any single character (LIKE "_"). Only for a skeleton with at least 3 Latin letters and exactly
+// one unknown character: a short or mostly non-Latin guest name ("A" + two kana, "Z" + five
+// Cyrillic letters) is not read as a Latin name with a hole in it, so it no longer collides with
+// any short account name of the same length. The letters are counted in the skeleton, not in the
+// name as typed, so spelling the Latin letters with mapped look-alikes (Cyrillic i, c, t) does not
+// get a name past the fallback.
+// Names written wholly in another script (Cyrillic, Cherokee, Japanese, ...) are only ever compared
+// through the table, on purpose: a name the table does not fully map (say, a Cherokee and Canadian
+// Syllabics spelling of an account name) is not chased any further. The leaderboard shows every
+// account row with its verified mark, so a guest row imitating an account's name is visibly
+// unverified; the table covers the look-alikes that would pass for the name itself.
+// The name is also read with the symbol look-alikes left out, as skeletons did before those were
+// mapped, so a name decorated with them ("!Victim!" with inverted marks, "xVictimx" with
+// multiplication signs) is refused as well. Guest side only: account skeletons are ASCII, so this
+// can only make the check stricter.
+const FALLBACK_MIN_LATIN_LETTERS = 3;
 async function nameProtected(db, name) {
   const trimmed = String(name).trim();
-  const skeletons = [...new Set([...[trimmed, trimmed.toLowerCase(), trimmed.toUpperCase()].map(text => nameSkeleton(text)),
-    nameSkeleton(trimmed, true)])].filter(Boolean);
-  const patterns = /[A-Za-z]/.test(trimmed)
-    ? [...new Set(skeletons.filter(skeleton => /[^a-z0-9]/u.test(skeleton)).map(skeleton => skeleton.replace(/[^a-z0-9]/gu, '_')))]
-    : [];
+  const folded = trimmed.normalize('NFKD');
+  const bare = [...folded].filter(char => !SYMBOL_LOOKALIKE_CHARS.has(char)).join('');
+  const texts = bare === folded ? [trimmed] : [trimmed, bare];
+  const skeletons = [...new Set(texts.flatMap(text => [text, text.toLowerCase(), text.toUpperCase()].map(variant => nameSkeleton(variant))
+    .concat(nameSkeleton(text, true))))].filter(Boolean);
+  const latinLetters = skeleton => (skeleton.match(/[a-z]/g) || []).length;
+  const oneUnknown = skeleton => [...skeleton.replace(/[a-z0-9]/g, '')].length === 1;
+  const patterns = [...new Set(skeletons.filter(skeleton => oneUnknown(skeleton) && latinLetters(skeleton) >= FALLBACK_MIN_LATIN_LETTERS)
+    .map(skeleton => skeleton.replace(/[^a-z0-9]/gu, '_')))];
   const sql = 'SELECT id FROM accounts WHERE username = ?' +
     (skeletons.length ? ` OR username_skeleton IN (${skeletons.map(() => '?').join(', ')})` : '') +
     patterns.map(() => ' OR username_skeleton LIKE ?').join('') + ' LIMIT 1';

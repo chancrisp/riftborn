@@ -137,12 +137,10 @@ const SWORD = String.fromCodePoint(0x1f5e1);
 const profile = JSON.stringify({ v: 3, name: 'Chan ' + SWORD + ' é中', bestScore: 123456, unlocks: Array.from({ length: 200 }, (_, i) => 'cosmetic-' + i) });
 const seeded = () => new FakeStorage({
   'riftborn-reborn-profile-v1': profile,
-  'riftborn-reborn-profile-v1-bak': profile,
   'riftborn-reborn-preferences-v1': JSON.stringify({ muted: true, volume: 0.4 }),
   'riftborn-reborn-scores-v1': JSON.stringify([{ score: 1000, name: 'Chan' }]),
   'riftborn-reborn-boards-v1': JSON.stringify({ weekly: [] }),
   'riftborn-reborn-score-outbox-v1': '[]',
-  'riftborn-reborn-whats-new-seen-v1': '2.1.1',
   'riftborn-profile-v1': JSON.stringify({ classic: true, best: 42 }),
   'neon-crypt-preferences-v1': JSON.stringify({ volume: 1 }),
   // Never moved:
@@ -153,14 +151,19 @@ const seeded = () => new FakeStorage({
   'riftborn-reborn-dev-accounts': 'http://127.0.0.1:8787',
   'riftborn-reborn-dev-mode-v1': 'true',
   'riftborn-reborn-dev-loadout-v1': '{}',
+  'riftborn-reborn-dev-carry-v1': '{}',
+  'riftborn-reborn-welcome-v1': '1',
+  'riftborn-reborn-whats-new-seen-v1': '2.1.1',
+  'riftborn-reborn-whats-new-visit-v1': '1',
+  'riftborn-reborn-profile-v1-bak': profile,
   'riftborn-dev-gate': 'gate-hash',
   'riftborn-score-outbox-v1': '[]',
   'some-other-project-key': 'not ours',
   'riftborn-reborn-huge': 'x'.repeat(MIGRATION.maxValueBytes + 1),
   ['riftborn-reborn-' + 'k'.repeat(120)]: 'key too long'
 });
-const MOVED = ['riftborn-reborn-profile-v1', 'riftborn-reborn-profile-v1-bak', 'riftborn-reborn-preferences-v1', 'riftborn-reborn-scores-v1', 'riftborn-reborn-boards-v1',
-  'riftborn-reborn-score-outbox-v1', 'riftborn-reborn-whats-new-seen-v1', 'riftborn-profile-v1', 'neon-crypt-preferences-v1'].sort();
+const MOVED = ['riftborn-reborn-profile-v1', 'riftborn-reborn-preferences-v1', 'riftborn-reborn-scores-v1', 'riftborn-reborn-boards-v1',
+  'riftborn-reborn-score-outbox-v1', 'riftborn-profile-v1', 'neon-crypt-preferences-v1'].sort();
 
 try {
   // ---- the servers answer like the real hosts ---------------------------------------------------------
@@ -339,8 +342,12 @@ try {
     assert.ok(!(await get(LEGACY, '/riftborn/classic/')).text.includes('RIFTBORN_CLASSIC_IMPORT'), 'github.io never imports');
 
     const toastText = MIGRATION.toast;
+    const { pendingKey, doneKey } = MIGRATION.receive;
+    // The referrer a real hand-over carries (the github.io page's referrer policy is strict-origin).
+    const OLD = 'https://chancrisp.github.io/';
+    assert.ok(importer.includes('"trusted":"https://chancrisp.github.io"'), 'The importer trusts only the old address');
     /** Loads the classic page like a browser at `url`: head (importer), body, loader, DOMContentLoaded. */
-    async function runClassic(url, { storage = new FakeStorage(), session = new FakeStorage(), hostname } = {}) {
+    async function runClassic(url, { storage = new FakeStorage(), session = new FakeStorage(), hostname, referrer = '' } = {}) {
       const where = new URL(url);
       const history = [];
       const location = { href: where.href, pathname: where.pathname, search: where.search, hash: where.hash, hostname: hostname ?? where.hostname };
@@ -348,7 +355,7 @@ try {
       const ready = [];
       const element = tag => ({ tagName: tag.toUpperCase(), className: '', textContent: '', attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } });
       const body = { appendChild(child) { child.parentNode = body; appended.push(child); return child; }, removeChild(child) { appended.splice(appended.indexOf(child), 1); } };
-      const document = { body: null, readyState: 'loading', createElement: element, addEventListener: (type, fn) => type === 'DOMContentLoaded' && ready.push(fn) };
+      const document = { body: null, readyState: 'loading', referrer, createElement: element, addEventListener: (type, fn) => type === 'DOMContentLoaded' && ready.push(fn) };
       const window = { localStorage: storage, sessionStorage: session };
       const historyApi = { state: null, replaceState(state, title, to) { history.push(to); location.hash = ''; } };
       const run = (script, extra = {}) => new Function('window', 'document', 'location', 'history', 'localStorage', 'sessionStorage', 'console', script)(window, document, location, historyApi, storage, session, extra.console);
@@ -368,55 +375,59 @@ try {
       return { history, hashAfterHead, startedEarly, game, toasts, storage, session, logged, waited: !!window.RIFTBORN_CLASSIC_IMPORT };
     }
     const handOver = async (storage, pathname = '/riftborn/classic/', compression) => (await runPage((await get(LEGACY, pathname)).text, LEGACY + pathname, { storage, compression })).replaced;
+    const CLASSIC_KEYS = [...MIGRATION.extra];
 
-    // A classic player follows an old /classic/ bookmark to a riftborn.us that has never seen them.
+    // A classic player follows an old /classic/ bookmark to a riftborn.us that has never seen them
+    // (trusted: the browser says the link came from the old address).
     const oldDevice = seeded();
     const to = await handOver(oldDevice);
     assert.ok(to.startsWith(LIVE + '/classic/#' + MIGRATION.param + '=z.'));
-    const fresh = await runClassic(to);
+    const fresh = await runClassic(to, { referrer: OLD });
     assert.deepEqual(fresh.history, ['/classic/'], 'The fragment leaves the address bar at once (history.replaceState)');
     assert.equal(fresh.hashAfterHead, '', 'before anything else runs');
     assert.equal(fresh.startedEarly, false, 'The classic game waits for the import (it reads localStorage as it loads)');
     assert.equal(fresh.game.length, 1, 'then starts, once');
     assert.equal(fresh.game[0].src, JSON.parse(/s\.src = ("[^"]+");/.exec(loader)[1]));
     assert.equal(fresh.game[0].type, 'module');
-    for (const key of MOVED) assert.equal(fresh.storage.getItem(key), oldDevice.getItem(key), 'Moved to /classic/: ' + key);
-    for (const key of Object.keys(fresh.storage.snapshot())) assert.ok(MOVED.includes(key) || key === MIGRATION.receive.doneKey, 'Nothing else arrives: ' + key);
+    for (const key of CLASSIC_KEYS) assert.equal(fresh.storage.getItem(key), oldDevice.getItem(key), 'The classic saves move to /classic/: ' + key);
+    assert.deepEqual(Object.keys(fresh.storage.snapshot()).sort(), [...CLASSIC_KEYS, doneKey].sort(), 'Only the classic saves (and the done key): the rebuilt game\'s keys are never written here');
     assert.equal(fresh.storage.getItem('riftborn-profile-v1'), JSON.stringify({ classic: true, best: 42 }), 'The classic profile arrives');
-    assert.equal(fresh.session.getItem(MIGRATION.receive.pendingKey), null, 'Nothing left pending');
+    const waiting = fresh.session.getItem(pendingKey);
+    assert.ok(waiting && waiting.startsWith('z.'), 'The rest waits in this tab for the rebuilt game (its importer applies its own rules)');
     assert.equal(fresh.toasts.length, 1, 'The "moved" toast shows');
     assert.equal(fresh.toasts[0].textContent, toastText);
     assert.equal(fresh.toasts[0].attributes.role, 'status');
     assert.deepEqual(fresh.logged, [], 'Nothing logged');
     // Visiting the old /classic/ address again: harmless, no second toast.
     const before = fresh.storage.snapshot();
-    const again = await runClassic(await handOver(oldDevice), { storage: fresh.storage });
+    const again = await runClassic(await handOver(oldDevice), { storage: fresh.storage, referrer: OLD });
     assert.deepEqual(again.storage.snapshot(), before, 'Importing again changes nothing');
     assert.equal(again.toasts.length, 0, 'The toast shows once');
-    // Then the old root address: the classic profile is already here and stays (no fresh copy was
-    // ever created on riftborn.us/classic/, so nothing was lost).
-    assert.equal(fresh.storage.getItem('riftborn-profile-v1'), oldDevice.getItem('riftborn-profile-v1'));
+    // A full referrer URL from the old address (a looser referrer policy) is the same origin: trusted.
+    const fullReferrer = await runClassic(to, { referrer: 'https://chancrisp.github.io/riftborn/classic/' });
+    assert.equal(fullReferrer.storage.getItem('riftborn-profile-v1'), oldDevice.getItem('riftborn-profile-v1'));
 
-    // A device that already has data on riftborn.us: absent keys are set; present keys keep their
-    // value; rebuilt-game data it already has (the Journal etc.) is left pending in this tab for the
-    // rebuilt game's own merge, never folded in or overwritten here.
+    // A device that already has data on riftborn.us: absent classic saves are set, present ones keep
+    // their value; the rebuilt game's data is left pending in this tab for the rebuilt game's own
+    // rules, never written, folded in or overwritten here.
     const mine = new FakeStorage({
       'riftborn-profile-v1': JSON.stringify({ classic: true, best: 7, newer: true }),
       'riftborn-reborn-profile-v1': JSON.stringify({ v: 3, name: 'Here', bestScore: 5 }),
-      [MIGRATION.receive.doneKey]: '{"at":1,"from":"chancrisp.github.io"}'
+      [doneKey]: '{"at":1,"from":"chancrisp.github.io"}'
     });
-    const mixed = await runClassic(await handOver(seeded()), { storage: mine });
+    const mixed = await runClassic(await handOver(seeded()), { storage: mine, referrer: OLD });
     assert.equal(mine.getItem('riftborn-profile-v1'), JSON.stringify({ classic: true, best: 7, newer: true }), 'A present classic profile keeps its value');
     assert.equal(mine.getItem('riftborn-reborn-profile-v1'), JSON.stringify({ v: 3, name: 'Here', bestScore: 5 }), 'The Journal here is never overwritten');
     assert.equal(mine.getItem('riftborn-migration-profile-v1'), null, 'nor staged by the classic page');
-    assert.equal(mine.getItem('neon-crypt-preferences-v1'), JSON.stringify({ volume: 1 }), 'An absent key is set');
-    assert.equal(mine.getItem('riftborn-reborn-scores-v1'), JSON.stringify([{ score: 1000, name: 'Chan' }]));
-    const pending = mixed.session.getItem(MIGRATION.receive.pendingKey);
+    assert.equal(mine.getItem('neon-crypt-preferences-v1'), JSON.stringify({ volume: 1 }), 'An absent classic save is set');
+    assert.equal(mine.getItem('riftborn-reborn-scores-v1'), null, 'An absent rebuilt-game key is left for the rebuilt game');
+    assert.equal(mine.getItem('riftborn-reborn-score-outbox-v1'), null, 'and the outbox is never written here');
+    const pending = mixed.session.getItem(pendingKey);
     assert.ok(pending && pending.startsWith('z.'), 'The payload waits in this tab for the rebuilt game (its importer merges the Journal)');
     assert.equal(mixed.toasts.length, 0, 'No second toast on a device that already took a hand-over');
     assert.equal(mixed.game.length, 1);
     // A reload before the rebuilt game runs: the pending payload is imported again, harmlessly.
-    const reload = await runClassic(LIVE + '/classic/', { storage: mine, session: mixed.session });
+    const reload = await runClassic(LIVE + '/classic/', { storage: mine, session: mixed.session, referrer: OLD });
     assert.deepEqual(reload.history, [], 'Nothing to take off the address bar');
     assert.equal(reload.game.length, 1);
     assert.equal(mine.getItem('riftborn-profile-v1'), JSON.stringify({ classic: true, best: 7, newer: true }));
@@ -425,25 +436,57 @@ try {
     const classicOnly = new FakeStorage({ 'riftborn-profile-v1': JSON.stringify({ classic: true, best: 42 }), 'neon-crypt-preferences-v1': '{"volume":0}' });
     const plainTo = await handOver(classicOnly, '/riftborn/classic/', 'none');
     assert.ok(plainTo.includes('#' + MIGRATION.param + '=j.'));
-    const plainRun = await runClassic(plainTo);
+    const plainRun = await runClassic(plainTo, { referrer: OLD });
     assert.deepEqual(plainRun.storage.snapshot()['neon-crypt-preferences-v1'], '{"volume":0}');
-    assert.equal(plainRun.session.getItem(MIGRATION.receive.pendingKey), null);
+    assert.equal(plainRun.session.getItem(pendingKey), null);
+
+    // Drive-by hand-over (security review 2.2): anyone can write a riftborn.us/classic/#rb_migrate=
+    // link. Without the old address as referrer this page writes nothing at all (no outbox rows to
+    // post from the victim's browser, no Journal or name, no flags, no classic saves either), shows
+    // no toast and marks nothing done; the payload waits in this tab for the rebuilt game, which asks.
+    const bait = {
+      'riftborn-reborn-score-outbox-v1': JSON.stringify([{ id: 'x', status: 'pending', accountId: null, payload: { name: 'VictimAccount', score: 999999 } }]),
+      'riftborn-reborn-feedback-outbox-v1': JSON.stringify([{ id: 'f', payload: { text: 'spam' } }]),
+      'riftborn-reborn-profile-v1': JSON.stringify({ v: 3, name: 'VictimAccount', bestScore: 999999 }),
+      'riftborn-reborn-preferences-v1': '{"muted":true}',
+      'riftborn-reborn-last-name-v1': '"VictimAccount"',
+      'riftborn-reborn-welcome-v1': '1',
+      [doneKey]: '{"at":1}',
+      'riftborn-profile-v1': JSON.stringify({ classic: true, best: 1e9 }),
+      'neon-crypt-preferences-v1': '{"volume":0}'
+    };
+    const driveBy = 'j.' + Buffer.from(JSON.stringify({ v: 1, from: 'chancrisp.github.io', at: 1, keys: bait })).toString('base64url');
+    for (const referrer of ['', 'https://evil.example/', 'https://chancrisp.github.io.evil.example/', 'http://chancrisp.github.io/', 'https://evil.example/?r=https://chancrisp.github.io/',
+      'https://riftborn.us/classic/', 'null', 'chancrisp.github.io']) {
+      for (const device of [{}, { 'riftborn-reborn-preferences-v1': '{"muted":false}', 'riftborn-reborn-score-outbox-v1': '[]' }]) {
+        const run = await runClassic(LIVE + '/classic/#' + MIGRATION.param + '=' + driveBy, { storage: new FakeStorage(device), referrer });
+        assert.deepEqual(run.storage.snapshot(), device, 'A drive-by writes nothing (referrer ' + JSON.stringify(referrer) + ')');
+        assert.deepEqual(run.history, ['/classic/'], 'The fragment still leaves');
+        assert.deepEqual([run.game.length, run.toasts.length, run.logged.length], [1, 0, 0], 'The game starts; no toast; nothing logged');
+        assert.equal(run.session.getItem(pendingKey), null, 'An untrusted payload is dropped, so a later trusted load in this tab cannot pick it up');
+      }
+    }
+    // The same payload through the old address: still only the classic saves (outboxes, Journal,
+    // flags are the rebuilt game's to take by its rules).
+    const trustedBait = await runClassic(LIVE + '/classic/#' + MIGRATION.param + '=' + driveBy, { referrer: OLD });
+    assert.deepEqual(Object.keys(trustedBait.storage.snapshot()).sort(), [...CLASSIC_KEYS, doneKey].sort(), 'Trusted: the classic saves only');
+    assert.equal(trustedBait.storage.getItem(doneKey) === bait[doneKey], false, 'The done key is this page\'s own, never the payload\'s');
 
     // Malformed payloads, the wrong host, no hand-over at all: the fragment still leaves, nothing is
     // written, nothing is logged, the game starts.
     for (const bad of ['z.@@@', 'z.' + Buffer.from('not deflate').toString('base64url'), 'j.' + Buffer.from('{"v":2,"from":"chancrisp.github.io","keys":{}}').toString('base64url'),
       'j.' + Buffer.from(JSON.stringify({ v: 1, from: 'evil.example', at: 1, keys: { 'riftborn-profile-v1': 'x' } })).toString('base64url'), 'x.abc', '']) {
-      const run = await runClassic(LIVE + '/classic/#' + MIGRATION.param + '=' + bad);
+      const run = await runClassic(LIVE + '/classic/#' + MIGRATION.param + '=' + bad, { referrer: OLD });
       assert.deepEqual(run.history, ['/classic/'], 'The fragment leaves: ' + bad.slice(0, 12));
       assert.deepEqual(run.storage.snapshot(), {}, 'Nothing written: ' + bad.slice(0, 12));
-      assert.equal(run.session.getItem(MIGRATION.receive.pendingKey), null);
+      assert.equal(run.session.getItem(pendingKey), null);
       assert.deepEqual([run.game.length, run.toasts.length, run.logged.length], [1, 0, 0]);
     }
-    const elsewhere = await runClassic(to.replace(LIVE, 'https://chancrisp.github.io'), { hostname: 'chancrisp.github.io' });
+    const elsewhere = await runClassic(to.replace(LIVE, 'https://chancrisp.github.io'), { hostname: 'chancrisp.github.io', referrer: OLD });
     assert.deepEqual(elsewhere.storage.snapshot(), {}, 'Only riftborn.us (and local test servers) accept a hand-over');
     const contractKeys = { 'riftborn-reborn-session-v1': 's', 'riftborn-dev-gate': 'g', 'riftborn-reborn-dev-accounts': 'd', 'some-other-project-key': 'o', 'riftborn-profile-v1': 'p' };
     const forged = 'j.' + Buffer.from(JSON.stringify({ v: 1, from: 'chancrisp.github.io', at: 1, keys: contractKeys })).toString('base64url');
-    const guarded = await runClassic(LIVE + '/classic/#' + MIGRATION.param + '=' + forged);
+    const guarded = await runClassic(LIVE + '/classic/#' + MIGRATION.param + '=' + forged, { referrer: OLD });
     assert.deepEqual(guarded.storage.snapshot()['riftborn-profile-v1'], 'p');
     for (const key of Object.keys(contractKeys).filter(key => key !== 'riftborn-profile-v1')) assert.equal(guarded.storage.getItem(key), null, 'Never accepted: ' + key);
     const plain = await runClassic(LIVE + '/classic/');
@@ -461,11 +504,19 @@ try {
       assert.ok(source.includes('value: 256 * 1024') && source.includes('total: 1024 * 1024') && source.includes('keys: 64'));
       assert.ok(source.includes(`MOVED_TEXT = "${MIGRATION.toast}"`) && source.includes(`MOVED_TOAST_MS = ${MIGRATION.receive.toastMs}`));
       assert.ok(storageSource.includes(`migrationDone: "${MIGRATION.receive.doneKey}"`) && storageSource.includes(`profile: "${MIGRATION.receive.profileKey}"`));
-      for (const key of [...MIGRATION.exclude, ...MIGRATION.extra]) assert.ok(source.includes(`"${key}"`), 'The game knows ' + key);
-      console.log('PASS classic importer limits and keys match the rebuilt game (../riftborn).');
+      // The key lists are the same, entry for entry, and so is the trusted origin.
+      const list = name => {
+        const match = new RegExp(`export const ${name} = Object\\.freeze\\(\\[([^\\]]*)\\]\\)`).exec(source);
+        assert.ok(match, 'The game declares ' + name);
+        return [...match[1].matchAll(/"([^"]+)"/g)].map(m => m[1]);
+      };
+      assert.deepEqual(list('MIGRATION_EXCLUDED'), [...MIGRATION.exclude], 'site.config.mjs MIGRATION.exclude is the game\'s MIGRATION_EXCLUDED');
+      assert.deepEqual(list('MIGRATION_CLASSIC_KEYS'), [...MIGRATION.extra], 'MIGRATION.extra is the game\'s MIGRATION_CLASSIC_KEYS');
+      assert.ok(source.includes(`MIGRATION_FROM = "${MIGRATION.from}"`) && source.includes('MIGRATION_REFERRER_ORIGIN = `https://${MIGRATION_FROM}`'), 'Same trusted origin as the game');
+      console.log('PASS classic importer limits, keys and trusted origin match the rebuilt game (../riftborn).');
     }
   }
-  console.log('PASS classic hand-over: riftborn.us/classic/ imports before the classic game starts, takes the fragment off at once, sets absent keys, keeps present ones, leaves rebuilt-game merges to the rebuilt game, ignores malformed payloads, toasts once, is idempotent.');
+  console.log('PASS classic hand-over: riftborn.us/classic/ imports before the classic game starts, takes the fragment off at once, takes only the classic saves and only from the old address (a drive-by link writes nothing), leaves the rebuilt game\'s keys to the rebuilt game, ignores malformed payloads, toasts once, is idempotent.');
 
   // ---- the receiving side --------------------------------------------------------------------------------
   const liveFiles =[liveRoot.text, ...[...liveRoot.text.matchAll(/src="(js\/[^"]+)"/g)].map(match => fs.readFileSync(path.join(tmp, '_cf', 'live', match[1]), 'utf8'))].join('\n');
