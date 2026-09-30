@@ -34,7 +34,9 @@ const hostLabel = url => new URL(url).host;
  * cannot drift apart unnoticed.
  */
 export const SOCIAL_CARD = Object.freeze({
-  title: 'Riftborn - a PS1-style browser shooter',
+  title: 'Riftborn – a PS1-style browser shooter',
+  // The Riftborn brand colour (rift violet): Discord colours link previews with theme-color.
+  themeColor: '#8F5BFF',
   siteName: 'Riftborn',
   description: 'A PS1-style survival shooter you play in your browser. Blast through five fractured worlds, break the Keepers and take down the Rift Warden. Free, no download.',
   imagePath: '/assets/riftborn-card.jpg',
@@ -57,6 +59,7 @@ export function socialTags(url, card = SOCIAL_CARD) {
   const meta = (attribute, key, content) => `<meta ${attribute}="${key}" content="${escapeHtml(content)}">`;
   return [
     meta('name', 'description', card.description),
+    meta('name', 'theme-color', card.themeColor),
     meta('property', 'og:type', 'website'),
     meta('property', 'og:site_name', card.siteName),
     meta('property', 'og:url', page.href),

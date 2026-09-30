@@ -36,22 +36,23 @@ const one = (html, key) => {
 const canonicals = html => [...html.matchAll(/<link rel="canonical" href="([^"]*)">/g)].map(m => decode(m[1]));
 const cspOf = html => /<meta http-equiv="Content-Security-Policy" content="([^"]+)">/.exec(html)[1];
 const hasCard = html => /(property="og:|name="twitter:)/.test(html);
-const CARD_KEYS = ['description', ...OG, ...TWITTER];
+const CARD_KEYS = ['description', 'theme-color', ...OG, ...TWITTER];
 
 // ---- the tags --------------------------------------------------------------------------------------------
 {
   const tags = socialTags(ORIGIN + '/');
   assert.equal(tags.endsWith('\n'), true);
   for (const key of OG) assert.equal(one(tags, key).attr, 'property', key + ' uses property=');
-  for (const key of [...TWITTER, 'description']) assert.equal(one(tags, key).attr, 'name', key + ' uses name=');
+  for (const key of [...TWITTER, 'description', 'theme-color']) assert.equal(one(tags, key).attr, 'name', key + ' uses name=');
   assert.equal(metas(tags).length, CARD_KEYS.length, 'No stray tags');
   const image = `${ORIGIN}/assets/riftborn-card.jpg?v=${SOCIAL_CARD.imageVersion}`;
   assert.deepEqual(Object.fromEntries(metas(tags).map(m => [m.key, m.content])), {
     description: SOCIAL_CARD.description,
+    'theme-color': '#8F5BFF',
     'og:type': 'website',
     'og:site_name': 'Riftborn',
     'og:url': ORIGIN + '/',
-    'og:title': 'Riftborn - a PS1-style browser shooter',
+    'og:title': 'Riftborn – a PS1-style browser shooter',
     'og:description': SOCIAL_CARD.description,
     'og:image': image,
     'og:image:type': 'image/jpeg',
@@ -59,7 +60,7 @@ const CARD_KEYS = ['description', ...OG, ...TWITTER];
     'og:image:height': '630',
     'og:image:alt': SOCIAL_CARD.imageAlt,
     'twitter:card': 'summary_large_image',
-    'twitter:title': 'Riftborn - a PS1-style browser shooter',
+    'twitter:title': 'Riftborn – a PS1-style browser shooter',
     'twitter:description': SOCIAL_CARD.description,
     'twitter:image': image,
     'twitter:image:alt': SOCIAL_CARD.imageAlt
