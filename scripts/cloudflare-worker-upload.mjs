@@ -1,6 +1,7 @@
 import { build } from 'esbuild';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { AUTH_PUBLIC_BASE, WORKER_ALLOWED_ORIGINS } from '../site.hosts.mjs';
 
 const ACCOUNT_API = 'https://api.cloudflare.com/client/v4/accounts';
 const WORKER_NAME = 'riftborn-leaderboard';
@@ -23,13 +24,27 @@ const SIGNING_KEYS = Object.freeze(['AUTH_SIGNING_KEY', 'AUTH_SIGNING_KEY_PREVIO
 // The accounts per-IP limiter (server/accounts-api.js IP_BINDING_LIMIT): no D1 write per request.
 export const ACCOUNTS_RATE_LIMITER = Object.freeze({ type: 'ratelimit', name: 'ACCOUNTS_RATE_LIMITER', namespace_id: '6184035', simple: { limit: 30, period: 60 } });
 
+/**
+ * The browser origins the Worker answers (CORS): riftborn.us, dev.riftborn.us and the GitHub Pages
+ * origin from site.hosts.mjs, plus any in RIFTBORN_SITE_ORIGIN (optional; one origin or a comma
+ * list, each an exact http(s) origin without a path).
+ */
+export function allowedOrigins(siteOrigin) {
+  const extra = String(siteOrigin ?? '').split(',').map(value => value.trim()).filter(Boolean);
+  for (const value of extra) {
+    let url = null;
+    try { url = new URL(value); } catch { url = null; }
+    if (!url || !/^https?:$/.test(url.protocol) || url.origin !== value) {
+      throw new Error('RIFTBORN_SITE_ORIGIN must be exact http(s) origins without a path (comma-separated).');
+    }
+  }
+  return [...new Set([...WORKER_ALLOWED_ORIGINS, ...extra])];
+}
+
 /** Build multipart metadata for the documented Workers Script Upload API. */
 export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, ...accountSecrets }) {
   if (!/^[0-9a-f-]{36}$/i.test(databaseId || '')) throw new Error('Set CLOUDFLARE_D1_DATABASE_ID to the D1 database UUID.');
-  const origin = new URL(siteOrigin || '');
-  if (!/^https?:$/.test(origin.protocol) || origin.origin !== siteOrigin) {
-    throw new Error('RIFTBORN_SITE_ORIGIN must be an exact http(s) origin without a path.');
-  }
+  const origins = allowedOrigins(siteOrigin);
 
   const metadata = {
     main_module: 'riftborn-worker.mjs',
@@ -41,7 +56,9 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
       // current API bug that rejects this visible D1 ID on script uploads.
       { type: 'inherit', name: 'DB' },
       { type: 'plain_text', name: 'ENVIRONMENT', text: 'production' },
-      { type: 'plain_text', name: 'ALLOWED_ORIGINS', text: origin.origin },
+      { type: 'plain_text', name: 'ALLOWED_ORIGINS', text: origins.join(',') },
+      // Sign-in runs on this host only (server/accounts-api.js publicBase); callback URLs live there.
+      { type: 'plain_text', name: 'AUTH_PUBLIC_BASE', text: AUTH_PUBLIC_BASE },
       {
         type: 'ratelimit',
         name: 'SCORE_RATE_LIMITER',

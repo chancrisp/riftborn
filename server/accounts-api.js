@@ -19,6 +19,7 @@
 // - The "fake" and "fake2" providers exist only in the local harness and are impossible in production.
 import { checkUsername, usernameKey } from './username-rules.js';
 import { GUEST_NAME_INVISIBLE, lateColumns } from './scores-api.js';
+import { AUTH_PUBLIC_BASE, AUTH_RETURN_ORIGINS, AUTH_RETURN_PATHS } from '../site.hosts.mjs';
 
 export const PROVIDERS = Object.freeze(['google', 'discord', 'github']);
 // Local-harness providers (see fakeEnabled): two, so linking a second platform can be tested.
@@ -61,8 +62,11 @@ export const IP_BINDING_LIMIT = Object.freeze({ limit: 30, period: 60 }); // the
 const TOKEN = /^[A-Za-z0-9_-]{43}$/; // 32 random bytes, base64url
 const METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
 const ALLOW_HEADERS = 'Content-Type, Authorization';
-const DEFAULT_RETURN_ORIGINS = 'https://chancrisp.github.io';
-const DEFAULT_RETURN_PATHS = '/riftborn/,/riftborn/dev/';
+// Hosts from site.hosts.mjs: sign-ins return only to https://riftborn.us/ and https://dev.riftborn.us/
+// (accounts never run on github.io). AUTH_RETURN_ORIGINS / AUTH_RETURN_PATHS override them (local harness).
+const DEFAULT_RETURN_ORIGINS = AUTH_RETURN_ORIGINS.join(',');
+const DEFAULT_RETURN_PATHS = AUTH_RETURN_PATHS.join(',');
+const DEFAULT_PUBLIC_BASE = AUTH_PUBLIC_BASE; // https://api.riftborn.us
 // The client challenge (start ?challenge=, /auth/session {verifier}) is required: /start refuses
 // a flow without one, so a login code is useless without the verifier held by the page (tab)
 // that started the sign-in. A code lifted from someone else's flow can never be redeemed, and an
@@ -134,7 +138,24 @@ export function checkReturnUrl(raw, env) {
 
 function defaultReturn(env) {
   const { origins, paths } = returnAllowList(env);
-  return (origins[0] || DEFAULT_RETURN_ORIGINS) + (paths[0] || '/riftborn/');
+  return (origins[0] || AUTH_RETURN_ORIGINS[0]) + (paths[0] || '/');
+}
+
+// Every OAuth round trip runs on one public host: /auth/:provider/start sets the __Host- cookie there
+// and every redirect_uri points there, so the cookie always comes back to the host that set it.
+// AUTH_PUBLIC_BASE (default https://api.riftborn.us in production); a start or callback reached on
+// any other host (the workers.dev address) is sent there, same path and query. Without the variable
+// a non-production Worker (the local harness) uses the host it is reached on.
+export function publicBase(env) {
+  const raw = typeof env.AUTH_PUBLIC_BASE === 'string' ? env.AUTH_PUBLIC_BASE.trim().replace(/\/+$/, '') : '';
+  if (raw) {
+    try {
+      const url = new URL(raw);
+      const secure = url.protocol === 'https:' || (url.protocol === 'http:' && !isProduction(env) && LOOPBACK.has(url.hostname));
+      if (secure && url.origin === raw) return url.origin;
+    } catch { /* invalid: fall through to the default */ }
+  }
+  return isProduction(env) ? DEFAULT_PUBLIC_BASE : null;
 }
 
 // Same rule as server/scores-api.js and server/feedback-api.js.
@@ -704,7 +725,7 @@ const OAUTH = Object.freeze({
 const USER_AGENT = 'riftborn-accounts';
 const PROVIDER_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
-const callbackUrl = (request, provider) => `${new URL(request.url).origin}/auth/${provider}/callback`;
+const callbackUrl = (request, env, provider) => `${publicBase(env) || new URL(request.url).origin}/auth/${provider}/callback`;
 const timeout = () => (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined);
 
 class ProviderError extends Error {}
@@ -835,7 +856,7 @@ async function oauthStart(request, env, db, keys, provider, now) {
   const target = new URL(OAUTH[provider].authorize);
   const params = {
     client_id: creds.id,
-    redirect_uri: callbackUrl(request, provider),
+    redirect_uri: callbackUrl(request, env, provider),
     response_type: 'code',
     state,
     code_challenge: await sha256(verifier),
@@ -867,7 +888,7 @@ async function oauthCallback(request, env, db, keys, provider, now) {
     const creds = providerCredentials(env, provider);
     if (!creds) return errorToGame(returnUrl, 'provider_unavailable');
     try {
-      platformId = await providerUserId(provider, creds, code, state.verifier, callbackUrl(request, provider), now);
+      platformId = await providerUserId(provider, creds, code, state.verifier, callbackUrl(request, env, provider), now);
     } catch (error) {
       console.error('Accounts: sign-in with ' + provider + ' failed', error instanceof ProviderError ? error.message : (error?.name || 'error'));
       return errorToGame(returnUrl, 'provider_error');
@@ -1105,6 +1126,9 @@ async function navigation(request, env, ctx, route, url, now) {
   const known = PROVIDERS.includes(route.provider) || (FAKE_PROVIDERS.includes(route.provider) && fakeEnabled(env, url));
   if (!known) return json({ error: 'not_found' }, 404);
   if (request.method !== 'GET') return json({ error: 'method_not_allowed' }, 405, null, { Allow: 'GET' });
+  // One sign-in host (see publicBase): a start or callback that arrives elsewhere goes there first.
+  const base = publicBase(env);
+  if (base && url.origin !== base) return redirect(base + url.pathname + url.search);
   if (!keys || !env.DB) {
     if (route.name === 'start') return json({ error: 'provider_unavailable' }, 503);
     return errorToGame(defaultReturn(env), 'provider_unavailable');

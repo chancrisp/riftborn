@@ -163,18 +163,22 @@ console.log('PASS accounts config: provider list from secrets, 503 provider_unav
 
 // ---- return URL allow-list -------------------------------------------------------------------
 {
+  // Production defaults (site.config.mjs): the live game and the dev build, each at its root only.
   const prod = { ENVIRONMENT: 'production' };
-  for (const good of ['https://chancrisp.github.io/riftborn/', 'https://chancrisp.github.io/riftborn/dev/', 'https://chancrisp.github.io/riftborn/index.html',
-    'https://chancrisp.github.io/riftborn/dev/index.html', 'https://chancrisp.github.io/riftborn/?practice=1']) {
+  for (const good of ['https://riftborn.us/', 'https://dev.riftborn.us/', 'https://riftborn.us/index.html',
+    'https://dev.riftborn.us/index.html', 'https://riftborn.us/?practice=1']) {
     assert.equal(checkReturnUrl(good, prod), good, 'Allowed: ' + good);
   }
-  assert.equal(checkReturnUrl('https://chancrisp.github.io/riftborn/#rb_login=stale', prod), 'https://chancrisp.github.io/riftborn/', 'An old fragment is dropped');
-  assert.equal(checkReturnUrl('https://chancrisp.github.io:443/riftborn/', prod), 'https://chancrisp.github.io/riftborn/');
-  for (const bad of ['https://evil.example/riftborn/', 'https://chancrisp.github.io.evil.example/riftborn/', 'http://chancrisp.github.io/riftborn/',
-    'https://chancrisp.github.io/riftborn', 'https://chancrisp.github.io/', 'https://chancrisp.github.io/other/', 'https://chancrisp.github.io/riftborn/../other/',
-    'https://chancrisp.github.io/riftborn/dev/x.html', 'https://chancrisp.github.io/riftborn/%2e%2e/', 'https://user:pw@chancrisp.github.io/riftborn/',
-    'https://chancrisp.github.io/riftborn/?a=<script>', 'https://chancrisp.github.io/riftborn/?a="x"', 'javascript:alert(1)', '//evil.example/riftborn/',
-    '/riftborn/', '', 'https://chancrisp.github.io/riftborn/?' + 'a'.repeat(600), 'http://localhost:8700/']) {
+  assert.equal(checkReturnUrl('https://riftborn.us/#rb_login=stale', prod), 'https://riftborn.us/', 'An old fragment is dropped');
+  assert.equal(checkReturnUrl('https://riftborn.us:443/', prod), 'https://riftborn.us/');
+  assert.equal(checkReturnUrl('https://riftborn.us', prod), 'https://riftborn.us/', 'An empty path is the root');
+  assert.equal(checkReturnUrl('https://riftborn.us/%2e%2e/', prod), 'https://riftborn.us/', 'Dot segments resolve (to the root here)');
+  for (const bad of ['https://evil.example/', 'https://riftborn.us.evil.example/', 'http://riftborn.us/', 'https://www.riftborn.us/', 'https://api.riftborn.us/',
+    'https://riftborn.us/classic/', 'https://riftborn.us/privacy/', 'https://riftborn.us/other/', 'https://riftborn.us/../other/', 'https://dev.riftborn.us/riftborn/dev/',
+    'https://riftborn.us/x.html', 'https://riftborn.us/%2e%2e/other/', 'https://user:pw@riftborn.us/', 'https://riftborn.us/?a=<script>', 'https://riftborn.us/?a="x"',
+    // Accounts never run on github.io: its old game paths are refused.
+    'https://chancrisp.github.io/riftborn/', 'https://chancrisp.github.io/riftborn/dev/', 'https://chancrisp.github.io/',
+    'javascript:alert(1)', '//evil.example/', '/', '', 'https://riftborn.us/?' + 'a'.repeat(600), 'http://localhost:8700/']) {
     assert.equal(checkReturnUrl(bad, prod), null, 'Refused: ' + bad);
   }
   for (const bad of ['https://evil.example/', 'http://localhost:8701/', 'http://localhost:8700/other/', 'http://localhost:8700.evil.example/', 'javascript:alert(1)']) {
@@ -639,13 +643,42 @@ console.log('PASS single-use values: login codes, states, signup tokens and link
   // Cookie: first-party on the Worker origin, HttpOnly, Lax, 10 min; __Host- + Secure over https.
   let r = await nav(startUrl(), { jar: newJar() });
   assert.match(r.headers.get('Set-Cookie'), /^rb_oauth=[A-Za-z0-9_-]{43}; Path=\/; Max-Age=600; HttpOnly; SameSite=Lax$/);
-  const https = await nav('/auth/google/start?challenge=' + CH.challenge + '&return=' + encodeURIComponent('https://chancrisp.github.io/riftborn/'), {
-    base: 'https://riftborn-leaderboard.chanmanc10.workers.dev', jar: newJar(),
-    e: { ...withProviders, ENVIRONMENT: 'production', AUTH_RETURN_ORIGINS: undefined, AUTH_RETURN_PATHS: undefined, FAKE_OAUTH: undefined }
-  });
+  // Production: one public sign-in host (AUTH_PUBLIC_BASE, default https://api.riftborn.us). A start
+  // or callback reached on the workers.dev address is sent there (same path and query, nothing set
+  // up, no cookie), so the __Host- cookie is always set and read on the same host.
+  const prodEnv = { ...withProviders, ENVIRONMENT: 'production', AUTH_RETURN_ORIGINS: undefined, AUTH_RETURN_PATHS: undefined, FAKE_OAUTH: undefined };
+  const WORKERS_DEV = 'https://riftborn-leaderboard.chanmanc10.workers.dev';
+  const googleStart = '/auth/google/start?challenge=' + CH.challenge + '&return=' + encodeURIComponent('https://riftborn.us/');
+  const pendingBefore = one("SELECT COUNT(*) AS n FROM auth_pending WHERE kind = 'state'").n;
+  const hop = await nav(googleStart, { base: WORKERS_DEV, jar: newJar(), e: prodEnv });
+  assert.equal(hop.status, 302);
+  assert.equal(hop.headers.get('Location'), 'https://api.riftborn.us' + googleStart, 'workers.dev start -> the same start on api.riftborn.us');
+  assert.equal(hop.headers.get('Set-Cookie'), null, 'No cookie on the wrong host');
+  assert.equal(hop.headers.get('Cache-Control'), 'no-store');
+  assert.equal(one("SELECT COUNT(*) AS n FROM auth_pending WHERE kind = 'state'").n, pendingBefore, 'and no sign-in state is made there');
+  const hopBack = await nav('/auth/google/callback?state=s&code=c', { base: WORKERS_DEV, jar: newJar(), e: prodEnv });
+  assert.equal(hopBack.headers.get('Location'), 'https://api.riftborn.us/auth/google/callback?state=s&code=c', 'workers.dev callback -> api.riftborn.us');
+  assert.equal((await nav(googleStart, { base: 'https://api.riftborn.us.evil.example', jar: newJar(), e: prodEnv })).headers.get('Location'), 'https://api.riftborn.us' + googleStart);
+  const https = await nav(googleStart, { base: 'https://api.riftborn.us', jar: newJar(), e: prodEnv });
   assert.equal(https.status, 302);
   assert.match(https.headers.get('Set-Cookie'), /^__Host-rb_oauth=[A-Za-z0-9_-]{43}; Path=\/; Max-Age=600; HttpOnly; SameSite=Lax; Secure$/);
-  assert.equal(new URL(https.headers.get('Location')).searchParams.get('redirect_uri'), 'https://riftborn-leaderboard.chanmanc10.workers.dev/auth/google/callback');
+  assert.equal(new URL(https.headers.get('Location')).origin, 'https://accounts.google.com');
+  assert.equal(new URL(https.headers.get('Location')).searchParams.get('redirect_uri'), 'https://api.riftborn.us/auth/google/callback');
+  // AUTH_PUBLIC_BASE moves the host; an invalid value keeps the default; a GitHub return is refused.
+  const moved = await nav(googleStart, { base: 'https://api.riftborn.us', jar: newJar(), e: { ...prodEnv, AUTH_PUBLIC_BASE: 'https://auth.riftborn.us' } });
+  assert.equal(moved.headers.get('Location'), 'https://auth.riftborn.us' + googleStart);
+  const invalid = await nav(googleStart, { base: 'https://api.riftborn.us', jar: newJar(), e: { ...prodEnv, AUTH_PUBLIC_BASE: 'http://api.riftborn.us' } });
+  assert.equal(new URL(invalid.headers.get('Location')).searchParams.get('redirect_uri'), 'https://api.riftborn.us/auth/google/callback', 'Never plain http in production');
+  const legacy = await nav('/auth/google/start?challenge=' + CH.challenge + '&return=' + encodeURIComponent('https://chancrisp.github.io/riftborn/'), { base: 'https://api.riftborn.us', jar: newJar(), e: prodEnv });
+  assert.equal(legacy.status, 400);
+  assert.equal(legacy.data.error, 'invalid_return', 'Accounts never return to github.io');
+  // The API routes are cookie-free and stay reachable on either host (old clients, and a redirect
+  // would break the CORS request).
+  assert.equal((await call('/api/auth/providers', { base: WORKERS_DEV, e: prodEnv, origin: 'https://riftborn.us' })).status, 403, 'CORS still applies (no ALLOWED_ORIGINS in this env)');
+  assert.deepEqual((await call('/api/auth/providers', { base: WORKERS_DEV, e: { ...prodEnv, ALLOWED_ORIGINS: 'https://riftborn.us' }, origin: 'https://riftborn.us' })).data, { providers: ['google', 'discord', 'github'] });
+  // The local harness (non-production, no AUTH_PUBLIC_BASE) keeps using the host it is reached on.
+  const local = await nav('/auth/google/start?challenge=' + CH.challenge + '&return=' + encodeURIComponent(RETURN), { jar: newJar(), e: withProviders });
+  assert.equal(new URL(local.headers.get('Location')).searchParams.get('redirect_uri'), BASE + '/auth/google/callback');
 
   // Login CSRF: the attacker's callback URL, opened in the victim's browser, is refused.
   const attacker = newJar(), victim = newJar();

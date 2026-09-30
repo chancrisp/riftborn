@@ -1,4 +1,13 @@
-name: Build and deploy Riftborn to GitHub Pages
+name: Build and deploy Riftborn to GitHub Pages and Cloudflare Pages
+
+# One build (scripts/build-pages.mjs, hosts and switches in site.config.mjs), two hosts:
+#   GitHub Pages      https://chancrisp.github.io/riftborn/  (the game until launch; afterwards
+#                     handoff pages that move saved data to riftborn.us, plus the feedback inbox)
+#   Cloudflare Pages  https://riftborn.us/ (project "riftborn") and https://dev.riftborn.us/
+#                     (project "riftborn-dev"); only while the repository variable CF_PAGES_ENABLED is 1
+# Launch = LAUNCHED = true in site.config.mjs, pushed to main. Then the github.io handoff is only
+# published after riftborn.us has the game and is checked to serve it over its real address (never
+# a handoff to a site that is not there yet). Only main ever deploys to Cloudflare production.
 
 on:
   push:
@@ -17,6 +26,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      launched: ${{ steps.site.outputs.launched }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,19 +35,73 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - id: site
+        run: node scripts/site-config.mjs >> "$GITHUB_OUTPUT"
       - run: npm run build:pages
         env:
           RIFTBORN_SCORE_API_BASE: ${{ vars.RIFTBORN_SCORE_API_BASE || 'https://riftborn-leaderboard.chanmanc10.workers.dev' }}
+          CF_PAGES_ENABLED: ${{ vars.CF_PAGES_ENABLED }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+      - if: vars.CF_PAGES_ENABLED == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudflare-pages
+          path: _cf
+          if-no-files-found: error
+          retention-days: 1
+
+  cloudflare:
+    # Production (riftborn.us, dev.riftborn.us) only ever gets main: a manual run on another branch
+    # skips this job (and, after launch, the github.io handoff that waits for it).
+    if: vars.CF_PAGES_ENABLED == '1' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: cloudflare-production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tools/wrangler/package-lock.json
+      # Wrangler runs with the production token: exact-pinned by the tools/wrangler lockfile, never
+      # fetched at deploy time, no install scripts.
+      - name: Install the pinned Wrangler
+        run: npm ci --prefix tools/wrangler --ignore-scripts --no-audit --no-fund
+      - uses: actions/download-artifact@v4
+        with:
+          name: cloudflare-pages
+          path: _cf
+      - name: Deploy riftborn.us and dev.riftborn.us with Wrangler
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: node scripts/cloudflare-pages-deploy.mjs
+      # After launch, github.io turns into hand-over pages only if riftborn.us and dev.riftborn.us
+      # really serve this deploy (custom domain, DNS and certificate included); otherwise this job
+      # fails and the github.io deploy below is skipped.
+      - name: Check riftborn.us and dev.riftborn.us serve this deploy
+        if: needs.build.outputs.launched == 'true'
+        run: node scripts/cloudflare-pages-verify.mjs
 
   deploy:
+    # Before launch a Cloudflare failure (or the job being off) never holds up github.io. After
+    # launch github.io changes only when the Cloudflare deploy succeeded and riftborn.us was
+    # checked to serve it.
+    needs: [build, cloudflare]
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.cloudflare.result == 'success' || (needs.build.outputs.launched != 'true' && needs.cloudflare.result != 'cancelled')) }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
-    needs: build
+    permissions:
+      pages: write
+      id-token: write
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
