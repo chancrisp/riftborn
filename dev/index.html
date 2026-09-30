@@ -10,20 +10,20 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23161c42'/%3E%3Cpath d='m18 2-12 17h9l-2 11 13-18h-9z' fill='%238effd1'/%3E%3C/svg%3E">
 <link rel="preload" href="assets/ps1-atlas.png" as="image" crossorigin="anonymous">
 <link rel="preload" href="assets/crypt-pixel.ttf" as="font" type="font/ttf" crossorigin>
-<link rel="stylesheet" href="css/riftborn.f321a09222.css">
+<link rel="stylesheet" href="css/riftborn.50625fef74.css">
 </head>
 <body class="menu-open">
 <canvas id="game" aria-label="3D survival arena"></canvas>
 <div id="deathTint" aria-hidden="true"></div>
-<div id="modeBadge" role="status"></div>
+<div id="topTags"><span id="clock">00:00</span><span id="hostiles">0 HOSTILES</span><div id="modeBadge" role="status"></div></div>
 <div id="hitflash" aria-hidden="true"></div>
 <div id="buildCue" aria-live="off"></div>
 <div id="crosshair" aria-hidden="true"><i></i></div>
 
 <header>
   <div class="wordmark">RIFTBORN<img id="profileBadge" class="hidden" src="assets/death-skull.png" width="24" height="24" alt="Trial veteran badge"><span id="earnedBadge"></span></div>
-  <div class="world-state"><b id="sector">SECTOR 01</b><span id="clock">00:00</span><span id="hostiles">0 HOSTILES</span></div>
-  <div class="actions"><button id="sound" type="button" aria-label="Toggle sound">SOUND ON</button><button id="pause" type="button" aria-label="Pause game">PAUSE</button></div>
+  <div class="world-state"><b id="sector">SECTOR 01</b></div>
+  <div class="actions" id="hudActions"><button id="sound" type="button" aria-label="Toggle sound">SOUND ON</button><button id="pause" type="button" aria-label="Pause game">PAUSE</button></div>
 </header>
 
 <div id="waveToast" role="status"></div>
@@ -188,7 +188,7 @@
 (function () {
   var HASH = "488aeb0b98cf7219c182964510cbc8880c513e0352c7e792f714ae1ff215fd34";
   var KEY = "riftborn-dev-gate";
-  var GAME = "js/riftborn.460d43bbf7.js";
+  var GAME = "js/riftborn.0f9611ede6.js";
   var gate = document.getElementById("devGate");
   var form = document.getElementById("devGateForm");
   var input = document.getElementById("devGatePass");
