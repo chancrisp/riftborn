@@ -8,6 +8,8 @@ on:
       - 'cloudflare/**'
       - 'server/scores-api.js'
       - 'server/feedback-api.js'
+      - 'server/accounts-api.js'
+      - 'server/username-rules.js'
       - 'scripts/cloudflare-worker-upload.mjs'
       - 'package.json'
       - 'package-lock.json'
@@ -36,4 +38,14 @@ jobs:
           # Optional: the feedback inbox key and a Discord webhook for new-feedback pings.
           FEEDBACK_ADMIN_KEY: ${{ secrets.FEEDBACK_ADMIN_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # Optional (Riftborn accounts, v2.2): OAuth app credentials per platform and the HMAC
+          # signing key (32+ random bytes). A platform missing its ID or secret stays unavailable.
+          # GitHub forbids secret names starting with GITHUB_, hence GH_CLIENT_* for the GitHub app.
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+          DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
+          GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
+          AUTH_SIGNING_KEY: ${{ secrets.AUTH_SIGNING_KEY }}
         run: node scripts/cloudflare-worker-upload.mjs

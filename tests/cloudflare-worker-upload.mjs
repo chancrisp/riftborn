@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 const uploadModule = await import('../scripts/cloudflare-worker-upload.mjs').catch(() => null);
 assert.ok(uploadModule, 'Worker upload helper must exist');
@@ -47,4 +48,33 @@ assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\
 assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\/feedback/, 'The bundled Worker serves the feedback route');
 assert.ok(JSON.parse(await uploadRequest.body.get('metadata').text()).bindings.some(binding => binding.name === 'FEEDBACK_ADMIN_KEY' && binding.text === 'deploy-key'));
 
-console.log('PASS Cloudflare Worker upload: entry module, D1, production origin, and score rate limit, feedback rate limit and optional feedback secrets.');
+assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\/account/, 'The bundled Worker serves the accounts routes');
+
+// Riftborn accounts (v2.2): OAuth credentials and the signing key are secrets, bound only when set.
+assert.ok(!metadata.bindings.some(binding => binding.name === 'FAKE_OAUTH'), 'The fake provider is never enabled on the deployed Worker');
+const accountSecrets = {
+  googleClientId: 'g-id', googleClientSecret: 'g-secret', discordClientId: 'd-id', discordClientSecret: 'd-secret',
+  githubClientId: 'h-id', githubClientSecret: ' h-secret ', authSigningKey: 'k'.repeat(43)
+};
+const withAccounts = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, ...accountSecrets }).get('metadata').text());
+assert.deepEqual(withAccounts.bindings.filter(binding => binding.type === 'secret_text').map(binding => [binding.name, binding.text]), [
+  ['GOOGLE_CLIENT_ID', 'g-id'], ['GOOGLE_CLIENT_SECRET', 'g-secret'], ['DISCORD_CLIENT_ID', 'd-id'], ['DISCORD_CLIENT_SECRET', 'd-secret'],
+  ['GITHUB_CLIENT_ID', 'h-id'], ['GITHUB_CLIENT_SECRET', 'h-secret'], ['AUTH_SIGNING_KEY', 'k'.repeat(43)]
+]);
+assert.ok(withAccounts.bindings.some(binding => binding.type === 'plain_text' && binding.name === 'ENVIRONMENT' && binding.text === 'production'), 'Accounts deploy as production');
+assert.ok(!withAccounts.bindings.some(binding => binding.name === 'FAKE_OAUTH'));
+const partial = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, googleClientId: 'g-id', discordClientSecret: '  ' }).get('metadata').text());
+assert.deepEqual(partial.bindings.filter(binding => binding.type === 'secret_text').map(binding => binding.name), ['GOOGLE_CLIENT_ID'], 'Unset or blank secrets are not bound');
+assert.throws(() => uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, authSigningKey: 'too-short' }), /AUTH_SIGNING_KEY/);
+// GitHub Actions forbids secret names starting with GITHUB_: the GitHub app arrives as GH_CLIENT_*.
+assert.deepEqual(uploadModule.ACCOUNT_SECRETS.map(([, binding, envName]) => [binding, envName]).filter(([binding]) => binding.startsWith('GITHUB_')),
+  [['GITHUB_CLIENT_ID', 'GH_CLIENT_ID'], ['GITHUB_CLIENT_SECRET', 'GH_CLIENT_SECRET']]);
+assert.ok(uploadModule.ACCOUNT_SECRETS.every(([, , envName]) => !envName.startsWith('GITHUB_')));
+const workflow = fs.readFileSync('.github/workflows/cloudflare-worker.yml', 'utf8');
+for (const [, , envName] of uploadModule.ACCOUNT_SECRETS) assert.ok(workflow.includes(`${envName}: \${{ secrets.${envName} }}`), 'The workflow passes ' + envName);
+for (const path of ['server/accounts-api.js', 'server/username-rules.js']) assert.ok(workflow.includes(`- '${path}'`), 'The workflow redeploys on ' + path);
+const wrangler = fs.readFileSync('cloudflare/wrangler.jsonc', 'utf8');
+assert.match(wrangler, /"ENVIRONMENT":\s*"production"/, 'wrangler.jsonc also deploys as production');
+assert.ok(!/FAKE_OAUTH/.test(wrangler + workflow), 'FAKE_OAUTH never reaches a deployed configuration');
+
+console.log('PASS Cloudflare Worker upload: entry module, D1, production origin, and score rate limit, feedback rate limit and optional feedback secrets, optional account secrets.');

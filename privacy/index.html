@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#15151e">
+<title>Riftborn · Privacy policy</title>
+<meta name="description" content="What Riftborn stores when you play as a guest or sign in with a Riftborn account, what it never stores, and how to delete your data.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23161c42'/%3E%3Cpath d='m18 2-12 17h9l-2 11 13-18h-9z' fill='%238effd1'/%3E%3C/svg%3E">
+<style>
+/* The game's pixel face for headings only (same-origin file; falls back to a system monospace).
+   Body text stays in a plain system font so a long policy is easy to read. */
+@font-face {
+  font-family: "Crypt Pixel";
+  src: url("../assets/crypt-pixel.ttf") format("truetype");
+  font-display: swap;
+}
+:root {
+  --ink: #15151e;
+  --panel: #23262b;
+  --field: #11151b;
+  --rule: #565b51;
+  --white: #ded6be;
+  --muted: #a5a394;
+  --yellow: #d4bc78;
+  --mint: #b8c49a;
+  --pixel: "Crypt Pixel", "Courier New", monospace;
+  --text: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body {
+  margin: 0;
+  padding: 0 max(16px, env(safe-area-inset-right)) 48px max(16px, env(safe-area-inset-left));
+  background: var(--ink);
+  color: var(--white);
+  font: 400 17px/1.65 var(--text);
+}
+main { max-width: 720px; margin: 0 auto; }
+header { padding: 32px 0 8px; }
+.back {
+  display: inline-block;
+  margin-bottom: 18px;
+  font: 400 14px/1.2 var(--pixel);
+  letter-spacing: .08em;
+  color: var(--muted);
+  text-decoration: none;
+}
+.back:hover, .back:focus-visible { color: var(--yellow); }
+h1, h2 {
+  font-family: var(--pixel);
+  font-weight: 400;
+  text-shadow: 2px 2px #000;
+  overflow-wrap: anywhere;
+}
+h1 { margin: 0 0 6px; font-size: clamp(30px, 8vw, 46px); line-height: 1.1; letter-spacing: -1px; }
+h1 span { color: var(--yellow); }
+.subtitle { margin: 0; font: 400 15px/1.4 var(--pixel); letter-spacing: .12em; color: var(--muted); }
+.updated { margin: 6px 0 0; color: var(--muted); font-size: 15px; }
+h2 { margin: 36px 0 10px; font-size: 22px; line-height: 1.25; letter-spacing: .04em; color: var(--yellow); }
+p, ul { margin: 0 0 14px; }
+ul { padding-left: 1.25em; }
+li { margin-bottom: 6px; }
+strong { color: #f0e8cc; font-weight: 600; }
+a { color: var(--mint); text-underline-offset: 3px; }
+a:hover, a:focus-visible { color: var(--yellow); }
+a:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+code {
+  padding: 1px 5px;
+  font: 400 .92em ui-monospace, "Cascadia Mono", Consolas, monospace;
+  background: var(--field);
+  border: 1px solid var(--rule);
+}
+.short {
+  margin: 22px 0 0;
+  padding: 16px 18px 6px;
+  background: var(--panel);
+  border: 2px solid var(--rule);
+  border-color: #8e9180 #111318 #111318 #8e9180;
+  box-shadow: 3px 3px #000;
+}
+.short h2 { margin-top: 0; }
+footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 15px; }
+@media (max-width: 480px) {
+  body { font-size: 16px; }
+  header { padding-top: 20px; }
+  h2 { font-size: 20px; }
+}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <a class="back" href="../">&lsaquo; BACK TO RIFTBORN</a>
+  <h1>RIFT<span>BORN</span></h1>
+  <p class="subtitle">PRIVACY POLICY</p>
+  <p class="updated">Last updated 2026-09-30</p>
+</header>
+
+<section class="short" aria-labelledby="short">
+  <h2 id="short">The short version</h2>
+  <ul>
+    <li><strong>Guests</strong> share nothing with the server except the scores they choose to post and any feedback they choose to send.</li>
+    <li><strong>A Riftborn account</strong> is a username you pick, plus a scrambled form of your Google, Discord or GitHub account number, plus your saved game progress.</li>
+    <li>We <strong>never</strong> store your email, real name, profile picture or a password. We do not store IP addresses.</li>
+    <li>No ads, no analytics, no trackers. Your data is never sold or shared.</li>
+    <li>You can delete everything yourself: <strong>Settings &gt; Account &gt; Delete account</strong>.</li>
+  </ul>
+</section>
+
+<h2>Who this covers</h2>
+<p>Riftborn is a small independent browser game, played at <a href="https://chancrisp.github.io/riftborn/">chancrisp.github.io/riftborn</a>. This page explains what the game and its online service (the leaderboard and Riftborn accounts) keep about you. It covers the live game and the test build at <code>/riftborn/dev/</code>.</p>
+
+<h2>What is stored if you have a Riftborn account</h2>
+<p>A &ldquo;Riftborn account&rdquo; means you signed in with Google, Discord or GitHub and then chose a username. We store:</p>
+<ul>
+  <li><strong>Your Riftborn username.</strong> You choose it yourself. We never copy a name from Google, Discord or GitHub. It is public: it appears on the leaderboard, so do not use your real name if you would rather not.</li>
+  <li><strong>For each platform you link, a scrambled, one-way form of that platform&rsquo;s account number.</strong> During sign-in the platform tells us your account number. We run it through a secret-keyed one-way scramble (a keyed hash) and keep only the result. It lets us recognise you when you come back, and it cannot be turned back into your real account number.</li>
+  <li><strong>Your saved game progress:</strong> cosmetics, characters and palettes, Journal, records and synced preferences. The server keeps this as a single block of data and does not read it.</li>
+  <li><strong>Leaderboard scores:</strong> your name and run stats (score, stage, kills, time, ruleset, game version and the date). Scores you post while signed in are attached to your account, so if you change your username your past rows show the new one.</li>
+  <li><strong>Sign-in session records</strong> for each device you are signed in on: a scrambled form of a random sign-in token, and the dates it was created, last used and expires (180 days after you last use it). No device details are recorded. Signing out ends the session.</li>
+  <li><strong>Dates</strong> your account was created and your username last changed (usernames can change once every 30 days).</li>
+</ul>
+<p>Signing in creates a few short-lived working records (for example, while you are choosing a username). They expire within minutes and are deleted when used or cleaned up soon after.</p>
+
+<h2>What is not stored</h2>
+<ul>
+  <li>No email address, real name, profile picture or avatar, from any platform.</li>
+  <li>No password. We never see your Google, Discord or GitHub password; you type it only on that platform&rsquo;s own page.</li>
+  <li>No contacts, friends, servers, repositories or anything else from your platform account.</li>
+  <li>No IP addresses. Like every website, our server sees your IP address while it answers a request. We use it only to slow down abuse: the server keeps a scrambled, one-way version of it as a counter key, never the address itself.</li>
+  <li><strong>Guests:</strong> nothing on the server except scores they post (a name they typed and the run stats) and any feedback they send. Checking whether a name is free sends that typed name to the server; it is not kept.</li>
+</ul>
+
+<h2>The sign-in platforms and what we ask for</h2>
+<p>When you press <em>Continue with</em> a platform, your browser goes to that platform&rsquo;s own sign-in page, and its privacy policy applies to that step. We ask for the smallest permission each one offers, and read only your account number:</p>
+<ul>
+  <li><strong>Google:</strong> basic sign-in identity only (the <code>openid</code> permission). No email, name or profile.</li>
+  <li><strong>Discord:</strong> the <code>identify</code> permission, the smallest Discord offers for sign-in. Discord lets an app with it see basic account details, but our server reads only your numeric user ID and discards the rest. No email, servers or friends.</li>
+  <li><strong>GitHub:</strong> no extra permissions, so public profile access only. We read only your numeric user ID. No email, repositories or private data.</li>
+</ul>
+<p>The platform&rsquo;s temporary access code is used once during sign-in and is not stored. You can remove Riftborn&rsquo;s access at any time in your platform&rsquo;s own settings (Google Account security, Discord Authorized Apps, GitHub Applications). That stops future sign-ins with that platform but does not delete your Riftborn data; use Delete account for that.</p>
+
+<h2>How the data is used</h2>
+<p>Only to sign you in, keep your progress and cosmetics with your Riftborn account, and show your username on the leaderboard. It is never sold, never shared with anyone else, and never used for advertising or profiling. There are no analytics or tracking scripts in the game or on this page.</p>
+<p>The game is hosted on GitHub Pages, and the leaderboard and accounts run on Cloudflare (a Worker and its database). Those services handle your requests in the normal way and may keep their own standard logs under their own policies.</p>
+
+<h2>Feedback messages</h2>
+<p>The game&rsquo;s <strong>FEEDBACK</strong> form is optional and sends nothing until you press SEND. A message includes what you write, a category, an optional star rating and an optional <strong>contact</strong> line (Discord or email, only if you type one and want a reply). To help fix bugs it also adds basic technical context: game version, browser and operating system name, screen size, whether you used touch, mouse or a controller, average frame rate, a few game settings and a short summary of your last run. The form shows the exact data under &ldquo;WHAT GETS SENT&rdquo;. Your IP address is not stored, and feedback is not linked to your account. Please do not put private details in the message text.</p>
+
+<h2>Storage on your own device</h2>
+<p>Riftborn uses your browser&rsquo;s local storage, not cookies. It holds: your settings, your saved progress on this device, scores and boards saved on this device, scores or feedback waiting to be sent, the last name you used, your sign-in token if you are signed in, and small flags such as which intro or notes you have seen. It stays on your device until you clear this site&rsquo;s data in your browser settings.</p>
+
+<h2>Deleting your data</h2>
+<ul>
+  <li><strong>Riftborn account:</strong> Settings &gt; Account &gt; Delete account. You confirm by typing your username. This removes the account, its linked platform records, its sign-in sessions and its saved progress. Your past leaderboard rows stay but are cut loose from you and renamed to an anonymous guest name.</li>
+  <li><strong>Unlink a platform:</strong> Settings &gt; Account, if you have more than one linked.</li>
+  <li><strong>Anything else</strong> (a guest score, a feedback message, or if you cannot get into the game): ask through the in-game FEEDBACK form and say what to remove.</li>
+  <li><strong>On your device:</strong> clear this site&rsquo;s data in your browser settings.</li>
+</ul>
+
+<h2>Children</h2>
+<p>Riftborn is not aimed at children under 13. Google, Discord and GitHub set their own minimum ages for their accounts. Guests provide no personal information. If you think a child has made a Riftborn account, tell us through FEEDBACK and we will delete it.</p>
+
+<h2>Changes to this policy</h2>
+<p>If this policy changes, the &ldquo;Last updated&rdquo; date above changes with it, and significant changes will also be mentioned in the game&rsquo;s patch notes.</p>
+
+<h2>Contact</h2>
+<p>Open Riftborn and press the <strong>FEEDBACK</strong> button on the main menu. Guests and signed-in players can both use it.</p>
+
+<footer>
+  <a href="../">Back to Riftborn</a>
+</footer>
+</main>
+</body>
+</html>

@@ -4,9 +4,20 @@ import { pathToFileURL } from 'node:url';
 
 const ACCOUNT_API = 'https://api.cloudflare.com/client/v4/accounts';
 const WORKER_NAME = 'riftborn-leaderboard';
+// Riftborn accounts (v2.2): optional OAuth app credentials and the HMAC signing key. Each is bound
+// as a secret only when set; a provider without both its ID and secret is simply unavailable.
+// Never bind FAKE_OAUTH here: the fake provider is for the local harness only.
+// [option, Worker binding, environment variable]. GitHub Actions forbids secret names starting
+// with GITHUB_, so the GitHub OAuth app's credentials arrive as GH_CLIENT_ID/_SECRET.
+export const ACCOUNT_SECRETS = Object.freeze([
+  ['googleClientId', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_ID'], ['googleClientSecret', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_CLIENT_SECRET'],
+  ['discordClientId', 'DISCORD_CLIENT_ID', 'DISCORD_CLIENT_ID'], ['discordClientSecret', 'DISCORD_CLIENT_SECRET', 'DISCORD_CLIENT_SECRET'],
+  ['githubClientId', 'GITHUB_CLIENT_ID', 'GH_CLIENT_ID'], ['githubClientSecret', 'GITHUB_CLIENT_SECRET', 'GH_CLIENT_SECRET'],
+  ['authSigningKey', 'AUTH_SIGNING_KEY', 'AUTH_SIGNING_KEY'],
+]);
 
 /** Build multipart metadata for the documented Workers Script Upload API. */
-export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl }) {
+export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, ...accountSecrets }) {
   if (!/^[0-9a-f-]{36}$/i.test(databaseId || '')) throw new Error('Set CLOUDFLARE_D1_DATABASE_ID to the D1 database UUID.');
   const origin = new URL(siteOrigin || '');
   if (!/^https?:$/.test(origin.protocol) || origin.origin !== siteOrigin) {
@@ -47,6 +58,12 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
     if (!/^https:\/\//i.test(webhook)) throw new Error('DISCORD_WEBHOOK_URL must be an https:// URL.');
     metadata.bindings.push({ type: 'secret_text', name: 'DISCORD_WEBHOOK_URL', text: webhook });
   }
+  for (const [option, name] of ACCOUNT_SECRETS) {
+    const value = String(accountSecrets[option] ?? '').trim();
+    if (!value) continue;
+    if (name === 'AUTH_SIGNING_KEY' && value.length < 32) throw new Error('AUTH_SIGNING_KEY must be at least 32 characters (use 32+ random bytes).');
+    metadata.bindings.push({ type: 'secret_text', name, text: value });
+  }
 
   const form = new FormData();
   form.set('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }), 'metadata.json');
@@ -54,7 +71,7 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
   return form;
 }
 
-export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, fetchImpl = fetch }) {
+export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, fetchImpl = fetch, ...accountSecrets }) {
   if (!/^[0-9a-f]{32}$/i.test(accountId || '')) throw new Error('Set CLOUDFLARE_ACCOUNT_ID to the Cloudflare account ID.');
   if (!apiToken) throw new Error('Set the CLOUDFLARE_API_TOKEN GitHub secret.');
 
@@ -66,7 +83,7 @@ export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin
     target: 'es2022',
     minify: true,
   });
-  const form = createWorkerUpload(result.outputFiles[0].text, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl });
+  const form = createWorkerUpload(result.outputFiles[0].text, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, ...accountSecrets });
   const response = await fetchImpl(`${ACCOUNT_API}/${accountId}/workers/scripts/${WORKER_NAME}?bindings_inherit=strict`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${apiToken}` },
@@ -88,6 +105,7 @@ async function main() {
     siteOrigin: process.env.RIFTBORN_SITE_ORIGIN,
     feedbackAdminKey: process.env.FEEDBACK_ADMIN_KEY,
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
+    ...Object.fromEntries(ACCOUNT_SECRETS.map(([option, , envName]) => [option, process.env[envName]])),
   });
   console.log(`Deployed ${WORKER_NAME}; version ${result?.id || 'created'}.`);
 }

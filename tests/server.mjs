@@ -81,13 +81,13 @@ for(const bad of ['v2.1','2.1','2.1.0.1','<script>','12345.1.1','1.2.3 ','',2.1,
  const first=await (await at(legacyEnv)).json();
  assert.ok(columns(db).includes('game_version')&&columns(db).includes('rift_score'),'The first request adds the missing columns');
  assert.equal(first.scores[0].game_version,null,'Rows recorded before the column return null');
- assert.equal(log.filter(s=>s.startsWith('PRAGMA')).length,1);assert.equal(log.filter(s=>s.startsWith('ALTER')).length,2);
+ assert.equal(log.filter(s=>s.startsWith('PRAGMA')).length,1);assert.equal(log.filter(s=>s.startsWith('ALTER')).length,3,'game_version, rift_score and (v2.2) account_id');
  assert.equal((await send(legacyEnv,{...versioned,id:'99999999-9999-4999-8999-000000000001'})).status,200);
  assert.equal((await send(legacyEnv,{...run,id:'99999999-9999-4999-8999-000000000002',score:600,death_mode:false})).status,200,'Clients without game_version still save');
  const rows=(await (await at(legacyEnv,'/api/scores?mode=normal&version=all')).json()).scores;
  assert.deepEqual(rows.map(r=>[r.name,r.score,r.game_version]),[['Test Runner',7777,'2.1.0'],['Test Runner',600,null],['Old Timer',500,null]]);
  assert.equal(log.filter(s=>s.startsWith('PRAGMA')).length,1,'The column is checked once per isolate and binding');
- assert.equal(log.filter(s=>s.startsWith('ALTER')).length,2);
+ assert.equal(log.filter(s=>s.startsWith('ALTER')).length,3);
 }
 {
  // Another isolate added the column between the check and the ALTER: continue with it.

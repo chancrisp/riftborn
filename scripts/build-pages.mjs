@@ -37,6 +37,9 @@ if (fs.existsSync(dev)) fs.cpSync(dev, path.join(output, 'dev'), { recursive: tr
 // The private player-feedback inbox (noindex; every read needs the Worker's admin key).
 const inbox = path.join(root, 'feedback');
 if (fs.existsSync(inbox)) fs.cpSync(inbox, path.join(output, 'feedback'), { recursive: true });
+// The public privacy policy (/riftborn/privacy/); Google's OAuth consent screen links to it.
+const privacy = path.join(root, 'privacy');
+if (fs.existsSync(privacy)) fs.cpSync(privacy, path.join(output, 'privacy'), { recursive: true });
 const edit = (file, change) => {
   const html = fs.readFileSync(file, 'utf8');
   const next = change(html);
