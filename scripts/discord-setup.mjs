@@ -432,6 +432,9 @@ async function attempt(r, label, fn) {
 const norm = (name) => String(name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const idCmp = (a, b) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0);
 const byPosition = (a, b) => (a.position ?? 0) - (b.position ?? 0) || idCmp(a.id, b.id);
+// Discord ranks roles by position, and equal positions by age: the older role (lower id) ranks
+// higher. Roles made through the API all start at position 1, so ties are normal.
+const ranksAbove = (a, b) => a.position > b.position || (a.position === b.position && idCmp(a.id, b.id) < 0);
 const sameList = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 const sortedJson = (list) => JSON.stringify([...(list ?? [])].map(String).sort());
 
@@ -527,7 +530,10 @@ async function phaseDiscover(r, ctx) {
   r.notice(`guild "${guild.name}" (${guild.id}): ${channels.length} channels, ${roles.length} roles, Community ${community}`);
   if (!botRole) r.error('the bot has no role of its own in the guild: invite it again with the bot scope and Administrator');
   else if (!(BigInt(botRole.permissions) & P.ADMINISTRATOR)) r.error(`the bot's role "${botRole.name}" lacks Administrator: invite it again with Administrator`);
-  else r.notice(`bot ${me.username} is in the guild with Administrator (role position ${botRole.position} of ${roles.length - 1})`);
+  else {
+    const rank = roles.filter((role) => role.id !== botRole.id && ranksAbove(role, botRole)).length + 1;
+    r.notice(`bot ${me.username} is in the guild with Administrator (its role ranks ${rank} of ${roles.length - 1} from the top)`);
+  }
 }
 
 async function phaseRoles(r, ctx) {
@@ -561,9 +567,13 @@ async function phaseRoles(r, ctx) {
   if (ours.every(Boolean)) {
     const current = [...ours].sort((a, b) => b.position - a.position || idCmp(a.id, b.id)).map((role) => role.id);
     const inOrder = sameList(current, ours.map((role) => role.id));
-    const belowBot = !botRole || ours.every((role) => role.position < botRole.position);
+    const belowBot = !botRole || ours.every((role) => ranksAbove(botRole, role));
     if (!belowBot) {
       r.error(`${botRole.name}'s role must be above the Riftborn roles: drag it to the top in Server Settings > Roles, then run again`);
+    } else if (!inOrder && botRole && botRole.position <= ours.length) {
+      // The bot can only move roles below its own, and with its role this low the only free
+      // positions are ties that Discord orders by age: the owner's drag spreads the positions out.
+      r.error(`the Riftborn roles are out of order: drag them into order under ${botRole.name} (${ROLES.map((spec) => spec.name).join(', ')}) in Server Settings > Roles, then run again`);
     } else if (!inOrder) {
       const body = [...ours].reverse().map((role, i) => ({ id: role.id, position: i + 1 }));
       const done = await attempt(r, 'reorder roles', () => api('PATCH', `/guilds/${gid}/roles`, { body }));

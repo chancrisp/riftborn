@@ -155,8 +155,9 @@ function createFakeDiscord() {
     return [200, c];
   }
 
+  // Like Discord: a new role takes position 1 and nothing moves, so positions tie and Discord
+  // ranks ties by age (the older role, lower id, ranks higher).
   function createRole(body) {
-    for (const r of state.roles) if (r.id !== G && r.position >= 1) r.position += 1;
     const made = { id: sf(), name: body.name ?? 'new role', color: body.color ?? 0, hoist: Boolean(body.hoist), mentionable: Boolean(body.mentionable),
       permissions: String(BigInt(body.permissions ?? '0')), managed: false, position: 1 };
     state.roles.push(made);
@@ -167,12 +168,12 @@ function createFakeDiscord() {
     const botPos = role(BOT_ROLE).position;
     for (const item of list) {
       const r = role(item.id);
-      if (!r || r.managed || r.id === G || r.position >= botPos || item.position >= botPos) return err(403, 'Missing Permissions', 50013);
+      if (!r || r.managed || r.id === G || !ranksAbove(role(BOT_ROLE), r) || item.position >= botPos) return err(403, 'Missing Permissions', 50013);
     }
     const moved = new Set(list.map((item) => item.id));
     for (const item of list) role(item.id).position = item.position;
     const others = state.roles.filter((r) => r.id !== G)
-      .sort((a, b) => a.position - b.position || (moved.has(b.id) ? 1 : 0) - (moved.has(a.id) ? 1 : 0) || (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+      .sort((a, b) => a.position - b.position || (moved.has(b.id) ? 1 : 0) - (moved.has(a.id) ? 1 : 0) || (BigInt(a.id) < BigInt(b.id) ? 1 : -1));
     others.forEach((r, i) => { r.position = i + 1; });
     return [200, state.roles];
   }
@@ -486,7 +487,7 @@ function assertDesiredState(fake, label) {
   for (const r of [tester, rifter, newsPing, patchPing, eventPing]) assert.equal(r.permissions, '0', at(`${r.name} has no permissions`));
   for (const r of [newsPing, patchPing, eventPing]) assert.equal(r.color, 0, at(`${r.name} has no colour`));
   const ladder = [role(s, BOT_ROLE), keeper, mod, tester, rifter, newsPing, patchPing, eventPing];
-  for (let i = 1; i < ladder.length; i += 1) assert.ok(ladder[i - 1].position > ladder[i].position, at(`${ladder[i - 1].name} above ${ladder[i].name}`));
+  for (let i = 1; i < ladder.length; i += 1) assert.ok(ranksAbove(ladder[i - 1], ladder[i]), at(`${ladder[i - 1].name} above ${ladder[i].name}`));
   assert.ok(s.members.get(OWNER).roles.includes(keeper.id), at('owner has Rift Keeper'));
   assert.deepEqual([...s.members].filter(([, m]) => m.roles.includes(keeper.id)).map(([id]) => id), [OWNER], at('only the owner has Rift Keeper'));
   const everyonePerms = BigInt(role(s, G).permissions);
@@ -583,6 +584,15 @@ function assertDesiredState(fake, label) {
 }
 
 function role(s, id) { return s.roles.find((r) => r.id === id); }
+
+// Discord's role ranking: higher position first, and on a tie the older role (lower id).
+function ranksAbove(a, b) { return a.position > b.position || (a.position === b.position && BigInt(a.id) < BigInt(b.id)); }
+
+// What Discord does when the owner drags a role: every position spread out, the ranking kept.
+function spreadRoles(s) {
+  const ranked = s.roles.filter((r) => r.id !== s.ids.G).sort((a, b) => (ranksAbove(a, b) ? 1 : -1));
+  ranked.forEach((r, i) => { r.position = i + 1; });
+}
 function canView(s, channel, roleIds) {
   let perms = BigInt(role(s, s.ids.G).permissions);
   for (const id of roleIds) perms |= BigInt(role(s, id).permissions);
@@ -644,6 +654,7 @@ try {
   const s = fake.state;
   const byName = (name) => s.channels.find((c) => c.name === name);
   const [testerRole, modRole] = ['Tester', 'Moderator'].map((name) => s.roles.find((r) => r.name === name));
+  spreadRoles(s); // the owner dragged a role in Server Settings: Discord spread the positions out
   [testerRole.position, modRole.position] = [modRole.position, testerRole.position];
   const [, helper] = fake.handle('POST', `/guilds/${G}/roles`, { name: 'Helper', permissions: '0' });
   byName('game-feedback').permission_overwrites.push({ id: helper.id, type: 0, allow: String(B.VIEW | B.SEND), deny: '0' });
@@ -656,6 +667,30 @@ try {
   assert.ok(writes().some((c) => c.method === 'PATCH' && c.route === `/guilds/${G}/roles`), 'drift: roles reordered');
   assertDesiredState(fake, 'run 3');
   assert.ok(s.roles.some((r) => r.name === 'Helper'), 'roles the script does not own are left alone');
+
+  // 3b. Tied positions (every role made through the API sits at position 1): the bot's older role
+  // ranks above them, so a server in creation order passes with no writes. A role remade later
+  // (newer id) sorts last, and the bot cannot spread tied positions: it asks the owner to drag.
+  const saved = s.roles.map((r) => [r, r.position, r.id]);
+  for (const r of s.roles) if (r.id !== G) r.position = 1;
+  s.roles.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+  const helperRole = s.roles.find((r) => r.name === 'Helper');
+  s.roles = s.roles.filter((r) => r !== helperRole);
+  fake.calls.length = 0;
+  const tied = await run(['discover', 'roles'], env);
+  assert.equal(tied.code, 0, `tied positions in creation order\n${tied.text}`);
+  assert.match(tied.stdout, /its role ranks 1 of 8 from the top/, 'discover reports the rank, not the raw position');
+  assert.deepEqual(writes().map((c) => `${c.method} ${c.route}`), [], 'tied and in order: no writes');
+  const oldTesterId = testerRole.id;
+  testerRole.id = fake.sf();
+  const remade = await run(['roles'], env);
+  assert.equal(remade.code, 1, 'a remade role out of order with tied positions fails');
+  assert.match(remade.stdout, /::error title=Roles::the Riftborn roles are out of order: drag them into order under RiftBot \(Rift Keeper, Moderator, Tester, Rifter, News pings, Patch pings, Event pings\)/, 'asks the owner to drag');
+  assert.doesNotMatch(remade.stdout, /must be above/, 'the bot is not blamed');
+  assert.ok(!writes().some((c) => c.method === 'PATCH' && c.route === `/guilds/${G}/roles`), 'no reorder attempted');
+  testerRole.id = oldTesterId;
+  s.roles.push(helperRole);
+  for (const [r, position] of saved) r.position = position;
 
   // 4. A rejected onboarding reports Discord's error; the other phases still pass.
   s.onboarding.enabled = false;
