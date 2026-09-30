@@ -792,7 +792,9 @@ async function phaseOnboarding(r, ctx) {
     }
   }
   const desiredPrompts = [
-    { title: 'Read the rules?', single_select: true, required: true, options: [
+    // Optional (the owner's choice): Discord posts the join message only once a member finishes the
+    // onboarding questions, so a required question left new members stuck without a welcome.
+    { title: 'Read the rules?', single_select: true, required: false, options: [
       { title: "I've read #rules", description: 'Be kind, keep it safe, and keep spoilers in #secret-hunt.', emoji: '✅', role_ids: [ids.rifter] },
     ] },
     { title: 'What should we ping you about?', single_select: false, required: false, options: [

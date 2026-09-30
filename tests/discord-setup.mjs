@@ -553,7 +553,7 @@ function assertDesiredState(fake, label) {
   assert.equal(ob.enabled, true, at('onboarding on'));
   const publicIds = LAYOUT.filter(([, access]) => ['readonly', 'news', 'public'].includes(access)).flatMap(([, , list]) => list.map(([name]) => named[name].id));
   assert.deepEqual([...ob.default_channel_ids].sort(), [...publicIds].sort(), at('default channels are the public ones'));
-  assert.deepEqual(ob.prompts.map((p) => [p.title, p.single_select, p.required]), [['Read the rules?', true, true], ['What should we ping you about?', false, false]], at('onboarding prompts'));
+  assert.deepEqual(ob.prompts.map((p) => [p.title, p.single_select, p.required]), [['Read the rules?', true, false], ['What should we ping you about?', false, false]], at('onboarding prompts'));
   assert.deepEqual(ob.prompts[0].options.map((o) => [o.title, o.role_ids]), [["I've read #rules", [rifter.id]]], at('rules prompt grants Rifter'));
   assert.deepEqual(ob.prompts[1].options.map((o) => o.role_ids[0]), [newsPing.id, patchPing.id, eventPing.id], at('ping prompt'));
 
