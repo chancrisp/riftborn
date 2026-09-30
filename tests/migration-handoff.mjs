@@ -151,6 +151,8 @@ const seeded = () => new FakeStorage({
   'riftborn-reborn-account-sync-v1': '{}',
   'riftborn-reborn-account-reminded': '1',
   'riftborn-reborn-dev-accounts': 'http://127.0.0.1:8787',
+  'riftborn-reborn-dev-mode-v1': 'true',
+  'riftborn-reborn-dev-loadout-v1': '{}',
   'riftborn-dev-gate': 'gate-hash',
   'riftborn-score-outbox-v1': '[]',
   'some-other-project-key': 'not ours',
