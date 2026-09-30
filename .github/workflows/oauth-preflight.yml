@@ -24,15 +24,18 @@ jobs:
       GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
       AUTH_SIGNING_KEY: ${{ secrets.AUTH_SIGNING_KEY }}
     steps:
-      - name: Signing key
+      - name: Signing key is present
         if: always()
-        run: |
-          node -e '
-          const k = process.env.AUTH_SIGNING_KEY || "";
-          if (!k) { console.log("missing"); process.exit(1); }
-          if (k !== k.trim()) { console.log("has leading/trailing spaces"); process.exit(1); }
-          if (k.length < 32) { console.log("too short: " + k.length); process.exit(1); }
-          console.log("ok, length " + k.length);'
+        run: node -e 'process.exit(process.env.AUTH_SIGNING_KEY ? 0 : 1)'
+      - name: Signing key has no spaces or line breaks around it
+        if: always()
+        run: node -e 'const k = process.env.AUTH_SIGNING_KEY || ""; process.exit(k && k === k.trim() ? 0 : 1)'
+      - name: Signing key is at least 32 characters
+        if: always()
+        run: node -e 'process.exit((process.env.AUTH_SIGNING_KEY || "").trim().length >= 32 ? 0 : 1)'
+      - name: Signing key looks like the generated key (no PowerShell command text)
+        if: always()
+        run: node -e 'const k = (process.env.AUTH_SIGNING_KEY || "").trim(); process.exit(/^[A-Za-z0-9+/=]{40,}$/.test(k) ? 0 : 1)'
       - name: Discord
         if: always()
         run: |
