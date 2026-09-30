@@ -22,7 +22,7 @@
 import { HOSTS } from './site.hosts.mjs';
 export { HOSTS, WORKER_ALLOWED_ORIGINS, AUTH_RETURN_ORIGINS, AUTH_RETURN_PATHS, AUTH_PUBLIC_BASE } from './site.hosts.mjs';
 
-export const LAUNCHED = false;
+export const LAUNCHED = true;
 
 export const PAGES_PROJECTS = Object.freeze({ live: 'riftborn', dev: 'riftborn-dev' });
 export const PRODUCTION_BRANCH = 'main';
