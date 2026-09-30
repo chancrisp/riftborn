@@ -1,0 +1,1 @@
+When creating Git commits, use the repository's configured human Git identity. Do not add Codex, Claude, OpenAI, Anthropic, ChatGPT, or any other AI assistant as an author, co-author, committer, or commit-message attribution unless explicitly requested by the user.
