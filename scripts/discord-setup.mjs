@@ -17,8 +17,9 @@
 //                set when the server has none, and left alone when it has one, unless the run was
 //                asked to replace it (DISCORD_SETUP_REPLACE_ICON, below)
 //   posts        the welcome, rules and FAQ posts and the other bot posts (each posted once)
-//   releases     each version in scripts/discord-releases.mjs, once: the announcement in
-//                #announcements and the patch notes in #patch-notes, published to following servers
+//   releases     each version in scripts/discord-releases.mjs, once, and only once riftborn.us
+//                serves it (its version.json): the announcement in #announcements and the patch notes
+//                in #patch-notes, published to following servers
 //   profile      the bot's username
 //   invite       the permanent invite to #welcome
 //   all          every phase in order (handy locally)
@@ -26,10 +27,12 @@
 // Idempotent: everything is looked up by name, only what is missing is created, settings and
 // overwrites are patched only when they differ from the desired state, a post is skipped when the
 // bot already posted in that channel, and a release post when the bot's post of that version is
-// already there. A second run makes no changes.
+// already there. A second run makes no changes. (The workflow also runs after every deploy of
+// riftborn.us, then only discover and releases, so a new version is posted as soon as it is live.)
 //
 // Every outcome is reported as a GitHub annotation so the result is readable without the logs:
-// one ::notice per phase summing it up, and each ::error (2 per phase, then an "N more" line).
+// one ::notice per phase summing it up (a ::warning when riftborn.us could not be read for the
+// release posts), and each ::error (2 per phase, then an "N more" line).
 // Nothing secret is ever printed: the token and anything that looks like a token or a webhook
 // URL is scrubbed from every line.
 //
@@ -41,6 +44,8 @@
 //      settings annotation and in the server's audit log reason).
 //      DISCORD_SETUP_API_BASE (tests only: an http loopback URL for the fake API in
 //      tests/discord-setup.mjs; refused in CI so the token can only ever go to discord.com).
+//      RIFTBORN_TEST_LIVE_ORIGIN (tests only, read through site.config.mjs and refused in CI there:
+//      the origin whose /version.json the releases phase reads in place of https://riftborn.us).
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -301,8 +306,8 @@ const automodRules = (modLogId) => [
 // ---------------------------------------------------------------------------------------------
 // Reporting: GitHub annotations, scrubbed
 
-// GitHub keeps at most 50 annotations per job. Each of the 12 steps emits one summary notice and
-// at most 2 errors plus one "N more errors" line: 4 per step, 48 per job.
+// GitHub keeps at most 50 annotations per job. Each of the 12 steps emits one summary (a notice, or
+// a warning) and at most 2 errors plus one "N more errors" line: 4 per step, 48 per job.
 const MAX_ERRORS = 2;
 const TOKEN = (process.env.DISCORD_SETUP_BOT_TOKEN || '').trim();
 
@@ -321,9 +326,12 @@ function makeReporter(title) {
   const t = escProp(title);
   const notes = [];
   let errors = 0;
+  let warned = false;
   return {
     // Notices are gathered into the step's one summary annotation, written by finish().
     notice: (text) => { const line = scrub(text); notes.push(line); console.log(`notice: ${line}`); },
+    // Like notice, and the summary annotation becomes a ::warning (the step still passes).
+    warn: (text) => { warned = true; const line = scrub(text); notes.push(line); console.log(`warning: ${line}`); },
     error: (text) => {
       errors += 1;
       const line = scrub(text);
@@ -333,7 +341,7 @@ function makeReporter(title) {
     finish() {
       if (errors > MAX_ERRORS) console.log(`::error title=${t}::${errors - MAX_ERRORS} more error${errors - MAX_ERRORS === 1 ? '' : 's'} in the step log`);
       const summary = notes.length ? notes.join('; ') : errors ? `failed with ${errors} error${errors === 1 ? '' : 's'}` : 'done';
-      console.log(`::notice title=${t}::${escData(scrub(summary, 1000))}`);
+      console.log(`::${warned ? 'warning' : 'notice'} title=${t}::${escData(scrub(summary, 1000))}`);
       return errors ? 1 : 0;
     },
   };
@@ -1059,6 +1067,7 @@ const RELEASE_HISTORY_PAGES = 5; // the newest 500 messages of each channel are 
 const PUBLISH_MAX_WAIT = 60_000; // a longer publish rate limit is left to the next run
 const LINK_LENGTH = 23, PING_LENGTH = 25; // "<#id>" and "<@&id>\n" once posted, ids up to 20 digits
 
+const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const shortVersion = (version) => version.replace(/\.0$/, ''); // 2.3.0 -> 2.3, 2.3.1 stays
 const markerOf = (spec, version) => spec.marker(shortVersion(version));
 const newerVersion = (a, b) => {
@@ -1084,7 +1093,7 @@ function checkReleases(list) {
     const at = typeof rel.version === 'string' ? rel.version : `entry ${n + 1}`;
     const unknown = Object.keys(rel).filter((key) => !RELEASE_FIELDS.includes(key));
     if (unknown.length) problems.push(`${at}: unknown ${unknown.length === 1 ? 'field' : 'fields'} ${unknown.join(', ')} (the fields are ${RELEASE_FIELDS.join(', ')})`);
-    if (typeof rel.version !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(rel.version)) { problems.push(`${at}: version must be MAJOR.MINOR.PATCH, like 2.3.0`); return; }
+    if (typeof rel.version !== 'string' || !VERSION_RE.test(rel.version)) { problems.push(`${at}: version must be MAJOR.MINOR.PATCH, like 2.3.0`); return; }
     if (previous && !newerVersion(rel.version, previous)) problems.push(`${at} must be newer than ${previous} above it (oldest first, each version once)`);
     previous = rel.version;
     if (rel.posted !== undefined && typeof rel.posted !== 'boolean') problems.push(`${at}: posted must be true or false`);
@@ -1163,11 +1172,74 @@ function buildRelease(rel, channels, ids) {
   return { messages, problems };
 }
 
-// Each version once, oldest first, up to the first placeholder: its announcement in #announcements
-// and its patch notes in #patch-notes, each skipped when RiftBot's post of that version is already
-// in the channel (found by its bold first line), then crossposted. Entries marked posted are only
-// recognised. In each channel a version that could not be posted holds back the ones after it, and
-// a version older than one already there is never posted, so the channels always read in order.
+// The live gate: a version is posted only once riftborn.us serves it (or a newer one), as its
+// version.json says (the file the game polls for updates; never cached, and asked with a
+// cache-busting query anyway). So a version's entry goes to main in the same push as live/: that
+// push's run usually still finds the old version live and leaves the new one waiting, and the run
+// after the Pages deploy (the workflow's workflow_run trigger) posts it. The host is the live origin of
+// site.config.mjs (its RIFTBORN_TEST_LIVE_ORIGIN points the tests at the fake and is refused in CI).
+// Asked at most once per run, only when a version is about to be posted (a run with nothing new asks
+// nothing), and never with the bot token or through a redirect (a 3xx is an answer without a
+// version, as cloudflare-pages-verify.mjs treats it). A site that cannot be reached holds new versions
+// back with a warning (the step stays green), for the next run to post; an answer without a
+// MAJOR.MINOR.PATCH version is an error.
+const LIVE_TIMEOUT = 10_000;
+const LIVE_RETRY_WAITS = [2000, 5000, 10_000]; // before the 2nd, 3rd and 4th tries: about 17 s in all
+const LIVE_TRIES = LIVE_RETRY_WAITS.length + 1;
+
+// { host, version }, { host, unreachable }, or { failed } once the error is reported.
+async function readLive(r) {
+  let origin;
+  try {
+    const { resolveSiteConfig } = await import(new URL('../site.config.mjs', import.meta.url).href);
+    origin = resolveSiteConfig(process.env).live;
+  } catch (err) {
+    r.error(`the live site could not be read from site.config.mjs (${describe(err)}): nothing new posted`);
+    return { failed: true };
+  }
+  const url = `${origin}/version.json`;
+  const host = new URL(origin).host;
+  let why = '';
+  for (let tryNo = 1; tryNo <= LIVE_TRIES; tryNo += 1) {
+    if (tryNo > 1) await sleep(LIVE_RETRY_WAITS[tryNo - 2]);
+    let status, text;
+    try {
+      const res = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store', redirect: 'manual', headers: { 'Cache-Control': 'no-cache' }, signal: AbortSignal.timeout(LIVE_TIMEOUT) });
+      status = res.status;
+      text = await res.text();
+    } catch (err) {
+      why = `network error (${err?.cause?.code || err?.name || 'fetch failed'})`;
+      continue;
+    }
+    if (status >= 500 || status === 429) { why = `HTTP ${status}`; continue; }
+    if (status !== 200) { r.error(`${url} answered HTTP ${status}, not its version: nothing new posted`); return { failed: true }; }
+    let version;
+    try { version = JSON.parse(text)?.version; } catch { version = undefined; }
+    if (typeof version !== 'string' || !VERSION_RE.test(version)) {
+      r.error(`${url} answered without a MAJOR.MINOR.PATCH version (${JSON.stringify(text.trim().slice(0, 60))}): nothing new posted`);
+      return { failed: true };
+    }
+    r.log(`${url} serves ${version}`);
+    return { host, version };
+  }
+  r.log(`${url} could not be read: ${why} after ${LIVE_TRIES} tries`);
+  return { host, unreachable: `${why}, ${LIVE_TRIES} tries` };
+}
+
+// Why the live gate holds a version back (null when it may go out), from readLive's answer.
+function liveHold(rel, live) {
+  if (live.failed) return { status: 'failed' };
+  if (live.unreachable) return { status: 'unverified', host: live.host, why: live.unreachable };
+  if (newerVersion(rel.version, live.version)) return { status: 'unreleased', host: live.host, live: live.version };
+  return null;
+}
+
+// Each version once, oldest first, up to the first placeholder and only once riftborn.us serves it
+// (the live gate, above): its announcement in #announcements and its patch notes in #patch-notes,
+// each skipped when RiftBot's post of that version is already in the channel (found by its bold
+// first line), then crossposted. Entries marked posted are only recognised. In each channel a
+// version that could not be posted holds back the ones after it, and a version older than one
+// already there is never posted, so the channels always read in order.
 async function phaseReleases(r, ctx) {
   const { channels, me } = ctx;
   let releases;
@@ -1192,6 +1264,7 @@ async function phaseReleases(r, ctx) {
   const built = due.map((rel) => (rel.posted ? null : buildRelease(rel, channels, ids)));
   const reported = new Set();
   const results = due.map(() => []);
+  let live = null; // what riftborn.us serves, read once the first version is about to be posted
   for (const spec of due.length ? RELEASE_CHANNELS : []) {
     const label = `#${spec.channel}`;
     const mark = (i, status, extra = {}) => results[i].push({ label, status, ...extra });
@@ -1205,6 +1278,7 @@ async function phaseReleases(r, ctx) {
     const newest = found.reduce((last, m, i) => (m ? i : last), -1);
     const isNews = channel.type === T.NEWS;
     let stopped = false;
+    let gated = null; // the live gate held a version back here: the later ones wait for the same reason
     for (const [i, rel] of due.entries()) {
       const what = `${rel.version} in ${label}`;
       if (found[i]) {
@@ -1216,6 +1290,7 @@ async function phaseReleases(r, ctx) {
       }
       if (rel.posted) { mark(i, 'marked', { complete: history.complete }); continue; }
       if (i < newest) { mark(i, 'older', { newer: releases[newest].version }); continue; }
+      if (gated) { mark(i, gated.status, gated); continue; }
       if (stopped) { mark(i, 'held'); continue; }
       stopped = true; // until this version is posted, the ones after it wait
       if (newest < 0 && !history.complete) {
@@ -1229,6 +1304,14 @@ async function phaseReleases(r, ctx) {
         mark(i, 'failed');
         continue;
       }
+      // Last, just before posting: is this version live on riftborn.us yet?
+      live ??= await readLive(r);
+      const hold = liveHold(rel, live);
+      if (hold) {
+        if (hold.status !== 'failed') gated = hold;
+        mark(i, hold.status, hold);
+        continue;
+      }
       const { body, pinged } = messages[spec.key];
       const sent = await attempt(r, `post ${what}`, () => api('POST', `/channels/${channel.id}/messages`, { body }));
       if (sent === FAIL) { mark(i, 'failed'); continue; }
@@ -1237,17 +1320,36 @@ async function phaseReleases(r, ctx) {
       mark(i, 'posted', { crosspost: isNews ? await publish(r, channel, sent, what) : 'n/a', pinged });
     }
   }
-  r.notice(`releases: ${releaseSummary(releases, due, results, block)}`);
+  // riftborn.us could not be read: the step stays green, but its summary is a warning, so a release
+  // left waiting for the next run stands out.
+  const unread = results.some((list) => list.some((x) => x.status === 'unverified'));
+  r[unread ? 'warn' : 'notice'](`releases: ${releaseSummary(releases, due, results, block)}`);
 }
 
 function releaseSummary(releases, due, results, block) {
   const parts = [];
   const quiet = []; // versions already in every channel, with nothing done this run
-  const flush = () => { if (quiet.length) parts.push(`${listOf(quiet.splice(0))} already posted`); };
+  const held = []; // versions the live gate held back in every channel, for the same reason
+  let hold = null;
+  const flush = () => {
+    if (quiet.length) parts.push(`${listOf(quiet.splice(0))} already posted`);
+    if (held.length) parts.push(liveNote(held.splice(0), hold));
+  };
   due.forEach((rel, i) => {
-    if (results[i].length && results[i].every((x) => x.status === 'there' && !x.crosspost)) { quiet.push(rel.version); return; }
+    const list = results[i];
+    if (list.length && list.every((x) => x.status === 'there' && !x.crosspost)) {
+      if (held.length) flush();
+      quiet.push(rel.version);
+      return;
+    }
+    if (list.length && ['unreleased', 'unverified'].includes(list[0].status) && list.every((x) => x.status === list[0].status)) {
+      if (quiet.length || (held.length && hold.status !== list[0].status)) flush();
+      hold = list[0];
+      held.push(rel.version);
+      return;
+    }
     flush();
-    parts.push(`${rel.version} ${releaseNote(results[i])}`);
+    parts.push(`${rel.version} ${releaseNote(list)}`);
   });
   flush();
   if (block >= 0) {
@@ -1257,6 +1359,14 @@ function releaseSummary(releases, due, results, block) {
     if (later.length) parts.push(`${listOf(later)} ${later.length === 1 ? 'waits' : 'wait'} for ${waiting}`);
   }
   return parts.join('; ');
+}
+
+// "2.4.0 waits for riftborn.us to serve it (live is 2.3.0)", or why riftborn.us could not say.
+function liveNote(versions, hold) {
+  const [verb, them] = versions.length === 1 ? ['waits', 'it'] : ['wait', 'them'];
+  if (hold.status === 'unreleased') return `${listOf(versions)} ${verb} for ${hold.host} to serve ${them} (live is ${hold.live})`;
+  return `${listOf(versions)} ${verb}: ${hold.host}/version.json could not be read (${hold.why}), so nothing new was posted; `
+    + `the next run checks again (the next deploy of main, or Run workflow by hand)`;
 }
 
 function releaseNote(list) {
@@ -1287,6 +1397,10 @@ function releaseNote(list) {
   if (failed.length) notes.push(`not posted to ${labels(failed)} (see the errors)`);
   const held = where('held');
   if (held.length) notes.push(`held back in ${labels(held)} until the version before it is posted`);
+  const unreleased = where('unreleased');
+  if (unreleased.length) notes.push(`waits in ${labels(unreleased)} for ${unreleased[0].host} to serve it (live is ${unreleased[0].live})`);
+  const unverified = where('unverified');
+  if (unverified.length) notes.push(`waits in ${labels(unverified)}: ${unverified[0].host}/version.json could not be read (${unverified[0].why})`);
   return notes.join(', ');
 }
 

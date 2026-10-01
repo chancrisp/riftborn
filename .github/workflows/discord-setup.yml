@@ -15,7 +15,26 @@ name: Discord server setup
 #
 # New versions: the Release posts step posts each version in scripts/discord-releases.mjs once, the
 # announcement in #announcements and the patch notes in #patch-notes, and crossposts them to following
-# servers. Pushing a filled-in entry to main is what announces it (that file's header has the steps).
+# servers, but only once https://riftborn.us/version.json serves that version (or a newer one). The
+# entry goes to main in the same push as live/ (that file's header has the steps): that push's run
+# usually finds the old version still live and says the new one waits, and when "Build and deploy
+# Riftborn to GitHub Pages and Cloudflare Pages" (pages.yml) has deployed it, the workflow_run trigger
+# runs this workflow again and RiftBot posts it, about 1-2 minutes after the push. (If the deploy wins
+# the race, the push's own run posts it and the later run finds it already there.)
+#
+# A workflow_run run (after every successful deploy of main) runs only Discover guild and Release
+# posts: they are all a release needs, and the rest of the server is left as it is between the
+# setup's own runs (a push that changes the Discord files, or Run workflow by hand, still runs every
+# step). So it never touches the icon, and replace_icon stays a manual-run-only input. Like every
+# run here it uses main's copy of this file and of the scripts, never the deployed commit's.
+#
+# Concurrency: one run at a time (a run that starts while another is going waits for it), so two runs
+# can never post at once; each run reads the channels afresh, so the second finds the first's posts.
+# GitHub keeps one waiting run per group, and a newer run in the group replaces the waiting one. For
+# runs that do something, that is harmless: each reads main and riftborn.us as they are when it
+# starts. A run whose job is skipped (after a deploy that failed or was cancelled, or a manual run off
+# main) would replace a waiting run that would post, and do nothing itself, so it gets a group of its
+# own: the group expression repeats the job's condition exactly.
 
 on:
   push:
@@ -24,6 +43,11 @@ on:
       - '.github/workflows/discord-setup.yml'
       - 'scripts/discord-setup.mjs'
       - 'scripts/discord-releases.mjs'
+  # Right after riftborn.us updates: the deploy workflow's name, exactly as in pages.yml.
+  workflow_run:
+    workflows: [Build and deploy Riftborn to GitHub Pages and Cloudflare Pages]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       replace_icon:
@@ -35,13 +59,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: discord-setup
+  # The job's own condition (below): runs that will do something share discord-setup, and a run whose
+  # job is skipped gets a group of its own, so it can never replace a waiting run that would post.
+  group: ${{ github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') && 'discord-setup' || format('discord-setup-skipped-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
   setup:
-    # Only main's copy of the script ever runs with the bot token.
-    if: github.ref == 'refs/heads/main'
+    # Only main's copy of the script ever runs with the bot token (a workflow_run run is on main too),
+    # and only after a deploy that succeeded. The concurrency group repeats this condition: change both.
+    if: github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # The bot token is given only to the steps that run the setup script, never to checkout or
@@ -59,44 +86,44 @@ jobs:
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
       - name: Roles
-        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' && github.event_name != 'workflow_run' }}
         run: node scripts/discord-setup.mjs roles
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
       - name: Categories and channels
-        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' && github.event_name != 'workflow_run' }}
         run: node scripts/discord-setup.mjs channels
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
       - name: Community
-        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' && github.event_name != 'workflow_run' }}
         run: node scripts/discord-setup.mjs community
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
       - name: News and forum channels
-        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' && github.event_name != 'workflow_run' }}
         run: node scripts/discord-setup.mjs news-forums
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
       - name: Onboarding
-        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' && github.event_name != 'workflow_run' }}
         run: node scripts/discord-setup.mjs onboarding
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
       - name: AutoMod
-        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' && github.event_name != 'workflow_run' }}
         run: node scripts/discord-setup.mjs automod
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
       - name: Server settings and icon
-        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' && github.event_name != 'workflow_run' }}
         run: node scripts/discord-setup.mjs settings
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
           # Only a manual run with replace_icon ticked sets this; every other run passes an empty value.
           DISCORD_SETUP_REPLACE_ICON: ${{ github.event_name == 'workflow_dispatch' && inputs.replace_icon && 'true' || '' }}
       - name: Posts
-        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' && github.event_name != 'workflow_run' }}
         run: node scripts/discord-setup.mjs posts
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
@@ -106,12 +133,12 @@ jobs:
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
       - name: Bot profile
-        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' && github.event_name != 'workflow_run' }}
         run: node scripts/discord-setup.mjs profile
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
       - name: Invite link
-        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' && github.event_name != 'workflow_run' }}
         run: node scripts/discord-setup.mjs invite
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}

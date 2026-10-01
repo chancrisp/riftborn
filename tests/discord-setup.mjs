@@ -22,12 +22,24 @@
 //     #patch-notes, crossposted, with exactly its ping role in allowed_mentions; a second run writes
 //     nothing; a placeholder (and anything after it) is never posted; a failed crosspost is retried
 //     by the next run without a second post, and a long publish rate limit fails fast; a bad list
-//     posts nothing; a version older than one already up is never posted.
+//     posts nothing; a version older than one already up is never posted;
+//   - the live gate: a version is posted only once riftborn.us (the fake's /version.json, through
+//     site.config.mjs's RIFTBORN_TEST_LIVE_ORIGIN) serves it or a newer one, compared as numbers; a
+//     newer version and everything after it wait with a notice; riftborn.us is asked once per run,
+//     only when something is about to be posted, with a cache-busting query and never the token; an
+//     unreachable site (503s, a closed port) posts nothing after four tries and is a warning, not an
+//     error; a malformed answer (or a redirect, never followed) is an error; versions already live go
+//     out as before;
+//   - the workflow: a workflow_run trigger on the Pages deploy of main (its name as pages.yml has it),
+//     successful deploys only, which runs Discover guild and Release posts and nothing else (never the
+//     icon step); push and manual triggers kept; one run at a time (concurrency, never cancelled), and
+//     a run whose job is skipped (a failed or cancelled deploy) in a group of its own, so it can never
+//     replace a waiting run that would post.
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,6 +49,7 @@ import { RELEASES } from '../scripts/discord-releases.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(ROOT, 'scripts', 'discord-setup.mjs');
 const WORKFLOW = readFileSync(path.join(ROOT, '.github', 'workflows', 'discord-setup.yml'), 'utf8').replace(/\r\n/g, '\n');
+const PAGES_WORKFLOW = readFileSync(path.join(ROOT, '.github', 'workflows', 'pages.yml'), 'utf8').replace(/\r\n/g, '\n');
 // Fake, assembled from parts so secret scanners don't mistake the test value for a real token.
 const TOKEN = ['MTIzNDU2Nzg5MDEyMzQ1Njc4', 'GfAkE1', 'mock-token-that-must-never-leak-0123456789'].join('.');
 const WEBHOOK = 'https://discord.com/api/webhooks/123456789012345678/secret-webhook-token-abcdef';
@@ -99,6 +112,10 @@ function createFakeDiscord() {
     crosspostRateLimit: new Set(), // channel ids whose next crosspost gets an hour-long 429
   };
   const calls = [];
+  // riftborn.us as the live gate sees it: GET /version.json on the same server (no token needed).
+  // answer, when set, replaces the normal reply ({ status, body }); calls is cleared per release run,
+  // seen keeps every request.
+  const site = { version: '2.3.0', answer: null, calls: [], seen: [] };
 
   const err = (status, message, code = 0, errors) => [status, { message, code, ...(errors ? { errors } : {}) }];
   const formErr = (field, message) => err(400, 'Invalid Form Body', 50035, { [field]: { _errors: [{ code: 'BASE_TYPE_INVALID', message }] } });
@@ -404,6 +421,17 @@ function createFakeDiscord() {
     for await (const chunk of req) chunks.push(chunk);
     const raw = Buffer.concat(chunks).toString('utf8');
     const url = new URL(req.url, 'http://127.0.0.1');
+    // /moved/version.json always serves the version: where the redirect test points, so following a
+    // redirect would show (an extra call, and a post).
+    if (url.pathname === '/version.json' || url.pathname === '/moved/version.json') {
+      const ask = { method: req.method, path: url.pathname, query: url.search, headers: { ...req.headers } };
+      site.calls.push(ask);
+      site.seen.push(ask);
+      const reply = (url.pathname === '/version.json' && site.answer)
+        || { status: 200, body: JSON.stringify({ version: site.version, build: '0123456789', builtAt: '2026-10-01T00:00:00.000Z' }) };
+      res.writeHead(reply.status, { 'content-type': 'application/json', 'cache-control': 'no-store', ...reply.headers });
+      return res.end(reply.body);
+    }
     const route = url.pathname.replace(/^\/api\/v10/, '');
     const call = { method: req.method, route, query: url.search, body: raw, reason: req.headers['x-audit-log-reason'] ?? null, status: 0 };
     calls.push(call);
@@ -436,7 +464,7 @@ function createFakeDiscord() {
   });
 
   return {
-    state, faults, calls, handle, sf,
+    state, faults, calls, site, handle, sf,
     start: () => new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}/api/v10`))),
     stop: () => new Promise((resolve) => { server.closeAllConnections?.(); server.close(() => resolve()); }),
   };
@@ -448,7 +476,7 @@ function createFakeDiscord() {
 const output = [];
 function envWith(extra) {
   const env = { ...process.env };
-  for (const key of Object.keys(env)) if (/^(CI|GITHUB_ACTIONS|GITHUB_EVENT_NAME|DISCORD_SETUP_.*)$/i.test(key)) delete env[key];
+  for (const key of Object.keys(env)) if (/^(CI|GITHUB_ACTIONS|GITHUB_EVENT_NAME|DISCORD_SETUP_.*|RIFTBORN_.*)$/i.test(key)) delete env[key];
   return { ...env, ...extra };
 }
 // A run that hangs (a rate limit gate pushed far ahead, say) is killed and fails instead.
@@ -464,9 +492,10 @@ function run(args, env, script = SCRIPT, timeout = 120_000) {
       assert.ok(!signal, `${args.join(' ')} hung and was killed after ${timeout / 1000} s`);
       const count = (kind) => stdout.split('\n').filter((line) => line.startsWith(`::${kind} `)).length;
       // GitHub keeps 50 annotations per job and the job has 12 steps: each step writes exactly one
-      // summary notice and at most 3 errors, 48 in all ("all" runs every phase in one process).
+      // summary (a notice, or a warning) and at most 3 errors, 48 in all ("all" runs every phase in
+      // one process).
       const steps = args[0] === 'all' ? 12 : 1;
-      if (args[0] !== 'nonsense') assert.equal(count('notice'), steps, `one summary notice per step for ${args.join(' ')}`);
+      if (args[0] !== 'nonsense') assert.equal(count('notice') + count('warning'), steps, `one summary per step for ${args.join(' ')}`);
       assert.ok(count('error') <= 3 * steps, `too many error annotations for ${args.join(' ')}`);
       resolve({ code, stdout, stderr, text: `${stdout}${stderr}` });
     });
@@ -718,12 +747,49 @@ for (const [i, rel] of RELEASES.entries()) {
     assert.ok(rel[key].length + 60 <= 2000, `${rel.version}: ${key} fits in a Discord message`);
   }
 }
-assert.equal((WORKFLOW.match(/if: \$\{\{ !cancelled\(\) && steps\.discover\.outcome == 'success' \}\}/g) ?? []).length, phases.length - 1, 'later steps run even when an earlier one fails');
+// The triggers: a push that changes the Discord files, the end of each deploy of riftborn.us, and a run
+// by hand. The deploy is named exactly as pages.yml names itself (GitHub matches the name), on main.
+const ON = WORKFLOW.match(/\non:\n((?: {2}.*\n|\n)+)/)[1];
+assert.deepEqual([...ON.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]), ['push', 'workflow_run', 'workflow_dispatch'], 'the triggers');
+const PAGES_NAME = PAGES_WORKFLOW.match(/^name: (.+)$/m)[1].trim();
+assert.equal(PAGES_NAME, 'Build and deploy Riftborn to GitHub Pages and Cloudflare Pages', 'the deploy workflow\'s name');
+assert.ok(ON.includes(`\n  workflow_run:\n    workflows: [${PAGES_NAME}]\n    types: [completed]\n    branches: [main]\n`), 'runs when the deploy of main completes');
+assert.match(WORKFLOW, /\n {4}if: github\.ref == 'refs\/heads\/main' && \(github\.event_name != 'workflow_run' \|\| github\.event\.workflow_run\.conclusion == 'success'\)\n/,
+  'main only, and after a deploy only when it succeeded');
+// Every step runs after Discover even when an earlier one fails; a workflow_run run is Discover guild
+// and Release posts only (the settings step, and with it the icon, never runs then).
+const stepIf = Object.fromEntries([...WORKFLOW.matchAll(/\n {6}- name: .+\n(?: {8}id: .+\n)?(?: {8}if: (.+)\n)? {8}run: node scripts\/discord-setup\.mjs ([a-z-]+)\n/g)].map((m) => [m[2], m[1] ?? '']));
+assert.deepEqual(Object.keys(stepIf), phases, 'every setup step has its condition read');
+for (const phase of phases) {
+  const want = phase === 'discover' ? ''
+    : phase === 'releases' ? "${{ !cancelled() && steps.discover.outcome == 'success' }}"
+      : "${{ !cancelled() && steps.discover.outcome == 'success' && github.event_name != 'workflow_run' }}";
+  assert.equal(stepIf[phase], want, `${phase}: ${phase === 'discover' ? 'runs on every trigger' : phase === 'releases' ? 'runs on every trigger once Discover succeeded' : 'skipped on workflow_run'}`);
+}
+// One Discord run at a time, and a running one is never cancelled (it may be mid-post). GitHub keeps
+// one waiting run per group and a newer one replaces it, so a run whose job is skipped (a failed or
+// cancelled deploy, a manual run off main) gets a group of its own: the group repeats the job's
+// condition exactly, and is checked here by evaluating it (GitHub's && and || work as JavaScript's).
+const JOB_IF = WORKFLOW.match(/\n {4}if: (github\.ref == .+)\n/)[1];
+const GROUP = `\${{ ${JOB_IF} && 'discord-setup' || format('discord-setup-skipped-{0}', github.run_id) }}`;
+assert.ok(WORKFLOW.includes(`\nconcurrency:\n  # The job's own condition (below): runs that will do something share discord-setup, and a run whose\n  # job is skipped gets a group of its own, so it can never replace a waiting run that would post.\n  group: ${GROUP}\n  cancel-in-progress: false\n`),
+  "one run at a time, never cancelled, the group following the job's condition");
+assert.equal((WORKFLOW.match(/^\s*concurrency:/gm) ?? []).length, 1, 'one concurrency setting, for the whole workflow');
+const groupOf = new Function('github', 'format', `return ${GROUP.slice(4, -3).replace(/ == /g, ' === ').replace(/ != /g, ' !== ')};`);
+const fmt = (pattern, ...args) => pattern.replace(/\{(\d+)\}/g, (_, i) => String(args[i]));
+const groupFor = (event_name, conclusion, ref = 'refs/heads/main') => groupOf({ ref, event_name, run_id: 4242, event: conclusion ? { workflow_run: { conclusion } } : {} }, fmt);
+assert.equal(groupFor('push'), 'discord-setup', 'a push to main shares the group');
+assert.equal(groupFor('workflow_dispatch'), 'discord-setup', 'a manual run on main shares the group');
+assert.equal(groupFor('workflow_run', 'success'), 'discord-setup', 'the run after a successful deploy shares the group');
+for (const conclusion of ['failure', 'cancelled', 'skipped', 'timed_out']) {
+  assert.equal(groupFor('workflow_run', conclusion), 'discord-setup-skipped-4242', `after a deploy that ended ${conclusion}: a group of its own`);
+}
+assert.equal(groupFor('workflow_dispatch', null, 'refs/heads/dev'), 'discord-setup-skipped-4242', 'a manual run off main: a group of its own');
 
 // The icon the workflow replaces on request: a one-shot workflow_dispatch input, handed to the settings
 // step only through an env var, and never interpolated into a shell command.
 assert.match(WORKFLOW, /\n {2}workflow_dispatch:\n {4}inputs:\n {6}replace_icon:\n(?: {8}description: .+\n)? {8}type: boolean\n {8}default: false\n/, 'replace_icon is an unticked boolean workflow_dispatch input');
-assert.match(WORKFLOW, /\n {2}push:\n {4}branches: \[main\]\n {4}paths:\n(?: {6}- .+\n)+ {2}workflow_dispatch:/, 'the push trigger has no inputs');
+assert.equal((ON.match(/^ +inputs:/gm) ?? []).length, 1, 'only workflow_dispatch has inputs (push and workflow_run have none)');
 const replaceLines = WORKFLOW.split('\n').filter((line) => line.includes('DISCORD_SETUP_REPLACE_ICON:'));
 assert.deepEqual(replaceLines, ["          DISCORD_SETUP_REPLACE_ICON: ${{ github.event_name == 'workflow_dispatch' && inputs.replace_icon && 'true' || '' }}"], 'one env line carries the flag, empty unless a manual run ticked it');
 assert.match(WORKFLOW, /run: node scripts\/discord-setup\.mjs settings\n {8}env:\n {10}DISCORD_SETUP_BOT_TOKEN: .+\n(?: {10}#.*\n)? {10}DISCORD_SETUP_REPLACE_ICON:/, 'only the settings step gets the flag');
@@ -747,7 +813,9 @@ assert.match(readFileSync(SCRIPT, 'utf8'), /\nconst ICON_REVISION = 2;\n/, 'the 
 
 const fake = createFakeDiscord();
 const base = await fake.start();
-const env = envWith({ DISCORD_SETUP_BOT_TOKEN: TOKEN, DISCORD_SETUP_API_BASE: base });
+// riftborn.us is the fake too (site.config.mjs's test override), so no run ever asks the real site.
+const SITE = base.replace(/\/api\/v10$/, '');
+const env = envWith({ DISCORD_SETUP_BOT_TOKEN: TOKEN, DISCORD_SETUP_API_BASE: base, RIFTBORN_TEST_LIVE_ORIGIN: SITE });
 const G = fake.state.ids.G;
 const writes = () => fake.calls.filter((c) => c.method !== 'GET' && c.status < 400);
 let releaseDir = null; // the script copy the release posts run from (7b)
@@ -921,7 +989,7 @@ try {
   const junk = await run(['settings'], replaceEnv('yes'));
   assert.equal(junk.code, 1, 'an unknown flag value is an error');
   assert.match(junk.stdout, /::error title=Server settings and icon::DISCORD_SETUP_REPLACE_ICON must be "true" or "1" \(or empty\): the icon was not touched/, 'unknown value explained');
-  for (const event of ['push', 'schedule', '']) {
+  for (const event of ['push', 'workflow_run', 'schedule', '']) {
     const refused = await run(['settings'], envWith({ GITHUB_ACTIONS: 'true', ...(event ? { GITHUB_EVENT_NAME: event } : {}), DISCORD_SETUP_REPLACE_ICON: 'true' }));
     assert.equal(refused.code, 1, `a ${event || 'no-event'} run cannot replace the icon`);
     assert.match(refused.stdout, /::error title=Server settings and icon::the server icon is replaced only by a manual run of the workflow \(workflow_dispatch with "replace_icon" ticked\), not by /, `${event || 'no-event'}: refused with the reason`);
@@ -1040,14 +1108,20 @@ try {
 
   // 7b. Release posts, run from a copy of the script beside a test list of releases. The News
   // channels start as on the live server: RiftBot's 2.2 posts (made by the posts phase, never
-  // crossposted), the announcement behind 150 newer Rift Keeper messages.
+  // crossposted), the announcement behind 150 newer Rift Keeper messages. The copy sits in the
+  // repository's layout (scripts/ beside the site config it reads the live host from). riftborn.us
+  // serves 2.3.4 until 7c, so every version here is live already (2.3.4 itself the equal case).
   releaseDir = mkdtempSync(path.join(os.tmpdir(), 'riftborn-releases-'));
-  const COPY = path.join(releaseDir, 'discord-setup.mjs');
+  mkdirSync(path.join(releaseDir, 'scripts'));
+  const COPY = path.join(releaseDir, 'scripts', 'discord-setup.mjs');
   cpSync(SCRIPT, COPY);
-  const releases = (list) => {
-    writeFileSync(path.join(releaseDir, 'discord-releases.mjs'), typeof list === 'string' ? list : `export const RELEASES = ${JSON.stringify(list, null, 2)};\n`);
+  for (const file of ['site.config.mjs', 'site.hosts.mjs']) cpSync(path.join(ROOT, file), path.join(releaseDir, file));
+  fake.site.version = '2.3.4';
+  const releases = (list, runEnv = env) => {
+    writeFileSync(path.join(releaseDir, 'scripts', 'discord-releases.mjs'), typeof list === 'string' ? list : `export const RELEASES = ${JSON.stringify(list, null, 2)};\n`);
     fake.calls.length = 0;
-    return run(['releases'], env, COPY, 30_000);
+    fake.site.calls.length = 0;
+    return run(['releases'], runEnv, COPY, 30_000);
   };
   const ann = byName('announcements');
   const pn = byName('patch-notes');
@@ -1067,7 +1141,10 @@ try {
     patchNotes: `**v${shortV(version)} · ${title}** (1 Oct 2026)\n- **Bigger worlds:** every world is larger.\n\nFull notes in-game: **PATCH NOTES** on the main menu.`,
   });
   const placeholder = (version) => ({ version, ping: { announcement: false, patchNotes: true }, announcement: null, patchNotes: null });
-  const notice = (result) => result.stdout.split('\n').find((line) => line.startsWith('::notice title=Release posts::'))?.slice('::notice title=Release posts::'.length);
+  // The step's summary, a notice (or a warning, when riftborn.us could not be read), and which it was.
+  const summaryLine = (result) => result.stdout.split('\n').map((line) => line.match(/^::(notice|warning) title=Release posts::(.*)$/)).find(Boolean);
+  const notice = (result) => summaryLine(result)?.[2];
+  const level = (result) => summaryLine(result)?.[1];
   const newsWrites = () => writes().map((c) => `${c.method} ${c.route}`);
   const botNews = (c) => s.messages.get(c.id).filter((msg) => msg.author.id === s.ids.BOT);
   const PLACEHOLDER_NOTE = 'a placeholder in scripts/discord-releases.mjs';
@@ -1107,6 +1184,7 @@ try {
   assert.equal(again.code, 0, `second run\n${again.text}`);
   assert.equal(notice(again), 'releases: 2.2.0 and 2.3.0 already posted', 'second run notice');
   assert.deepEqual(newsWrites(), [], 'second run: no writes');
+  assert.equal(fake.site.calls.length, 0, 'nothing to post: riftborn.us is not asked');
 
   // 2.3.1 pings both roles (and its marker never matches 2.3's post); a placeholder 2.4.0 holds back
   // itself and the 2.4.1 after it.
@@ -1214,8 +1292,123 @@ try {
   assert.equal(stale.code, 0, `older uncrossposted version\n${stale.text}`);
   assert.ok(!fake.calls.some((c) => c.route.endsWith('/crosspost')), 'an older uncrossposted version is left alone');
 
-  // 8. No secret anywhere: output, URLs, request bodies.
-  const haystack = [...output, ...fake.calls.flatMap((c) => [c.route, c.query, c.body])].join('\n');
+  // 7c. The live gate. The channels start again from 2.2 only, and riftborn.us serves 2.3.0 (today).
+  // The release push carries 2.4.0's entry before the deploy has put 2.4.0 live.
+  seedNews();
+  fake.site.version = '2.3.0';
+  const LIVE = new URL(SITE).host;
+  const posts24 = () => [...s.messages.values()].flat().filter((msg) => /\*\*(Riftborn |v)2\.4 ·/.test(msg.content));
+  const list24 = [r22, entry('2.3.0', 'Bigger Worlds'), entry('2.4.0', 'Next', { announcement: true, patchNotes: true })];
+  const early = await releases(list24);
+  assert.equal(early.code, 0, `2.4.0 before it is live\n${early.text}`);
+  assert.equal(notice(early), `releases: 2.2.0 already posted; 2.3.0 posted to #announcements and #patch-notes (crossposted, pinged Patch pings); 2.4.0 waits for ${LIVE} to serve it (live is 2.3.0)`,
+    'the live version (equal) goes out, the newer one waits for riftborn.us');
+  assert.equal(newsWrites().length, 4, 'only 2.3.0 is written: a post and a crosspost per channel');
+  assert.deepEqual(posts24(), [], '2.4.0 is not posted while riftborn.us serves 2.3.0');
+  assert.equal(level(early), 'notice', 'a version waiting for the deploy is a notice');
+  assert.equal(fake.site.calls.length, 1, 'riftborn.us is asked once per run');
+  const [ask] = fake.site.calls;
+  assert.equal(ask.method, 'GET', 'a GET');
+  assert.match(ask.query, /^\?t=\d+$/, 'with a cache-busting query');
+  assert.equal(ask.headers['cache-control'], 'no-cache', 'asking for a fresh answer');
+  assert.equal(ask.headers.authorization, undefined, 'never with the bot token');
+
+  // Still 2.3.0 live, and a 2.4.1 behind 2.4.0: both wait, nothing is written.
+  const list241 = [...list24, entry('2.4.1', 'Hotfix')];
+  const still = await releases(list241);
+  assert.equal(still.code, 0, `still 2.3.0 live\n${still.text}`);
+  assert.equal(notice(still), `releases: 2.2.0 and 2.3.0 already posted; 2.4.0 and 2.4.1 wait for ${LIVE} to serve them (live is 2.3.0)`, 'a version and the ones after it wait');
+  assert.deepEqual(newsWrites(), [], 'nothing written while they wait');
+
+  // riftborn.us does not answer (503s, then a closed port), even though it would serve 2.4.0: nothing
+  // is posted, four tries, and it is a warning, not an error.
+  fake.site.version = '2.4.0';
+  fake.site.answer = { status: 503, body: 'Service Unavailable' };
+  const down = await releases(list241);
+  fake.site.answer = null;
+  assert.equal(down.code, 0, `riftborn.us down is not a failure\n${down.text}`);
+  assert.doesNotMatch(down.stdout, /^::error/m, 'riftborn.us down: no error annotation');
+  assert.equal(level(down), 'warning', 'riftborn.us down: the summary is a warning');
+  assert.equal(notice(down), `releases: 2.2.0 and 2.3.0 already posted; 2.4.0 and 2.4.1 wait: ${LIVE}/version.json could not be read (HTTP 503, 4 tries), so nothing new was posted; `
+    + 'the next run checks again (the next deploy of main, or Run workflow by hand)', 'riftborn.us down: says so');
+  assert.equal(fake.site.calls.length, 4, 'riftborn.us down: four tries');
+  assert.deepEqual(newsWrites(), [], 'riftborn.us down: nothing written');
+  const closed = http.createServer();
+  await new Promise((resolve) => closed.listen(0, '127.0.0.1', resolve));
+  const deadOrigin = `http://127.0.0.1:${closed.address().port}`;
+  await new Promise((resolve) => closed.close(resolve));
+  const unreachable = await releases(list241, { ...env, RIFTBORN_TEST_LIVE_ORIGIN: deadOrigin });
+  assert.equal(unreachable.code, 0, `riftborn.us unreachable is not a failure\n${unreachable.text}`);
+  assert.doesNotMatch(unreachable.stdout, /^::error/m, 'unreachable: no error annotation');
+  assert.equal(level(unreachable), 'warning', 'unreachable: the summary is a warning');
+  assert.match(notice(unreachable), /; 2\.4\.0 and 2\.4\.1 wait: 127\.0\.0\.1:\d+\/version\.json could not be read \(network error \(ECONNREFUSED\), 4 tries\), so nothing new was posted;/, 'unreachable: says why');
+  assert.deepEqual(newsWrites(), [], 'unreachable: nothing written');
+
+  // A malformed answer is an error (reported once, no retry) and posts nothing.
+  for (const [answer, why] of [
+    [{ status: 200, body: 'not json' }, 'answered without a MAJOR.MINOR.PATCH version ("not json")'],
+    [{ status: 200, body: '<!doctype html><title>Riftborn</title>' }, 'answered without a MAJOR.MINOR.PATCH version ("<!doctype html><title>Riftborn</title>")'],
+    [{ status: 200, body: '{"version":"2.4"}' }, 'answered without a MAJOR.MINOR.PATCH version ("{\\"version\\":\\"2.4\\"}")'],
+    [{ status: 200, body: '{"version":"v2.4.0"}' }, 'answered without a MAJOR.MINOR.PATCH version'],
+    [{ status: 200, body: '{"version":2.4}' }, 'answered without a MAJOR.MINOR.PATCH version'],
+    [{ status: 200, body: '{"build":"0123456789"}' }, 'answered without a MAJOR.MINOR.PATCH version'],
+    [{ status: 404, body: 'Not Found' }, 'answered HTTP 404, not its version'],
+    // A redirect is not followed, even to a place that serves the version (2.4.0 would be posted).
+    [{ status: 301, body: '', headers: { location: `${SITE}/moved/version.json` } }, 'answered HTTP 301, not its version'],
+  ]) {
+    fake.site.answer = answer;
+    const bad = await releases(list241);
+    fake.site.answer = null;
+    assert.equal(bad.code, 1, `a malformed answer fails the step: ${answer.body}\n${bad.text}`);
+    const errors = bad.stdout.split('\n').filter((line) => line.startsWith('::error '));
+    assert.equal(errors.length, 1, `reported once: ${answer.body}`);
+    assert.ok(errors[0].startsWith(`::error title=Release posts::${SITE}/version.json ${why}`), `says what came back: ${errors[0]}`);
+    assert.equal(fake.site.calls.length, 1, `an answer is not retried: ${answer.body}`);
+    assert.deepEqual(newsWrites(), [], `a malformed answer: nothing written: ${answer.body}`);
+    assert.equal(notice(bad), 'releases: 2.2.0 and 2.3.0 already posted; 2.4.0 not posted to #announcements and #patch-notes (see the errors); '
+      + '2.4.1 held back in #announcements and #patch-notes until the version before it is posted', `a malformed answer: notice: ${answer.body}`);
+  }
+
+  // The deploy is done and riftborn.us serves 2.4.0: posted once, crossposted, both pings; 2.4.1
+  // still waits. The next run writes nothing.
+  const golive = await releases(list241);
+  assert.equal(golive.code, 0, `2.4.0 live\n${golive.text}`);
+  assert.equal(notice(golive), `releases: 2.2.0 and 2.3.0 already posted; 2.4.0 posted to #announcements and #patch-notes (crossposted, pinged News pings and Patch pings); 2.4.1 waits for ${LIVE} to serve it (live is 2.4.0)`, '2.4.0 live: posted');
+  const [a24, p24] = [botNews(ann).at(-1), botNews(pn).at(-1)];
+  assert.deepEqual(newsWrites(), [`POST /channels/${ann.id}/messages`, `POST /channels/${ann.id}/messages/${a24.id}/crosspost`,
+    `POST /channels/${pn.id}/messages`, `POST /channels/${pn.id}/messages/${p24.id}/crosspost`], '2.4.0 live: one post and one crosspost per channel');
+  assert.deepEqual([a24.content, p24.content], [`<@&${NEWS}>\n${linkNews(list24[2].announcement)}`, `<@&${PATCH}>\n${linkNews(list24[2].patchNotes)}`], '2.4.0 live: its texts');
+  const afterLive = await releases(list241);
+  assert.equal(afterLive.code, 0, `after 2.4.0\n${afterLive.text}`);
+  assert.equal(notice(afterLive), `releases: 2.2.0, 2.3.0 and 2.4.0 already posted; 2.4.1 waits for ${LIVE} to serve it (live is 2.4.0)`, 'after 2.4.0: notice');
+  assert.deepEqual(newsWrites(), [], 'after 2.4.0: nothing written');
+  assert.equal(posts24().length, 2, '2.4.0 once per channel');
+
+  // Versions compare as numbers, not text: with 2.9.5 live, 2.4.1 and 2.9.0 go out and 2.10.0 waits;
+  // with 2.10.0 live, it goes out.
+  const list210 = [...list241, entry('2.9.0', 'Nine'), entry('2.10.0', 'Ten')];
+  fake.site.version = '2.9.5';
+  const nine = await releases(list210);
+  assert.equal(nine.code, 0, `2.9.5 live\n${nine.text}`);
+  assert.equal(notice(nine), 'releases: 2.2.0, 2.3.0 and 2.4.0 already posted; 2.4.1 posted to #announcements and #patch-notes (crossposted, pinged Patch pings); '
+    + `2.9.0 posted to #announcements and #patch-notes (crossposted, pinged Patch pings); 2.10.0 waits for ${LIVE} to serve it (live is 2.9.5)`, '2.9.5 live: 2.10.0 is newer');
+  fake.site.version = '2.10.0';
+  const ten = await releases(list210);
+  assert.equal(ten.code, 0, `2.10.0 live\n${ten.text}`);
+  assert.equal(notice(ten), 'releases: 2.2.0, 2.3.0, 2.4.0, 2.4.1 and 2.9.0 already posted; 2.10.0 posted to #announcements and #patch-notes (crossposted, pinged Patch pings)', '2.10.0 live: posted');
+
+  // A rollback after a version went out in one channel only: the other channel waits for it to be
+  // live again, and nothing is written.
+  s.messages.set(pn.id, s.messages.get(pn.id).filter((msg) => !msg.content.includes('**v2.10 · ')));
+  fake.site.version = '2.9.5';
+  const rolledBack = await releases(list210);
+  assert.equal(rolledBack.code, 0, `rolled back\n${rolledBack.text}`);
+  assert.equal(notice(rolledBack), `releases: 2.2.0, 2.3.0, 2.4.0, 2.4.1 and 2.9.0 already posted; 2.10.0 already in #announcements, waits in #patch-notes for ${LIVE} to serve it (live is 2.9.5)`, 'rolled back: notice');
+  assert.deepEqual(newsWrites(), [], 'rolled back: nothing written');
+
+  // 8. No secret anywhere: output, URLs, request bodies; and riftborn.us never gets the token.
+  assert.ok(fake.site.seen.length > 0 && fake.site.seen.every((c) => c.headers.authorization === undefined && !JSON.stringify(c.headers).includes(TOKEN)), 'riftborn.us never sees the token');
+  const haystack = [...output, ...fake.calls.flatMap((c) => [c.route, c.query, c.body]), ...fake.site.seen.map((c) => c.query)].join('\n');
   assert.ok(!haystack.includes(TOKEN), 'the token never appears in output or request bodies');
   assert.ok(!haystack.includes('secret-webhook-token'), 'webhook URLs never appear');
 

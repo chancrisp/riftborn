@@ -1,15 +1,25 @@
 // Release posts: what RiftBot posts in the Riftborn Discord when a new version ships, one entry per
 // version, oldest first. Data only: the "releases" phase of scripts/discord-setup.mjs (the "Release
 // posts" step of .github/workflows/discord-setup.yml, which runs on every push to main that changes
-// this file) posts each entry once, the announcement in #announcements and the patch notes in
-// #patch-notes, and then publishes both so servers that follow those channels get them too.
+// this file and after every deploy of riftborn.us) posts each entry once, the announcement in
+// #announcements and the patch notes in #patch-notes, and then publishes both so servers that follow
+// those channels get them too. An entry is posted only once https://riftborn.us/version.json serves
+// its version (or a newer one), so it can be pushed before its version is live.
 //
-// How a new version gets announced:
-//   1. The lead drafts both texts from the in-game patch notes for that version.
-//   2. The owner approves them, and says whether either post pings (see ping below).
-//   3. The lead fills in the version's entry below (or adds a new one at the end) and pushes it to
-//      main once that version is live (each version is merged to main only after it is approved
-//      live). That push runs the workflow, and RiftBot posts and publishes the two messages.
+// How a new version gets announced, at the same time as it goes live:
+//   1. With the release candidate, the lead drafts both texts from its in-game patch notes.
+//   2. The owner approves the candidate and the texts together, and says whether either post pings
+//      (see ping below).
+//   3. The lead promotes the candidate (.tools/promote-live.mjs) and adds the version's entry below
+//      in the same push to main as live/. That push's run usually finds riftborn.us still on the old
+//      version and leaves the entry waiting ("2.4.0 waits for riftborn.us to serve it"); once the
+//      Pages deploy has put the new version live (about 1-2 minutes), the workflow runs again and
+//      RiftBot posts and publishes the two messages. (If the deploy finishes first, the push's own
+//      run posts them and the later run finds them already there.)
+//   If riftborn.us could not be reached at that moment (the run then shows a warning), the entry
+//   waits for the next deploy of main or a run by hand (Actions > Discord server setup > Run
+//   workflow). Pushing an entry whose version never goes live posts nothing, and holds back every
+//   entry after it.
 //
 // An entry:
 //   version       MAJOR.MINOR.PATCH, newer than the entry above it.
