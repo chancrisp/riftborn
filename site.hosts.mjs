@@ -23,6 +23,12 @@ export const HOSTS = Object.freeze({
 // origin stays: the legacy game posts scores and feedback until launch, and the feedback inbox
 // reads through it afterwards. RIFTBORN_SITE_ORIGIN (GitHub variable) can add more.
 export const WORKER_ALLOWED_ORIGINS = Object.freeze([HOSTS.live, HOSTS.dev, HOSTS.legacyOrigin]);
+// Of those, the origins that may only READ the leaderboard (GET /api/scores): the test build shows
+// the live boards but never posts to them. The Worker refuses their score writes with 403 before
+// any work, and their preflight offers no write (server/scores-api.js). Accounts and feedback are
+// untouched. Delivered as the SCORE_READ_ONLY_ORIGINS var (scripts/cloudflare-worker-upload.mjs,
+// cloudflare/wrangler.jsonc).
+export const SCORE_READ_ONLY_ORIGINS = Object.freeze([HOSTS.dev]);
 // Where a sign-in may return to (exact origin + path). Accounts never run on github.io.
 export const AUTH_RETURN_ORIGINS = Object.freeze([HOSTS.live, HOSTS.dev]);
 export const AUTH_RETURN_PATHS = Object.freeze(['/']);

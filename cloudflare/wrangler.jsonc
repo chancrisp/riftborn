@@ -9,6 +9,7 @@
   "vars": {
     "ENVIRONMENT": "production",
     "ALLOWED_ORIGINS": "https://riftborn.us,https://dev.riftborn.us,https://chancrisp.github.io",
+    "SCORE_READ_ONLY_ORIGINS": "https://dev.riftborn.us",
     "AUTH_PUBLIC_BASE": "https://api.riftborn.us"
   },
   "d1_databases": [

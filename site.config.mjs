@@ -20,7 +20,7 @@
 // riftborn.us without their saved data (localStorage belongs to the old origin).
 
 import { HOSTS } from './site.hosts.mjs';
-export { HOSTS, WORKER_ALLOWED_ORIGINS, AUTH_RETURN_ORIGINS, AUTH_RETURN_PATHS, AUTH_PUBLIC_BASE } from './site.hosts.mjs';
+export { HOSTS, WORKER_ALLOWED_ORIGINS, SCORE_READ_ONLY_ORIGINS, AUTH_RETURN_ORIGINS, AUTH_RETURN_PATHS, AUTH_PUBLIC_BASE } from './site.hosts.mjs';
 
 export const LAUNCHED = true;
 

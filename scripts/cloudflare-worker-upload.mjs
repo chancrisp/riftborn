@@ -1,7 +1,7 @@
 import { build } from 'esbuild';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { AUTH_PUBLIC_BASE, WORKER_ALLOWED_ORIGINS } from '../site.hosts.mjs';
+import { AUTH_PUBLIC_BASE, SCORE_READ_ONLY_ORIGINS, WORKER_ALLOWED_ORIGINS } from '../site.hosts.mjs';
 
 const ACCOUNT_API = 'https://api.cloudflare.com/client/v4/accounts';
 const WORKER_NAME = 'riftborn-leaderboard';
@@ -71,6 +71,9 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
       { type: 'inherit', name: 'DB' },
       { type: 'plain_text', name: 'ENVIRONMENT', text: 'production' },
       { type: 'plain_text', name: 'ALLOWED_ORIGINS', text: origins.join(',') },
+      // dev.riftborn.us reads the leaderboard but never writes it (server/scores-api.js). Always
+      // from site.hosts.mjs: RIFTBORN_SITE_ORIGIN can add origins but never lift this.
+      { type: 'plain_text', name: 'SCORE_READ_ONLY_ORIGINS', text: SCORE_READ_ONLY_ORIGINS.join(',') },
       // Sign-in runs on this host only (server/accounts-api.js publicBase); callback URLs live there.
       { type: 'plain_text', name: 'AUTH_PUBLIC_BASE', text: AUTH_PUBLIC_BASE },
       {

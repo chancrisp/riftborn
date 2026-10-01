@@ -1362,4 +1362,109 @@ console.log('PASS failed session proofs: bogus tokens on GET /api/account, /api/
 }
 console.log('PASS score limiter keys: keyed hash of the address (IPv6 /64) when the Worker has its signing key.');
 
+// ---- read-only score origins (v2.3.1): dev.riftborn.us reads the live boards, never writes them -----
+// The production configuration (cloudflare/wrangler.jsonc vars) over https. A refused write must cost
+// nothing: no rate-limiter call, no body read, no account lookup, no database access at all.
+{
+  const LIVE = 'https://riftborn.us', DEV = 'https://dev.riftborn.us', PREVIEW = 'https://v2-3-1.riftborn-dev.pages.dev';
+  const wrangler = JSON.parse(fs.readFileSync('cloudflare/wrangler.jsonc', 'utf8')).vars;
+  const limited = [];
+  const SCORE_RATE_LIMITER = { async limit({ key }) { limited.push(key); return { success: true }; } };
+  let reached = 0;
+  const watched = { ...DB, prepare(sql) { reached++; return DB.prepare(sql); } };
+  const site = { ...env, ...wrangler, DB: watched, SCORE_RATE_LIMITER };
+  assert.equal(site.ENVIRONMENT, 'production');
+  assert.equal(site.SCORE_READ_ONLY_ORIGINS, DEV);
+  const at = (path, opts = {}) => call(path, { base: 'https://api.riftborn.us', e: site, ...opts });
+  const stored = n => one('SELECT COUNT(*) AS n FROM scores WHERE id = ?', uid(n)).n;
+  const player = await register('readonly-1', 'DevReader');
+
+  // Reads: exactly what riftborn.us gets, with CORS for dev.riftborn.us.
+  assert.equal((await at('/api/scores', { method: 'POST', body: run(700, { name: 'Live Runner' }), origin: LIVE })).status, 200, 'riftborn.us still posts');
+  assert.equal(stored(700), 1);
+  assert.equal(limited.length, 1, 'and its post is rate limited as before');
+  assert.equal((await at('/api/scores', { method: 'POST', body: run(701), origin: LIVE, token: player.token })).status, 200, 'A signed-in post from riftborn.us too');
+  for (const query of ['', '?mode=normal&version=all', '?mode=normal&version=all&ruleset=original']) {
+    const dev = await at('/api/scores' + query, { origin: DEV });
+    assert.equal(dev.status, 200, 'dev.riftborn.us reads ' + (query || 'the board'));
+    assert.equal(dev.headers.get('Access-Control-Allow-Origin'), DEV);
+    assert.equal(dev.headers.get('Vary'), 'Origin');
+    assert.equal(dev.headers.get('X-Content-Type-Options'), 'nosniff');
+    assert.deepEqual(dev.data, (await at('/api/scores' + query, { origin: LIVE })).data, 'The same board as riftborn.us');
+  }
+  assert.ok((await at('/api/scores?mode=normal&version=all', { origin: DEV })).data.scores.some(row => row.name === 'DevReader' && row.verified), 'Account rows read as usual');
+  const head = await at('/api/scores', { method: 'HEAD', origin: DEV });
+  assert.equal(head.status, (await at('/api/scores', { method: 'HEAD', origin: LIVE })).status, 'HEAD: as for riftborn.us');
+
+  // Preflight: dev.riftborn.us is offered GET and no request headers, so a browser never sends its
+  // JSON post (POST is CORS-safelisted; the Content-Type it needs is not offered). riftborn.us: as before.
+  for (const [method, headers] of [['POST', 'content-type'], ['POST', 'authorization,content-type'], ['PUT', 'content-type'], ['PATCH', ''], ['DELETE', '']]) {
+    const r = await at('/api/scores', { method: 'OPTIONS', origin: DEV, headers: { 'Access-Control-Request-Method': method, ...(headers ? { 'Access-Control-Request-Headers': headers } : {}) } });
+    assert.equal(r.status, 204);
+    assert.equal(r.headers.get('Access-Control-Allow-Origin'), DEV);
+    assert.equal(r.headers.get('Access-Control-Allow-Methods'), 'GET, OPTIONS', `dev.riftborn.us preflight for ${method} offers no write`);
+    assert.equal(r.headers.get('Access-Control-Allow-Headers'), null, 'and no request headers');
+  }
+  const livePreflight = await at('/api/scores', { method: 'OPTIONS', origin: LIVE, headers: { 'Access-Control-Request-Method': 'POST' } });
+  assert.equal(livePreflight.headers.get('Access-Control-Allow-Methods'), 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  assert.equal(livePreflight.headers.get('Access-Control-Allow-Headers'), 'Content-Type, Authorization');
+
+  // Writes from dev.riftborn.us: 403 before anything else, whatever the method, body or session.
+  const rows = () => one('SELECT COUNT(*) AS n FROM scores').n;
+  reached = 0;
+  await at('/api/scores', { origin: DEV });
+  assert.ok(reached > 0, 'A read reaches the database (so the counter below is live)');
+  const before = rows();
+  const writes = [
+    ['POST', { body: run(710) }, 'a guest post'],
+    ['POST', { body: run(711), token: player.token }, 'a signed-in post'],
+    ['POST', { body: JSON.stringify(run(712)), headers: { 'Content-Type': 'text/plain' } }, 'a simple-request post (no preflight)'],
+    ['POST', { body: 'not json' }, 'a malformed post'],
+    ['PUT', { body: run(713) }, 'PUT'],
+    ['PATCH', { body: run(714) }, 'PATCH'],
+    ['DELETE', {}, 'DELETE']
+  ];
+  for (const [method, opts, what] of writes) {
+    reached = 0;
+    const used = limited.length;
+    const r = await at('/api/scores', { method, origin: DEV, ...opts });
+    assert.equal(r.status, 403, `dev.riftborn.us: ${what} is refused`);
+    assert.deepEqual(r.data, { error: 'read_only_origin' });
+    assert.equal(r.headers.get('Access-Control-Allow-Origin'), DEV, 'with CORS, so the page can read why');
+    assert.equal(r.headers.get('Cache-Control'), 'no-store');
+    assert.equal(r.headers.get('X-Content-Type-Options'), 'nosniff');
+    assert.equal(r.headers.get('Strict-Transport-Security'), 'max-age=31536000');
+    assert.equal(reached, 0, `${what}: no database access`);
+    assert.equal(limited.length, used, `${what}: the rate limiter is not consumed`);
+  }
+  assert.equal(rows(), before, 'Nothing was written');
+  for (const n of [710, 711, 712, 713, 714]) assert.equal(stored(n), 0);
+
+  // No Origin (curl, a server): as before. Preview addresses: refused as before, reads included.
+  assert.equal((await at('/api/scores', { method: 'POST', body: run(720), origin: null })).status, 200, 'No Origin header: posts as before');
+  assert.equal(stored(720), 1);
+  assert.equal((await at('/api/scores', { origin: null })).status, 200);
+  for (const method of ['GET', 'POST', 'OPTIONS']) {
+    const r = await at('/api/scores', { method, origin: PREVIEW, ...(method === 'POST' ? { body: run(721) } : {}) });
+    assert.equal(r.status, 403, `${method} from a preview address`);
+    assert.deepEqual(r.data, { error: 'Forbidden origin' });
+    assert.equal(r.headers.get('Access-Control-Allow-Origin'), null);
+  }
+  assert.equal(stored(721), 0);
+  // Without the var (an older deploy) dev.riftborn.us is an ordinary allowed origin, as before 2.3.1.
+  assert.equal((await at('/api/scores', { method: 'POST', body: run(722), origin: DEV, e: { ...site, SCORE_READ_ONLY_ORIGINS: undefined } })).status, 200);
+  sqlite.prepare('DELETE FROM scores WHERE id = ?').run(uid(722));
+
+  // Account actions stay open to dev.riftborn.us (it uses real accounts): a rename from there shows on
+  // the account's existing rows at read time, without any score row being written.
+  const settled = rows();
+  const renamed = await at('/api/account', { method: 'PATCH', origin: DEV, token: player.token, body: { username: 'DevReader_Two' } });
+  assert.equal(renamed.status, 200, JSON.stringify(renamed.data));
+  assert.equal(renamed.headers.get('Access-Control-Allow-Origin'), DEV);
+  assert.equal((await at('/api/account', { origin: DEV, token: player.token })).status, 200);
+  assert.ok((await at('/api/scores?mode=normal&version=all', { origin: DEV })).data.scores.some(row => row.name === 'DevReader_Two'), 'The rename reaches the board');
+  assert.equal(rows(), settled, 'Account actions wrote no score row');
+}
+console.log('PASS read-only score origins: dev.riftborn.us reads the live boards (same rows, CORS), its preflight offers no write, every write from it is refused 403 before the limiter, body, accounts or database; riftborn.us and no-Origin posts as before; previews refused; account actions from dev unaffected.');
+
 console.log('PASS accounts: all flows.');

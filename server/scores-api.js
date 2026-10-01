@@ -10,8 +10,15 @@
 // turns into a guest run), and one the accounts database cannot check gets 503 (retried later).
 // The hooks also key the rate limiter by a hash of the address instead of the address itself.
 // Without them (the Sites Worker) everything behaves exactly as before.
+// Read-only origins (v2.3.1, SCORE_READ_ONLY_ORIGINS: dev.riftborn.us, from site.hosts.mjs) read the
+// boards exactly like any allowed origin but never write them: any method but GET/HEAD/OPTIONS gets
+// 403 before the rate limiter, the body, the accounts hooks or the database. Their preflight offers
+// GET only and no request headers: POST is a CORS-safelisted method, so it is the missing
+// Content-Type (and Authorization) that makes the browser stop a JSON post before it is sent.
+// Requests without an Origin (curl, servers) are not browser pages and are untouched.
 const CORS_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
 const CORS_HEADERS = 'Content-Type, Authorization';
+const READ_ONLY_METHODS = 'GET, OPTIONS';
 const json = (value, status = 200, origin = null, extra = {}) => {
   const headers = {
     'Content-Type': 'application/json',
@@ -106,6 +113,15 @@ function originAllowed(origin, env) {
     .includes(origin);
 }
 
+// Only narrows originAllowed: an origin must be allowed there to be answered at all.
+function originReadOnly(origin, env) {
+  return Boolean(origin) && String(env.SCORE_READ_ONLY_ORIGINS || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean)
+    .includes(origin);
+}
+
 export async function handleScores(request, env, accounts = null) {
   const url = new URL(request.url);
   if (url.pathname !== '/api/scores') return null;
@@ -113,20 +129,22 @@ export async function handleScores(request, env, accounts = null) {
   const origin = request.headers.get('Origin');
   const allowed = originAllowed(origin, env);
   if (!allowed) return json({ error: 'Forbidden origin' }, 403);
+  const readOnly = originReadOnly(origin, env);
   if (request.method === 'OPTIONS') {
     if (!origin) return json({ error: 'Origin required' }, 400);
     return new Response(null, {
       status: 204,
       headers: {
         'Access-Control-Allow-Origin': origin,
-        'Access-Control-Allow-Methods': CORS_METHODS,
-        'Access-Control-Allow-Headers': CORS_HEADERS,
+        'Access-Control-Allow-Methods': readOnly ? READ_ONLY_METHODS : CORS_METHODS,
+        ...(readOnly ? {} : { 'Access-Control-Allow-Headers': CORS_HEADERS }),
         'Access-Control-Max-Age': '86400',
         'Cache-Control': 'no-store',
         Vary: 'Origin'
       }
     });
   }
+  if (readOnly && !['GET', 'HEAD'].includes(request.method)) return json({ error: 'read_only_origin' }, 403, origin);
   if (!['GET', 'POST'].includes(request.method)) return json({ error: 'Method not allowed' }, 405, origin);
   if (request.headers.get('Sec-Fetch-Site') === 'cross-site' && !origin) return json({ error: 'Forbidden' }, 403);
 

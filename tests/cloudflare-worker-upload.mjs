@@ -26,15 +26,32 @@ assert.equal(uploadModule.allowedOrigins(' https://preview.example , https://rif
 for (const bad of ['https://riftborn.us/', 'https://riftborn.us/game', 'riftborn.us', 'ftp://riftborn.us', 'https://riftborn.us,nope']) {
   assert.throws(() => uploadModule.allowedOrigins(bad), /RIFTBORN_SITE_ORIGIN/, 'Refused: ' + bad);
 }
+// Read-only score origins (v2.3.1): dev.riftborn.us reads the leaderboard but never writes it. One
+// list (site.hosts.mjs), bound as SCORE_READ_ONLY_ORIGINS whatever RIFTBORN_SITE_ORIGIN says, each
+// one also a CORS origin (the list only narrows ALLOWED_ORIGINS).
+const READ_ONLY = 'https://dev.riftborn.us';
+const readOnlyOf = meta => meta.bindings.find(binding => binding.type === 'plain_text' && binding.name === 'SCORE_READ_ONLY_ORIGINS')?.text;
+{
+  const { SCORE_READ_ONLY_ORIGINS, WORKER_ALLOWED_ORIGINS } = await import('../site.hosts.mjs');
+  assert.equal(SCORE_READ_ONLY_ORIGINS.join(','), READ_ONLY, 'site.hosts.mjs: the test build is read only');
+  assert.ok(SCORE_READ_ONLY_ORIGINS.every(origin => WORKER_ALLOWED_ORIGINS.includes(origin)), 'Each read-only origin is a CORS origin');
+  assert.equal((await import('../site.config.mjs')).SCORE_READ_ONLY_ORIGINS, SCORE_READ_ONLY_ORIGINS, 'site.config.mjs re-exports it');
+  assert.equal(readOnlyOf(metadata), READ_ONLY, 'The upload binds the read-only list');
+  const extra = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin: 'https://dev.riftborn.us,https://preview.example' }).get('metadata').text());
+  assert.equal(readOnlyOf(extra), READ_ONLY, 'RIFTBORN_SITE_ORIGIN never changes the read-only list');
+}
 {
   // The deployed Worker answers CORS for each site origin on scores, feedback and accounts, and for nobody else.
   const worker = (await import('../cloudflare/worker.js')).default;
-  const env = { ENVIRONMENT: 'production', ALLOWED_ORIGINS: originsOf(metadata) };
+  const env = { ENVIRONMENT: 'production', ALLOWED_ORIGINS: originsOf(metadata), SCORE_READ_ONLY_ORIGINS: readOnlyOf(metadata) };
   for (const path of ['/api/scores', '/api/feedback', '/api/account']) {
     for (const origin of SITE_ORIGINS.split(',')) {
       const response = await worker.fetch(new Request('https://api.riftborn.us' + path, { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' } }), env, { waitUntil() {} });
       assert.equal(response.status, 204, `${path} preflight from ${origin}`);
       assert.equal(response.headers.get('Access-Control-Allow-Origin'), origin);
+      // Score writes: offered to every site origin but the read-only one (accounts and feedback: to all).
+      const writes = path !== '/api/scores' || origin !== READ_ONLY;
+      assert.equal(/POST/.test(response.headers.get('Access-Control-Allow-Methods')), writes, `${path} preflight from ${origin} ${writes ? 'offers' : 'withholds'} POST`);
     }
     const evil = await worker.fetch(new Request('https://api.riftborn.us' + path, { method: 'OPTIONS', headers: { Origin: 'https://riftborn.us.evil.example', 'Access-Control-Request-Method': 'POST' } }), env, { waitUntil() {} });
     assert.equal(evil.status, 403, `${path} refuses other origins`);
@@ -124,6 +141,7 @@ assert.deepEqual(JSON.parse(wrangler).ratelimits.find(item => item.name === 'ACC
   { name: 'ACCOUNTS_RATE_LIMITER', namespace_id: limiter.namespace_id, simple: IP_BINDING_LIMIT }, 'wrangler.jsonc binds the same limiter');
 assert.match(wrangler, /"ENVIRONMENT":\s*"production"/, 'wrangler.jsonc also deploys as production');
 assert.equal(JSON.parse(wrangler).vars.ALLOWED_ORIGINS, SITE_ORIGINS, 'wrangler.jsonc lists the same CORS origins');
+assert.equal(JSON.parse(wrangler).vars.SCORE_READ_ONLY_ORIGINS, readOnlyOf(metadata), 'wrangler.jsonc lists the same read-only score origins');
 assert.equal(JSON.parse(wrangler).vars.AUTH_PUBLIC_BASE, 'https://api.riftborn.us');
 assert.deepEqual(JSON.parse(wrangler).routes, [{ pattern: 'api.riftborn.us', custom_domain: true }], 'wrangler.jsonc documents the api.riftborn.us custom domain');
 assert.ok(workflow.includes("- 'site.hosts.mjs'"), 'The Worker redeploys when the hosts change');
@@ -170,4 +188,4 @@ assert.ok(!/FAKE_OAUTH/.test(wrangler + workflow), 'FAKE_OAUTH never reaches a d
   assert.ok(uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, feedbackAdminKey: long, feedbackKeyStrict: '1', warn }), 'Strict with a long key deploys');
 }
 
-console.log('PASS Cloudflare Worker upload: entry module, D1, production origin, and score rate limit, feedback rate limit and optional feedback secrets, optional account secrets, previous signing key, ACCOUNTS_LIVE guard, accounts rate limiter, main-only deploys, admin key length.');
+console.log('PASS Cloudflare Worker upload: entry module, D1, production origin, and score rate limit, feedback rate limit and optional feedback secrets, optional account secrets, previous signing key, ACCOUNTS_LIVE guard, accounts rate limiter, main-only deploys, admin key length, read-only score origins (site.hosts.mjs = upload = wrangler.jsonc, dev preflight offers no score write).');
