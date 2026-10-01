@@ -35,6 +35,15 @@ export function expectedBuilds(base = root) {
   return { live: read('live'), dev: read('dev') };
 }
 
+/**
+ * One GET of `url` with a cache-busting query (t=<now>), never following redirects. Never throws:
+ * -> { status, text } (status 0 with `error` when the request itself failed). Also used by the
+ * preview cleanup's link check (scripts/pages-previews.mjs aliasState).
+ */
+export async function fetchFresh(fetchImpl, url, timeoutMs) {
+  return get(fetchImpl, url, timeoutMs);
+}
+
 async function get(fetchImpl, url, timeoutMs) {
   const fresh = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
   try {

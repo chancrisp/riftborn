@@ -378,32 +378,35 @@ console.log('PASS refused previews: main, bad or old-style names, a name for ano
     return state;
   };
   const quiet = () => {};
+  // The link checks of removed previews (plain GETs, never the token): gone at once; no git history; no waiting.
+  const links = { aliasFetch: async () => new Response('', { status: 404 }), removedNames: () => ({ names: [], shallow: false }), sleep: async () => {} };
   const summaryFile = path.join(tmp, 'summary.md');
   const one = world();
-  const result = await deployPreviews({ base: out, env: { ...env, GITHUB_STEP_SUMMARY: summaryFile }, run: one.run, fetchImpl: one.fetchImpl, installed: () => WRANGLER_VERSION, log: quiet, warn: quiet });
-  assert.deepEqual(result, { rows: [[A, 'unchanged'], [B, 'deployed']], removed: ['old-one'] });
+  const result = await deployPreviews({ base: out, env: { ...env, GITHUB_STEP_SUMMARY: summaryFile }, run: one.run, fetchImpl: one.fetchImpl, installed: () => WRANGLER_VERSION, log: quiet, warn: quiet, ...links });
+  assert.deepEqual({ rows: result.rows, removed: result.removed, tombstoned: result.tombstoned }, { rows: [[A, 'unchanged'], [B, 'deployed']], removed: ['old-one'], tombstoned: [] });
+  assert.deepEqual(result.aliases, { 'old-one': 'removed' }, 'The removed preview link was checked and is gone');
   assert.equal(one.wrangler.length, 2, 'Project create (already there) and one deploy');
   assert.match(one.wrangler[1], new RegExp(`^pages deploy _cf/previews/${B} --project-name riftborn-dev --branch ${B} --commit-hash abc1234 --commit-message Preview ${B}: v${dots(devBuild.version)} `));
   assert.deepEqual(one.deleted, [['aaaa0004', true], ['aaaa0003', false]], `The removed preview (alias and all), then the replaced build of ${B}`);
   assert.deepEqual(one.deployments.map(d => [d.environment, d.deployment_trigger.metadata.branch]), [['production', 'main'], ['preview', A], ['preview', B]], 'Production untouched; one deployment per preview');
   assert.match(read(summaryFile), new RegExp(`\\| ${B} \\| v${dots(devBuild.version)} \\w+ \\| https://${B}\\.riftborn-dev\\.pages\\.dev/ \\| deployed \\|[\\s\\S]*Removed: old-one`));
   // Run again: nothing changed, nothing deployed, nothing deleted.
-  const again = await deployPreviews({ base: out, env, run: one.run, fetchImpl: one.fetchImpl, installed: () => WRANGLER_VERSION, log: quiet, warn: quiet });
-  assert.deepEqual(again, { rows: [[A, 'unchanged'], [B, 'unchanged']], removed: [] });
+  const again = await deployPreviews({ base: out, env, run: one.run, fetchImpl: one.fetchImpl, installed: () => WRANGLER_VERSION, log: quiet, warn: quiet, ...links });
+  assert.deepEqual(again, { rows: [[A, 'unchanged'], [B, 'unchanged']], removed: [], tombstoned: [], aliases: {} });
   assert.equal(one.wrangler.length, 3, 'Only the project check ran');
   // PREVIEW_REDEPLOY=1 (the manual run's "redeploy" box) deploys every preview.
   const two = world();
-  assert.deepEqual((await deployPreviews({ base: out, env: { ...env, PREVIEW_REDEPLOY: '1' }, run: two.run, fetchImpl: two.fetchImpl, installed: () => WRANGLER_VERSION, log: quiet, warn: quiet })).rows,
+  assert.deepEqual((await deployPreviews({ base: out, env: { ...env, PREVIEW_REDEPLOY: '1' }, run: two.run, fetchImpl: two.fetchImpl, installed: () => WRANGLER_VERSION, log: quiet, warn: quiet, ...links })).rows,
     [[A, 'deployed'], [B, 'deployed']]);
   // A preview that cannot be removed fails the run (after the deploys); other refusals stop it first.
   const three = world();
   three.failDelete = 'aaaa0004';
-  await assert.rejects(deployPreviews({ base: out, env, run: three.run, fetchImpl: three.fetchImpl, installed: () => WRANGLER_VERSION, log: quiet, warn: quiet }), /Could not remove these previews[\s\S]*old-one: Cloudflare API DELETE \/accounts\/\*\*\*\/pages\/projects\/riftborn-dev\/deployments\/aaaa0004: HTTP 500/);
+  await assert.rejects(deployPreviews({ base: out, env, run: three.run, fetchImpl: three.fetchImpl, installed: () => WRANGLER_VERSION, log: quiet, warn: quiet, ...links }), /Could not remove these previews[\s\S]*old-one: Cloudflare API DELETE \/accounts\/\*\*\*\/pages\/projects\/riftborn-dev\/deployments\/aaaa0004: HTTP 500/);
   await assert.rejects(deployPreviews({ base: out, env: { ...env, GITHUB_REF: 'refs/heads/v2.4' }, run: three.run, fetchImpl: three.fetchImpl, installed: () => WRANGLER_VERSION, log: quiet }), /Refusing to deploy refs\/heads\/v2\.4/);
   await assert.rejects(deployPreviews({ base: out, env, run: three.run, fetchImpl: three.fetchImpl, installed: () => null, log: quiet }), /Wrangler [\d.]+ is not installed/);
   await assert.rejects(deployPreviews({ base: path.join(tmp, 'nothing'), env, log: quiet }), /previews\.json is missing/);
   const lines = [];
-  await deployPreviews({ base: out, env: {}, dryRun: true, log: line => lines.push(line) });
+  await deployPreviews({ base: out, env: {}, dryRun: true, log: line => lines.push(line), removedNames: () => ({ names: [], shallow: false }) });
   assert.match(lines.join('\n'), new RegExp(`pages deploy _cf/previews/${A} --project-name riftborn-dev --branch ${A} [\\s\\S]*then delete the preview deployments made here in riftborn-dev for any branch but: ${A}, ${B}`));
 }
 console.log('PASS preview deploy: one riftborn-dev branch deployment per preview (never riftborn, never main), unchanged previews skipped, stale previews and older builds deleted (production never), paged API calls with the token kept out of errors, links checked after the deploy.');
@@ -427,6 +430,10 @@ console.log('PASS preview deploy: one riftborn-dev branch deployment per preview
   for (const file of imported) assert.ok(paths.includes(file), `previews.yml redeploys the previews when ${file} changes`);
   assert.match(workflow, /\n    if: vars\.CF_PAGES_ENABLED == '1' && github\.ref == 'refs\/heads\/main'\n/, 'Only on main, only while Cloudflare Pages is on');
   assert.ok(workflow.includes('    environment: cloudflare-production\n'), 'The same environment (and token) as the production deploy');
+  // The cleanup re-checks the links of previews removed by earlier pushes: the whole history (trees
+  // only, no file contents) is checked out.
+  const checkout = workflow.match(/\n      - uses: actions\/checkout@v4\n        with:\n((?: {10}.*\n)+)/)?.[1] || '';
+  assert.ok(checkout.includes('          fetch-depth: 0\n') && checkout.includes('          filter: blob:none\n') && checkout.includes('          persist-credentials: false\n'), checkout);
   const steps = ['run: npm ci --prefix tools/wrangler --ignore-scripts', 'run: node scripts/pages-previews.mjs', 'run: node scripts/cloudflare-pages-deploy.mjs --previews', 'run: node scripts/cloudflare-pages-verify.mjs --previews'].map(step => workflow.indexOf(step));
   assert.ok(steps.every((at, i) => at !== -1 && (i === 0 || steps[i - 1] < at)), 'Install the pinned Wrangler, stage, deploy, check');
   assert.ok(workflow.includes('CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}') && workflow.includes('CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}'));
@@ -438,3 +445,8 @@ console.log('PASS preview deploy: one riftborn-dev branch deployment per preview
 console.log('PASS preview workflow: main only, same environment and pinned Wrangler as production, stage -> deploy -> check; pages.yml ignores preview-only pushes.');
 
 fs.rmSync(tmp, { recursive: true, force: true });
+
+// The cleanup (link checks, tombstones, annotations) has its own file, run with these tests (npm test
+// runs this file; package.json is left alone because cloudflare-worker.yml redeploys the Worker on
+// any change to it).
+await import('./preview-cleanup.mjs');

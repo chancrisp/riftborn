@@ -12,6 +12,17 @@
 // Production (riftborn.us, dev.riftborn.us, github.io) never reads previews/
 // (scripts/build-pages.mjs), and pages.yml ignores pushes that only change previews/.
 //
+// Deleting is not trusted on its own (2026-10-01: v2-3-1-looks kept serving its old build after its
+// folder went, with nothing in the run to say why). After the deletions the removed branch's link is
+// checked (version.json and the page, cache-busted) for about a minute (only 404/410 counts as gone);
+// if it still serves a build (any), a "preview removed" page (the tombstone: plain HTML, noindex,
+// version.json {"removed":true}, commit message "Preview <name>: removed") is deployed to that
+// branch, which moves its alias off the old build. A removed branch whose newest deployment is its tombstone is done: the tombstone stays,
+// only older deployments are deleted, and it is never deployed again. A branch staged again deploys
+// over its tombstone as usual. Every previews/<name> ever removed in git history is checked too, so a
+// link Cloudflare no longer lists a deployment for (but still serves) is caught as well. Everything
+// is reported as GitHub annotations ("Preview cleanup"), readable without signing in.
+//
 // Every preview is checked before it is staged: a safe name that starts with its build's version,
 // the password gate (the game module loads only after it opens), noindex, and HOST CONFIG giving the
 // preview's own address nothing (never scores, not even leaderboard reads; feedback and accounts
@@ -25,8 +36,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { HOSTS, PAGES_PROJECTS, PRODUCTION_BRANCH } from '../site.config.mjs';
+import { fetchFresh } from './cloudflare-pages-verify.mjs';
 import { buildHeaders, inlineScripts } from './pages-headers.mjs';
 import { notFoundPage } from './pages-templates.mjs';
 
@@ -208,7 +221,17 @@ export const previewCommitMessage = preview => `Preview ${preview.name}: ${previ
 
 export const CF_API = 'https://api.cloudflare.com/client/v4';
 
-const scrub = (text, secrets) => secrets.filter(secret => secret && String(secret).length >= 8).reduce((out, secret) => out.split(String(secret)).join('***'), String(text));
+/** `text` with every secret (8+ characters) replaced by ***. */
+export const scrub = (text, secrets) => secrets.filter(secret => secret && String(secret).length >= 8).reduce((out, secret) => out.split(String(secret)).join('***'), String(text));
+
+/**
+ * For anything written where others read it (annotations, the job summary): scrub(), plus anything
+ * shaped like a credential even when it was not passed in (a bearer token, a 32-hex account id).
+ * Deployment ids (UUIDs), builds and digests are not secrets and stay readable.
+ */
+export const scrubPublic = (text, secrets = []) => scrub(text, secrets)
+  .replace(/\bBearer\s+[^\s"',;]+/gi, 'Bearer ***')
+  .replace(/(?<![0-9a-f-])[0-9a-f]{32}(?![0-9a-f-])/gi, '***');
 
 /** One Cloudflare API call -> the JSON body. Errors never carry the token or the account id. */
 export async function cloudflareApi({ token, accountId, route, method = 'GET', fetchImpl = fetch, timeoutMs = 30000 }) {
@@ -229,17 +252,46 @@ export async function cloudflareApi({ token, accountId, route, method = 'GET', f
 }
 
 const PER_PAGE = 25;
+const number = value => (value === null || value === undefined || value === '' ? NaN : Number(value));
 
-/** Every preview-environment deployment of the riftborn-dev project (all pages). */
+/**
+ * Every preview-environment deployment of the riftborn-dev project (all pages, each id once). The
+ * array also carries a non-enumerable `listing` ({ pages, totalCount, duplicates }) for the report.
+ * Assumptions, hardened where the API leaves room:
+ * - env=preview returns the deployments of every non-production branch, wrangler direct uploads
+ *   included (newest first). An entry without `environment` is taken as preview (it came from an
+ *   env=preview listing); the cleanup still never touches a production one or the production branch.
+ * - Paging: result_info.total_pages when given; else total_count with the per_page Cloudflare says
+ *   it used (it may cap ours); else a page shorter than that per_page is the last. A deployment seen
+ *   twice (pages shifting while a deploy lands) is kept once.
+ * - Whatever a listing still misses is caught by the link check (previewCleanup's `known`).
+ */
 export async function listPreviewDeployments({ token, accountId, project = PAGES_PROJECTS.dev, fetchImpl = fetch, maxPages = 40 }) {
   if (project !== PAGES_PROJECTS.dev) throw new Error(`Previews live only in ${PAGES_PROJECTS.dev}, never ${project}.`);
-  const all = [];
+  const byId = new Map();
+  const listing = { pages: 0, totalCount: null, duplicates: 0 };
   for (let page = 1; page <= maxPages; page++) {
     const body = await cloudflareApi({ token, accountId, fetchImpl, route: `/pages/projects/${project}/deployments?env=preview&page=${page}&per_page=${PER_PAGE}` });
     const result = Array.isArray(body.result) ? body.result : [];
-    all.push(...result);
-    const pages = Number(body.result_info?.total_pages);
-    if (!result.length || (Number.isFinite(pages) && pages > 0 ? page >= pages : result.length < PER_PAGE)) return all;
+    listing.pages = page;
+    for (const deployment of result) {
+      const key = deployment?.id ? String(deployment.id) : `#unidentified-${byId.size}`;
+      if (byId.has(key)) { listing.duplicates++; continue; }
+      byId.set(key, deployment && typeof deployment === 'object' && !deployment.environment ? { ...deployment, environment: 'preview' } : deployment);
+    }
+    const info = body.result_info || {};
+    const totalPages = number(info.total_pages);
+    const totalCount = number(info.total_count);
+    const perPage = number(info.per_page) > 0 ? number(info.per_page) : PER_PAGE;
+    if (Number.isFinite(totalCount)) listing.totalCount = totalCount;
+    const last = !result.length || (Number.isFinite(totalPages) && totalPages > 0 ? page >= totalPages
+      : Number.isFinite(totalCount) && totalCount >= 0 ? page * perPage >= totalCount
+        : result.length < perPage);
+    if (last) {
+      const all = [...byId.values()];
+      Object.defineProperty(all, 'listing', { value: listing, enumerable: false });
+      return all;
+    }
   }
   throw new Error(`More than ${maxPages} pages of preview deployments in ${project}.`);
 }
@@ -251,7 +303,23 @@ export async function deleteDeployment({ token, accountId, project = PAGES_PROJE
   await cloudflareApi({ token, accountId, fetchImpl, method: 'DELETE', route: `/pages/projects/${project}/deployments/${id}${force ? '?force=true' : ''}` });
 }
 
-const branchOf = deployment => deployment?.deployment_trigger?.metadata?.branch || '';
+const messageOf = deployment => String(deployment?.deployment_trigger?.metadata?.commit_message || '').trim();
+const ALIAS = new RegExp(`^https://([a-z0-9][a-z0-9-]*)\\.${PAGES_PROJECTS.dev.replace(/[-.]/g, '\\$&')}\\.pages\\.dev/?$`);
+/**
+ * The deployment's branch: deployment_trigger.metadata.branch (what wrangler's --branch sets on a
+ * direct upload); failing that its branch alias (only the newest deployment of a branch has one);
+ * failing that the name in this tool's commit message ("Preview <name>: ...").
+ */
+export function branchOf(deployment) {
+  const branch = deployment?.deployment_trigger?.metadata?.branch;
+  if (branch) return String(branch);
+  for (const alias of Array.isArray(deployment?.aliases) ? deployment.aliases : []) {
+    const match = ALIAS.exec(String(alias));
+    if (match && !/^[0-9a-f]{8}$/.test(match[1])) return match[1];
+  }
+  return /^Preview (\S+): /.exec(messageOf(deployment))?.[1] || '';
+}
+
 const previewDeployments = (deployments, branch) => deployments
   .filter(deployment => deployment?.environment === 'preview' && branchOf(deployment) === branch)
   .sort((a, b) => String(b.created_on || '').localeCompare(String(a.created_on || '')));
@@ -260,37 +328,247 @@ const previewDeployments = (deployments, branch) => deployments
 export function isUnchanged(deployments, preview) {
   const [latest] = previewDeployments(deployments, preview.name);
   return Boolean(latest && latest.latest_stage?.status === 'success' &&
-    String(latest.deployment_trigger?.metadata?.commit_message || '').includes(`${DIGEST_TAG}${String(preview.digest).slice(0, 16)}`));
+    messageOf(latest).includes(`${DIGEST_TAG}${String(preview.digest).slice(0, 16)}`));
 }
 
-/** A deployment this tool made (its commit message is previewCommitMessage's). */
-export const madeByPreviews = deployment => String(deployment?.deployment_trigger?.metadata?.commit_message || '').startsWith(`Preview ${branchOf(deployment)}: `);
+/** A deployment this tool made (its commit message is previewCommitMessage's or tombstoneCommitMessage's). */
+export const madeByPreviews = deployment => messageOf(deployment).startsWith(`Preview ${branchOf(deployment)}: `);
+
+// ---- the tombstone: what a removed preview's link shows when deleting its deployments did not stop it
+
+export const TOMBSTONES_OUT = '_cf/preview-tombstones';
+/** The tombstone deployment's commit message (how the next run recognises it). */
+export const tombstoneCommitMessage = name => `Preview ${name}: removed`;
+/** A deployment that is the "preview removed" page of its branch. */
+export const isTombstone = deployment => Boolean(deployment) && madeByPreviews(deployment) && messageOf(deployment) === tombstoneCommitMessage(branchOf(deployment));
+/** The build a preview deployment holds, from its commit message ("... build <build> digest ..."; null when none). */
+export const buildOf = deployment => /\bbuild (\S+)/.exec(messageOf(deployment))?.[1] || null;
 
 /**
- * The deployments to delete -> [{ id, branch, force, why }]. Only preview-environment deployments
- * that this tool made (madeByPreviews), on a branch other than the production one, are ever
- * considered (anything else in riftborn-dev is left alone):
- *   a branch not in previews/   every deployment (force: its alias goes too, the link stops working)
- *   a current preview           the deployments older than its newest successful one (not forced:
- *                               the alias stays on the newest)
+ * Why `name` cannot be a branch alias this tool deploys a tombstone to (null when it can): any
+ * name a preview ever had, including ones from before the version names (lowercase letters, digits
+ * and inner dashes, at most 28 characters), never the production branch and never 8 hex digits.
  */
-export function cleanupPlan(deployments, names) {
+export function aliasNameProblem(name) {
+  const text = String(name ?? '');
+  if (text === PRODUCTION_BRANCH) return `"${text}" is the production branch of ${PAGES_PROJECTS.dev} (dev.riftborn.us)`;
+  if (/^[0-9a-f]{8}$/.test(text)) return `"${text}" looks like a Cloudflare deployment id`;
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(text) || text.length > PREVIEW_NAME_MAX) return `${JSON.stringify(text)} is not a branch alias of ${PAGES_PROJECTS.dev}`;
+  return null;
+}
+
+const TOMBSTONE_STYLE = 'body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0912;color:#e8e4f5;font:16px/1.5 system-ui,sans-serif}main{max-width:32rem;padding:24px 16px;text-align:center}h1{margin:0 0 12px;color:#8f5bff;font-size:1.4rem}a{color:#b896ff}code{color:#fff}';
+const escapeHtml = text => String(text).replace(/[&<>"']/g, ch => `&#${ch.charCodeAt(0)};`);
+
+/** The tombstone's files for branch `name`: no script, nothing to gate, noindex, version.json says removed. */
+export function tombstoneFiles(name) {
+  const problem = aliasNameProblem(name);
+  if (problem) throw new Error(problem);
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Riftborn preview removed</title>
+<style>${TOMBSTONE_STYLE}</style>
+</head>
+<body>
+<main>
+<h1>This preview was removed</h1>
+<p>The Riftborn preview <code>${escapeHtml(name)}</code> is no longer available.</p>
+<p><a href="${escapeHtml(HOSTS.live)}/">Play Riftborn</a></p>
+</main>
+</body>
+</html>
+`;
+  const style = `'sha256-${crypto.createHash('sha256').update(TOMBSTONE_STYLE).digest('base64')}'`;
+  return {
+    'index.html': html,
+    '404.html': html,
+    'version.json': JSON.stringify({ preview: name, removed: true, build: null }) + '\n',
+    'robots.txt': 'User-agent: *\nDisallow: /\n',
+    '_headers': ['/*',
+      '  Cache-Control: no-store',
+      `  Content-Security-Policy: default-src 'none'; style-src ${style}; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+      '  X-Robots-Tag: noindex, nofollow',
+      '  X-Content-Type-Options: nosniff',
+      '  Referrer-Policy: no-referrer', ''].join('\n')
+  };
+}
+
+/** Writes the tombstone of `name` into `base`/_cf/preview-tombstones/<name>/ -> that folder (relative, as Wrangler gets it). */
+export function stageTombstone(name, base = root) {
+  const files = tombstoneFiles(name);
+  const dir = path.join(base, ...TOMBSTONES_OUT.split('/'), name);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [file, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, file), text);
+  return `${TOMBSTONES_OUT}/${name}`;
+}
+
+// ---- the cleanup ------------------------------------------------------------------------------------
+
+/**
+ * What the cleanup does, from the preview deployments (listPreviewDeployments), the staged preview
+ * `names` and `known` (preview names removed in git history: removedPreviewNames). Only
+ * preview-environment deployments that this tool made (madeByPreviews), on a branch other than the
+ * production one, are ever deleted (anything else in riftborn-dev is left alone):
+ *   a branch not in previews/   every deployment (force: its alias goes too, the link stops working),
+ *                               then its link is checked for about a minute (check "wait")
+ *     ...whose newest deployment is its tombstone (succeeded): done. The tombstone stays, the older
+ *                               deployments go (not forced: the alias is on the tombstone), and the
+ *                               link is checked once; the tombstone is never deployed again
+ *   a current preview           the deployments older than its newest successful one (not forced:
+ *                               the alias stays on the newest); over a tombstone too, once staged again
+ *   a known removed name        with nothing of this tool's listed: the link is checked once (it may
+ *                               still serve a build Cloudflare no longer lists, or one whose commit
+ *                               message this tool does not recognise: `foreign`, never deleted)
+ * -> { deletions: [{ id, branch, force, why }],
+ *      removed: [{ branch, found, ids, tombstone, oldBuild, check: 'wait' | 'once', fromHistory, foreign, foreignSample }],
+ *      current: [{ branch, found, older }] }
+ */
+export function previewCleanup(deployments, names, { known = [] } = {}) {
   const current = new Set(names);
-  const ours = deployments.filter(deployment => deployment?.environment === 'preview' && madeByPreviews(deployment));
+  const previews = deployments.filter(deployment => deployment?.environment === 'preview');
+  const ours = previews.filter(madeByPreviews);
   const branches = new Set(ours.map(branchOf));
-  const plan = [];
+  const deletions = [];
+  const removed = [];
+  const kept = new Map();
   for (const branch of [...branches].sort()) {
     if (!branch || branch === PRODUCTION_BRANCH) continue;
     const list = previewDeployments(ours, branch);
+    // What its link last served: the newest preview build that deployed (a failed one never held
+    // the alias). Only named in the report: the link check counts any build served as serving.
+    const oldBuild = buildOf(list.find(deployment => !isTombstone(deployment) && deployment.latest_stage?.status === 'success'));
+    const ids = list.map(deployment => deployment.id);
     if (!current.has(branch)) {
-      for (const deployment of list) plan.push({ id: deployment.id, branch, force: true, why: 'preview removed' });
+      const [newest] = list;
+      if (isTombstone(newest) && newest.latest_stage?.status === 'success') {
+        for (const deployment of list.slice(1)) deletions.push({ id: deployment.id, branch, force: false, why: 'older than its "preview removed" page' });
+        removed.push({ branch, found: list.length, ids, tombstone: newest.id, oldBuild, check: 'once', fromHistory: false, foreign: 0 });
+        continue;
+      }
+      for (const deployment of list) deletions.push({ id: deployment.id, branch, force: true, why: 'preview removed' });
+      removed.push({ branch, found: list.length, ids, tombstone: null, oldBuild, check: 'wait', fromHistory: false, foreign: 0 });
       continue;
     }
     const newest = list.findIndex(deployment => deployment.latest_stage?.status === 'success');
-    if (newest === -1) continue;
-    for (const deployment of list.slice(newest + 1)) plan.push({ id: deployment.id, branch, force: false, why: 'older build' });
+    const older = newest === -1 ? [] : list.slice(newest + 1);
+    for (const deployment of older) deletions.push({ id: deployment.id, branch, force: false, why: 'older build' });
+    kept.set(branch, { branch, found: list.length, older: older.length });
   }
-  return plan;
+  for (const branch of [...new Set(known)].sort()) {
+    if (current.has(branch) || branches.has(branch) || aliasNameProblem(branch)) continue;
+    // Deployments on that branch that this tool does not recognise as its own (another commit
+    // message): never deleted, but named in the report (they may be why a link kept serving).
+    const others = previewDeployments(previews, branch);
+    const sample = others[0] ? `${others[0].id} "${messageOf(others[0]).slice(0, 80) || '(no commit message)'}"` : null;
+    removed.push({ branch, found: 0, ids: [], tombstone: null, oldBuild: null, check: 'once', fromHistory: true, foreign: others.length, foreignSample: sample });
+  }
+  const currentList = [...current].sort().map(branch => kept.get(branch) || { branch, found: 0, older: 0 });
+  return { deletions, removed, current: currentList };
+}
+
+/** The deployments to delete -> [{ id, branch, force, why }] (previewCleanup's deletions). */
+export const cleanupPlan = (deployments, names) => previewCleanup(deployments, names).deletions;
+
+const runGit = (args, cwd) => {
+  const result = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024 });
+  if (result.status !== 0) throw new Error(String(result.stderr || result.error?.message || `git ${args[0]} failed`).trim().split('\n')[0]);
+  return result.stdout;
+};
+
+/**
+ * Every previews/<name> folder ever removed in this checkout's git history -> { names, shallow }.
+ * Trees only (no blobs: works in previews.yml's blobless checkout), renames off so git never needs
+ * file contents. `shallow` is true when the history is cut short (only what it holds is seen).
+ */
+export function removedPreviewNames(base = root, { git = runGit } = {}) {
+  const shallow = git(['rev-parse', '--is-shallow-repository'], base).trim() === 'true';
+  const out = git(['log', '--no-renames', '--diff-filter=D', '--name-only', '--format=', '--', `${PREVIEWS_DIR}/*/index.html`, `${PREVIEWS_DIR}/*/preview.json`], base);
+  const at = new RegExp(`^${PREVIEWS_DIR}/([^/]+)/(?:index\\.html|preview\\.json)$`);
+  const names = [...new Set(out.split(/\r?\n/).map(line => at.exec(line.trim())?.[1]).filter(Boolean))].sort();
+  return { names, shallow };
+}
+
+// ---- the link check -----------------------------------------------------------------------------------
+
+// What Cloudflare answers on a branch alias with no deployment behind it (checked 2026-10-01: 404 for
+// the page and version.json of a made-up riftborn-dev alias).
+const GONE = new Set([404, 410]);
+
+/**
+ * What https://<name>.riftborn-dev.pages.dev/ serves now (version.json and the page, cache-busted;
+ * plain GETs, no credentials). Only asked about removed previews, whose link should serve nothing, so
+ * any build counts: the alias can stick to an older deployment than the newest listed (the newest
+ * failed) or to one the listing missed. `oldBuild` (the newest build that deployed) only names it in
+ * the detail. Never throws. -> { state, build, detail }:
+ *   tombstone  version.json says removed (the "preview removed" page)
+ *   serving    version.json serves a build (any), or the page still holds a password-gated build
+ *   removed    version.json and the page both answer 404 or 410
+ *   error      anything else (a failed request, a 5xx, a redirect, an unexpected answer): not shown to
+ *              be gone, so waitForAlias keeps checking and the run warns instead of calling it removed
+ */
+export async function aliasState({ name, oldBuild = null, fetchImpl = fetch, timeoutMs = 15000 }) {
+  try {
+    const origin = previewOrigin(name);
+    const [version, page] = await Promise.all([fetchFresh(fetchImpl, `${origin}/version.json`, timeoutMs), fetchFresh(fetchImpl, `${origin}/`, timeoutMs)]);
+    const http = result => (result.status ? `HTTP ${result.status}` : String(result.error || 'no answer'));
+    let info = null;
+    if (version.status === 200) { try { info = JSON.parse(version.text); } catch { info = null; } }
+    if (info?.removed === true) return { state: 'tombstone', build: null, detail: 'it serves the "preview removed" page' };
+    const build = typeof info?.build === 'string' && info.build ? info.build : null;
+    if (build) return { state: 'serving', build, detail: `version.json serves build ${build}${oldBuild && build !== oldBuild ? `; the newest deployed build listed was ${oldBuild}` : ''}` };
+    if (page.status === 200 && String(page.text).includes('id="devGate"')) return { state: 'serving', build: null, detail: `version.json ${http(version)}, but the page still serves a password-gated build` };
+    const answers = `version.json ${http(version)}, page ${http(page)}`;
+    return { state: GONE.has(version.status) && GONE.has(page.status) ? 'removed' : 'error', build: null, detail: answers };
+  } catch (error) {
+    return { state: 'error', build: null, detail: String(error?.message || error) };
+  }
+}
+
+/** True when the link no longer serves the preview (gone, or showing its tombstone). */
+export const linkGone = result => result.state === 'removed' || result.state === 'tombstone';
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+/** aliasState until linkGone or `attempts` run out (about a minute by default). -> its last result + { attempts, seconds } */
+export async function waitForAlias({ attempts = 12, delayMs = 5000, sleep = pause, now = Date.now, ...options }) {
+  const start = now();
+  let result = { state: 'error', build: null, detail: 'not checked' };
+  let attempt = 0;
+  while (attempt < attempts) {
+    attempt++;
+    result = await aliasState(options);
+    if (linkGone(result)) break;
+    if (attempt < attempts) await sleep(delayMs);
+  }
+  return { ...result, attempts: attempt, seconds: Math.round((now() - start) / 1000) };
+}
+
+// ---- annotations (GitHub workflow commands: shown on the run page, readable without signing in) ----
+
+const escapeData = text => String(text).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+const escapeProperty = text => escapeData(text).replace(/:/g, '%3A').replace(/,/g, '%2C');
+/** "::notice title=...::message" (or warning / error), scrubbed (scrubPublic) and escaped. */
+export function workflowCommand(level, title, message, secrets = []) {
+  if (!['notice', 'warning', 'error'].includes(level)) throw new Error(`Unknown annotation level ${level}`);
+  return `::${level} title=${escapeProperty(scrubPublic(title, secrets))}::${escapeData(scrubPublic(message, secrets))}`;
+}
+// GitHub shows at most 10 annotations of each level per step: the rest are folded into the 10th.
+const ANNOTATIONS_PER_LEVEL = 10;
+/** The annotation lines for `notes` ([{ level, message }]), at most 10 per level. */
+export function annotationLines(notes, { title = 'Preview cleanup', secrets = [] } = {}) {
+  const lines = [];
+  for (const level of ['error', 'warning', 'notice']) {
+    const messages = notes.filter(note => note.level === level).map(note => note.message);
+    const shown = messages.length > ANNOTATIONS_PER_LEVEL
+      ? [...messages.slice(0, ANNOTATIONS_PER_LEVEL - 1), `${messages.length - ANNOTATIONS_PER_LEVEL + 1} more: ${messages.slice(ANNOTATIONS_PER_LEVEL - 1).join(' | ')}`]
+      : messages;
+    for (const message of shown) lines.push(workflowCommand(level, title, message, secrets));
+  }
+  return lines;
 }
 
 function main() {
@@ -305,6 +583,8 @@ function main() {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   try { main(); } catch (error) {
     console.error(error.message);
+    // On the run page too (readable without signing in): a staging failure means no deploy and no cleanup.
+    if (process.env.GITHUB_ACTIONS === 'true') console.log(workflowCommand('error', 'Preview links', error.message));
     process.exitCode = 1;
   }
 }

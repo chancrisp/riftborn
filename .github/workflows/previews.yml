@@ -7,7 +7,9 @@ name: Deploy Riftborn preview links
 # next to dev.riftborn.us (that project's production branch), never in its place. <name> starts with
 # the version of the build in the folder (v2-4-0, or v2-4-0-<tag>); a folder whose name does not match
 # its build's version is refused. A preview whose folder was removed has its deployments deleted, so
-# its link stops working.
+# its link stops working; the link is then checked, and one that still serves its old build gets a
+# "preview removed" page deployed over it (kept, never redeployed). The cleanup is reported as
+# annotations ("Preview cleanup") on the run page, readable without signing in.
 # Never touches riftborn.us, dev.riftborn.us or github.io: pages.yml ignores pushes that only change
 # previews/, and the deploy refuses the production branch. Same token and environment as pages.yml
 # (CLOUDFLARE_API_TOKEN with Cloudflare Pages: Edit), only on main.
@@ -52,6 +54,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # The whole history without file contents: the cleanup re-checks the link of every
+          # previews/<name> removed by an earlier push (git log), even one Cloudflare lists nothing for.
+          fetch-depth: 0
+          filter: blob:none
       - uses: actions/setup-node@v4
         with:
           node-version: 24
