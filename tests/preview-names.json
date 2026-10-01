@@ -1,0 +1,11 @@
+{
+  "about": "Preview names both repos must agree on: the site repo's scripts/pages-previews.mjs (tests/pages-previews.mjs) and the source repo's .tools/deploy-preview.mjs (.tools/deploy-preview.test.mjs reads this file from site/). A name is v<major>-<minor>-<patch> of the build, optionally -<tag> (lowercase letters and digits, starting with a letter), at most 28 characters (the Cloudflare branch alias of riftborn-dev). accepted / refused: the name rule alone (null = no name at all). versions: a name must also start with v<version> of the build it holds (v2-4-0 or v2-4-0-<tag> for 2.4.0).",
+  "accepted": ["v2-4-0", "v2-4-0-logo", "v2-4-0-maps", "v2-4-0-maps2", "v2-4-0-a", "v2-4-0-z9", "v2-4-0-v2", "v0-0-0", "v2-10-3", "v10-20-30-x", "v2-4-0-xxxxxxxxxxxxxxxxxxxxx"],
+  "refused": ["", "logo", "maps", "title-themes", "v2-4", "v2-4-dash", "v2", "v2-4-0-", "V2-4-0", "v2-4-0-Logo", "v2.4.0", "2-4-0", "va-4-0", "v2-4-0-2d", "v2-4-0-big-maps", "v2-4-0--logo", "v2-4-0-lo_go", "v2-4-0-lo go", "v2-4-0-logo/x", "-v2-4-0", "v2-4-0-xxxxxxxxxxxxxxxxxxxxxx", "main", "deadbeef", "0123abcd", "DEADBEEF", "v2-4-0\n", " v2-4-0", "v2-4-0-logo\n", null],
+  "versions": [
+    { "version": "2.4.0", "accepted": ["v2-4-0", "v2-4-0-logo", "v2-4-0-maps2"], "refused": ["v2-3-0", "v2-3-0-logo", "v2-4-1", "v2-4-1-logo", "v3-4-0", "v2-4-00", "v2-4", "logo", "v2-4-0-Logo"] },
+    { "version": "2.4.1", "accepted": ["v2-4-1", "v2-4-1-logo"], "refused": ["v2-4-10", "v2-4-10-logo", "v2-4-0", "v2-4-1-2"] },
+    { "version": "2.4.10", "accepted": ["v2-4-10", "v2-4-10-maps"], "refused": ["v2-4-1", "v2-4-1-maps", "v2-4-100"] },
+    { "version": "10.20.30", "accepted": ["v10-20-30", "v10-20-30-xxxxxxxxxxxxxxxxxx"], "refused": ["v10-20-30-xxxxxxxxxxxxxxxxxxx"] }
+  ]
+}

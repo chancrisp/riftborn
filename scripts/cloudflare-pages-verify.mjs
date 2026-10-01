@@ -10,6 +10,9 @@
 //   dev.riftborn.us/              200 and reads the hand-over; version.json = _cf/dev/version.json
 // GET requests only; nothing is written anywhere.
 //   node scripts/cloudflare-pages-verify.mjs
+//   node scripts/cloudflare-pages-verify.mjs --previews   the per-branch preview links just deployed
+//       (.github/workflows/previews.yml): each https://<name>.riftborn-dev.pages.dev/ answers 200
+//       with the password gate and its version.json is the staged build (_cf/previews/previews.json)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -70,16 +73,50 @@ export async function checkOnce({ live = HOSTS.live, dev = HOSTS.dev, expected, 
   return problems;
 }
 
-/** Retries checkOnce until it passes or `attempts` run out. -> { ok, problems, attempts } */
-export async function verifyDeployment({ attempts = 18, delayMs = 10000, log = () => {}, ...options } = {}) {
+/** One round of checks of the preview links -> problems ([] when each serves its staged build). */
+export async function checkPreviewsOnce({ previews = [], fetchImpl = fetch, timeoutMs = 15000 }) {
+  const problems = [];
+  for (const preview of previews) {
+    const page = await get(fetchImpl, `${preview.origin}/`, timeoutMs);
+    if (page.status !== 200) problems.push(`${preview.origin}/: ${page.error || 'HTTP ' + page.status}`);
+    else if (!page.text.includes('id="devGate"')) problems.push(`${preview.origin}/: no password gate`);
+    const version = await get(fetchImpl, `${preview.origin}/version.json`, timeoutMs);
+    if (version.status !== 200) { problems.push(`${preview.origin}/version.json: ${version.error || 'HTTP ' + version.status}`); continue; }
+    let served = null;
+    try { served = JSON.parse(version.text).build; } catch { served = null; }
+    if (served !== preview.build) problems.push(`${preview.origin}/version.json: serves build ${JSON.stringify(served)}, just deployed ${JSON.stringify(preview.build)}`);
+  }
+  return problems;
+}
+
+/** Retries checkOnce (or `check`) until it passes or `attempts` run out. -> { ok, problems, attempts } */
+export async function verifyDeployment({ attempts = 18, delayMs = 10000, log = () => {}, check = checkOnce, ...options } = {}) {
   let problems = [];
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    problems = await checkOnce(options);
+    problems = await check(options);
     if (!problems.length) return { ok: true, problems, attempts: attempt };
     log(`Attempt ${attempt}/${attempts}: ${problems.length} problem(s):\n  - ${problems.join('\n  - ')}`);
     if (attempt < attempts) await new Promise(resolve => setTimeout(resolve, delayMs));
   }
   return { ok: false, problems, attempts };
+}
+
+async function mainPreviews() {
+  let previews = [];
+  try {
+    previews = JSON.parse(fs.readFileSync(path.join(root, '_cf', 'previews', 'previews.json'), 'utf8')).previews || [];
+  } catch {
+    throw new Error('_cf/previews/previews.json is missing: run node scripts/pages-previews.mjs first.');
+  }
+  if (!previews.length) { console.log('No preview links to check.'); return; }
+  console.log(`Checking ${previews.map(preview => `${preview.origin}/ (build ${preview.build})`).join(', ')}.`);
+  const result = await verifyDeployment({ previews, check: checkPreviewsOnce, attempts: 12, log: message => console.log(message) });
+  if (!result.ok) {
+    console.error(`The preview links do not serve their builds:\n  - ${result.problems.join('\n  - ')}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`Every preview link serves its build behind the password gate (attempt ${result.attempts}).`);
 }
 
 async function main() {
@@ -94,4 +131,11 @@ async function main() {
   console.log(`riftborn.us and dev.riftborn.us serve this deploy (attempt ${result.attempts}).`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  if (process.argv.includes('--previews')) {
+    try { await mainPreviews(); } catch (error) {
+      console.error(error.message);
+      process.exitCode = 1;
+    }
+  } else await main();
+}

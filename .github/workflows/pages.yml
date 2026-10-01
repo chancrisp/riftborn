@@ -12,6 +12,10 @@ name: Build and deploy Riftborn to GitHub Pages and Cloudflare Pages
 on:
   push:
     branches: [main]
+    # A push that only changes previews/ (the per-branch preview links) is deployed by previews.yml
+    # alone: it never redeploys riftborn.us, dev.riftborn.us or github.io.
+    paths-ignore:
+      - 'previews/**'
   workflow_dispatch:
 
 permissions:

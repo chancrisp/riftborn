@@ -1,7 +1,7 @@
 {
   "name": "riftborn-pages-deploy-wrangler",
   "private": true,
-  "description": "Wrangler for scripts/cloudflare-pages-deploy.mjs only, exact-pinned with a lockfile. Installed only by the cloudflare job of .github/workflows/pages.yml (npm ci --prefix tools/wrangler --ignore-scripts); kept out of the root package.json so the game build and the Worker deploy never pull it.",
+  "description": "Wrangler for scripts/cloudflare-pages-deploy.mjs only, exact-pinned with a lockfile. Installed only by the cloudflare job of .github/workflows/pages.yml and by .github/workflows/previews.yml (npm ci --prefix tools/wrangler --ignore-scripts); kept out of the root package.json so the game build and the Worker deploy never pull it.",
   "license": "UNLICENSED",
   "dependencies": {
     "wrangler": "4.138.0"
