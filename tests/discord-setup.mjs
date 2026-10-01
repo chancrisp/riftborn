@@ -651,9 +651,15 @@ function assertDesiredState(fake, label) {
   }
   for (const name of ['secret-hunt', 'dev-builds']) assert.equal(botMessages(named[name]).length, 1, at(`#${name} posted once`));
   // The News channels hold the release posts a fresh server gets from scripts/discord-releases.mjs:
-  // each live version not marked posted, up to the first placeholder, once, crossposted.
+  // each live version not marked posted, up to the first placeholder, once, crossposted. Live means
+  // no newer than the fake riftborn.us serves (the live gate): a listed release waits until then.
   const link = (text) => text.replace(/\{#([a-z0-9-]+)\}/g, (_, name) => `<#${named[name].id}>`);
-  const live = releasesDue(RELEASES).filter((rel) => !rel.posted);
+  const notNewer = (a, b) => {
+    const [x, y] = [a, b].map((v) => v.split('.').map(Number));
+    for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i];
+    return true;
+  };
+  const live = releasesDue(RELEASES).filter((rel) => !rel.posted && notNewer(rel.version, fake.site.version));
   for (const [name, key, pingRole, flags] of [['announcements', 'announcement', newsPing, 0], ['patch-notes', 'patchNotes', patchPing, 4]]) {
     assert.deepEqual(botMessages(named[name]).map((msg) => [msg.content, msg.flags, msg.pinged]),
       live.map((rel) => [`${rel.ping?.[key] ? `<@&${pingRole.id}>\n` : ''}${link(rel[key])}`, flags | 1, rel.ping?.[key] ? [pingRole.id] : []]),

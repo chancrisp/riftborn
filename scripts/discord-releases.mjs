@@ -105,4 +105,30 @@ Full notes in {#patch-notes} · Play now: https://riftborn.us`,
 
 Full notes in-game: **PATCH NOTES** on the main menu.`,
   },
+  // 2.3.1, owner-approved 2026-10-01 ("Yes, post them as drafted"):
+  // News pings on the announcement, Patch pings on the patch notes.
+  {
+    version: '2.3.1',
+    ping: { announcement: true, patchNotes: true },
+    announcement: `**Riftborn 2.3.1 · Play Again is live!**
+- A **Fullscreen** switch in Settings
+- The death screen now tells you **what killed you**, with a tip for next time
+- **PLAY AGAIN** jumps straight into your next run
+- Older KEEPERS scores are back when you switch off **CURRENT RULES ONLY**
+
+Full notes in {#patch-notes} · Play now: https://riftborn.us`,
+    patchNotes: `**v2.3.1 · Play Again** (1 Oct 2026)
+- **Fullscreen:** a new switch in Settings › Graphics. In Chrome and Edge, Esc still pauses; hold Esc to leave fullscreen.
+- **What killed you:** the results show the final hit and a tip for your next attempt.
+- **Instant PLAY AGAIN** with the same name, ruleset and practice setting (Death Mode stays on until you turn it off).
+- **Assist tip** after two quick early deaths, shown once.
+- **Older KEEPERS scores** appear when you switch off CURRENT RULES ONLY.
+- **Tutorial:** the button shows it unlocks Quackshot, and the toll step can be skipped.
+- **Practice runs** no longer need a name.
+- **Bellwether bell** now warns that its shade returns in the finale.
+- **First-time hazard tips** are no longer lost in busy fights.
+- **Fixes:** phone HUD overlaps, Settings tab names cut off on small screens, and the update message for look-only updates.
+
+Full notes in-game: **PATCH NOTES** on the main menu.`,
+  },
 ];
