@@ -13,8 +13,9 @@
 //                (fails when Community is still off)
 //   onboarding   default channels and the onboarding questions
 //   automod      keyword preset, spam and mention spam rules
-//   settings     system channel and its messages, safety alerts; then the server icon on its own
-//                (only when unset)
+//   settings     system channel and its messages, safety alerts; then the server icon on its own:
+//                set when the server has none, and left alone when it has one, unless the run was
+//                asked to replace it (DISCORD_SETUP_REPLACE_ICON, below)
 //   posts        the welcome, rules and FAQ posts and the other bot posts (each posted once)
 //   profile      the bot's username
 //   all          every phase in order (handy locally)
@@ -29,6 +30,11 @@
 // URL is scrubbed from every line.
 //
 // Env: DISCORD_SETUP_BOT_TOKEN (required, the RiftBot token).
+//      DISCORD_SETUP_REPLACE_ICON (optional, "true" or "1": the settings phase uploads the icon of
+//      ICON_REVISION even when the server already has one. A one-shot: it is never set by a normal
+//      run, only by the workflow_dispatch input "replace_icon" of .github/workflows/discord-setup.yml,
+//      and in GitHub Actions any other trigger (a push) is refused. The result is reported in the
+//      settings annotation and in the server's audit log reason).
 //      DISCORD_SETUP_API_BASE (tests only: an http loopback URL for the fake API in
 //      tests/discord-setup.mjs; refused in CI so the token can only ever go to discord.com).
 
@@ -41,7 +47,22 @@ const USER_AGENT = 'DiscordBot (https://riftborn.us, 1.0)';
 const AUDIT_REASON = 'Riftborn setup';
 const GUILD_NAME = 'Riftborn';
 const BOT_NAME = 'RiftBot';
-const ICON_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'discord-assets', 'riftborn-portal-512.png');
+
+// The server icon. Discord's guild icon is a PNG, JPEG or GIF (GIF only when the server has
+// ANIMATED_ICON), documented as 1024x1024: the skull badge is that, a still PNG. Each icon the
+// server has worn or will wear is a numbered revision; ICON_REVISION is the one the setup uploads:
+//   - to a server with no icon, on any run;
+//   - over an icon the server already has, only on a run asked to replace it (see the header).
+// To change the icon later: add the file, add its revision here, bump ICON_REVISION, push, then run
+// the workflow once with "replace_icon" ticked. Never reuse a revision for a different image.
+const ICON_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'discord-assets');
+const ICONS = {
+  1: { file: 'riftborn-portal-512.png', label: 'the Rift Portal' },
+  2: { file: 'riftborn-skull-1024.png', label: 'the Riftborn skull badge' },
+};
+const ICON_REVISION = 2;
+const ICON = ICONS[ICON_REVISION];
+const ICON_FILE = path.join(ICON_DIR, ICON.file);
 
 // ---------------------------------------------------------------------------------------------
 // Discord constants
@@ -367,13 +388,14 @@ function flattenErrors(obj, at = '', out = []) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 const stats = { requests: 0, rateLimited: 0, retried: 0 };
 let apiBase = DISCORD_API;
+let replaceIcon = false; // set per phase by runPhase from DISCORD_SETUP_REPLACE_ICON
 let gateUntil = 0; // global pause (a global 429, or a bucket with no requests left)
 
-async function api(method, route, { body, query } = {}) {
+async function api(method, route, { body, query, reason } = {}) {
   const url = `${apiBase}${route}${query ? `?${new URLSearchParams(query)}` : ''}`;
   const headers = { Authorization: `Bot ${TOKEN}`, 'User-Agent': USER_AGENT };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (method !== 'GET') headers['X-Audit-Log-Reason'] = AUDIT_REASON;
+  if (method !== 'GET') headers['X-Audit-Log-Reason'] = reason ?? AUDIT_REASON; // ASCII only: it is a header
   // A POST that failed with a 5xx may still have created something, so it is never replayed: the
   // error is reported and the next run finds (or creates) the thing by name.
   const replayable = method !== 'POST';
@@ -900,22 +922,37 @@ async function phaseSettings(r, ctx) {
     settingsNote = done === FAIL ? 'server settings not updated' : `server settings updated (${Object.keys(body).join(', ')})`;
   }
   // The icon goes on its own, so a rejected image never holds back the settings above.
-  let iconNote = 'icon already set (left as it is)';
-  if (!guild.icon) {
-    let icon = null;
-    try {
-      icon = `data:image/png;base64,${(await readFile(ICON_FILE)).toString('base64')}`;
-    } catch (err) {
-      r.error(`could not read the icon file scripts/discord-assets/riftborn-portal-512.png: ${err.code || err.message}`);
-    }
-    iconNote = 'icon not set';
-    if (icon) {
-      const done = await attempt(r, 'set server icon', () => api('PATCH', `/guilds/${gid}`, { body: { icon } }));
-      if (done !== FAIL) iconNote = 'icon set to the Rift Portal';
-    }
-  }
+  const iconNote = await iconStep(r, ctx);
   const joinNote = await joinReport(ctx, general, flags);
   r.notice(`${settingsNote}; ${iconNote}; ${joinNote}`);
+}
+
+// A server with no icon gets ICON_REVISION's. A server with one keeps it, unless this run was asked
+// to replace it (replaceIcon, see resolveReplaceIcon): then the same image is uploaded over it, with
+// the revision in the audit log reason and old and new icon hash in the annotation. Discord never
+// says which image an icon is, so "replace" always uploads: that is why it is never the default.
+async function iconStep(r, ctx) {
+  const { gid, guild } = ctx;
+  const had = guild.icon || null;
+  if (had && !replaceIcon) return 'icon already set (left as it is)';
+  let image = null;
+  try {
+    image = `data:image/png;base64,${(await readFile(ICON_FILE)).toString('base64')}`;
+  } catch (err) {
+    r.error(`could not read the icon file scripts/discord-assets/${ICON.file}: ${err.code || err.message}`);
+  }
+  if (!image) return had ? 'icon not replaced (the icon file is unreadable, the current icon is kept)' : 'icon not set';
+  const what = `${ICON.label} (revision ${ICON_REVISION}, ${ICON.file})`;
+  if (!had) {
+    const done = await attempt(r, 'set server icon', () => api('PATCH', `/guilds/${gid}`, { body: { icon: image } }));
+    return done === FAIL ? 'icon not set' : `icon set to ${what}${replaceIcon ? ' (replace was requested, the server had no icon)' : ''}`;
+  }
+  const reason = `${AUDIT_REASON}: replace server icon with revision ${ICON_REVISION} (${ICON.file})`;
+  const done = await attempt(r, 'replace server icon', () => api('PATCH', `/guilds/${gid}`, { body: { icon: image }, reason }));
+  if (done === FAIL) return 'icon not replaced (the current icon is kept)';
+  const now = done?.icon || null;
+  if (now && now === had) return `icon replace requested: Discord already had this image, nothing changed (${what}, hash ${had})`;
+  return `icon replaced with ${what}: was hash ${had}, now ${now ? `https://cdn.discordapp.com/icons/${gid}/${now}.png` : 'a new hash (Discord did not return it)'}`;
 }
 
 // Join messages ("Glad you're here, ...") go to the system channel, and Discord posts one only when
@@ -1056,11 +1093,31 @@ const PHASES = {
 // ---------------------------------------------------------------------------------------------
 // Entry
 
+const inCI = () => ['CI', 'GITHUB_ACTIONS'].some((key) => { const v = (process.env[key] || '').toLowerCase(); return v && v !== 'false' && v !== '0'; });
+
+// DISCORD_SETUP_REPLACE_ICON: only "true" or "1" turn it on; empty, "false" and "0" are off, anything
+// else is an error. In GitHub Actions only a manual run (workflow_dispatch) may replace the icon, so
+// a push can never do it, whatever the workflow file passes in. Checked before any request is sent.
+// Returns true, false, or null when the run must stop.
+function resolveReplaceIcon(r) {
+  const value = (process.env.DISCORD_SETUP_REPLACE_ICON || '').trim().toLowerCase();
+  if (!value || value === 'false' || value === '0') return false;
+  if (value !== 'true' && value !== '1') {
+    r.error('DISCORD_SETUP_REPLACE_ICON must be "true" or "1" (or empty): the icon was not touched');
+    return null;
+  }
+  const event = process.env.GITHUB_EVENT_NAME || '';
+  if (inCI() && event !== 'workflow_dispatch') {
+    r.error(`the server icon is replaced only by a manual run of the workflow (workflow_dispatch with "replace_icon" ticked), not by ${event ? `"${event}"` : 'an unknown trigger'}: the icon was not touched`);
+    return null;
+  }
+  return true;
+}
+
 function resolveApiBase(r) {
   const override = (process.env.DISCORD_SETUP_API_BASE || '').trim();
   if (!override) return DISCORD_API;
-  const ci = ['CI', 'GITHUB_ACTIONS'].some((key) => { const v = (process.env[key] || '').toLowerCase(); return v && v !== 'false' && v !== '0'; });
-  if (ci) { r.error('DISCORD_SETUP_API_BASE is for local tests and is refused in CI'); return null; }
+  if (inCI()) { r.error('DISCORD_SETUP_API_BASE is for local tests and is refused in CI'); return null; }
   let url;
   try { url = new URL(override); } catch { url = null; }
   if (!url || url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) {
@@ -1077,6 +1134,9 @@ async function runPhase(name) {
   const base = resolveApiBase(r);
   if (!base) return r.finish();
   apiBase = base;
+  const replace = name === 'settings' ? resolveReplaceIcon(r) : false;
+  if (replace === null) return r.finish();
+  replaceIcon = replace;
   if (!TOKEN) { r.error('DISCORD_SETUP_BOT_TOKEN is not set'); return r.finish(); }
   if (/\s/.test(TOKEN)) { r.error('DISCORD_SETUP_BOT_TOKEN contains whitespace'); return r.finish(); }
   try {

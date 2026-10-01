@@ -11,10 +11,16 @@
 //   - the owner-only channel grants no role, and the private categories are private;
 //   - a rejected onboarding reports the exact Discord error and the other phases still pass;
 //   - no secret appears in any annotation, log line, URL or request body;
-//   - the API base override is refused in CI and off loopback; a wrong guild count fails clearly.
+//   - the API base override is refused in CI and off loopback; a wrong guild count fails clearly;
+//   - the server icon: set from nothing, left alone when there is one (no flag, or the flag off),
+//     replaced only when DISCORD_SETUP_REPLACE_ICON asks (one PATCH with the new image, the revision in
+//     the audit log reason, old and new hash in the annotation), reported when Discord rejects it or
+//     already had the image, and refused in GitHub Actions on any trigger but workflow_dispatch; the
+//     workflow passes the flag from the workflow_dispatch input to the settings step only.
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -41,6 +47,8 @@ const DEFAULT_EVERYONE = String([0, 6, 9, 10, 11, 12, 14, 15, 16, 17, 18, 20, 21
 
 // ---------------------------------------------------------------------------------------------
 // The fake Discord API
+
+const iconHash = (dataUri) => createHash('md5').update(dataUri).digest('hex');
 
 function createFakeDiscord() {
   let seq = 1_250_000_000_000_000_000n;
@@ -186,8 +194,14 @@ function createFakeDiscord() {
       if (key in body) next[key] = body[key];
     }
     if ('icon' in body) {
+      // Discord documents the guild icon as a 1024x1024 PNG, JPEG or GIF: here a PNG that is square,
+      // 128 to 1024 px, under 10 MB. The hash is a hash of the image, so the same image gives the same hash.
       if (faults.iconReject || !/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(body.icon)) return formErr('icon', 'Invalid image data');
-      next.icon = `icon${body.icon.length}`;
+      const png = Buffer.from(body.icon.split(',')[1], 'base64');
+      const isPng = png.length > 33 && png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+      const [w, h] = isPng ? [png.readUInt32BE(16), png.readUInt32BE(20)] : [0, 0];
+      if (!isPng || w !== h || w < 128 || w > 1024 || png.length > 10_000_000) return formErr('icon', 'Invalid image data');
+      next.icon = iconHash(body.icon);
     }
     if ('features' in body && body.features.includes('COMMUNITY') && !community()) {
       // Discord refuses COMMUNITY unless both channel ids come in the same request (discord-api-docs #6015).
@@ -401,7 +415,7 @@ function createFakeDiscord() {
 const output = [];
 function envWith(extra) {
   const env = { ...process.env };
-  for (const key of Object.keys(env)) if (/^(CI|GITHUB_ACTIONS|DISCORD_SETUP_.*)$/i.test(key)) delete env[key];
+  for (const key of Object.keys(env)) if (/^(CI|GITHUB_ACTIONS|GITHUB_EVENT_NAME|DISCORD_SETUP_.*)$/i.test(key)) delete env[key];
   return { ...env, ...extra };
 }
 function run(args, env) {
@@ -627,6 +641,31 @@ assert.match(WORKFLOW, /workflow_dispatch:/, 'workflow can be run by hand');
 for (const p of ['.github/workflows/discord-setup.yml', 'scripts/discord-setup.mjs']) assert.ok(WORKFLOW.includes(`- '${p}'`), `workflow runs on changes to ${p}`);
 assert.equal((WORKFLOW.match(/if: \$\{\{ !cancelled\(\) && steps\.discover\.outcome == 'success' \}\}/g) ?? []).length, phases.length - 1, 'later steps run even when an earlier one fails');
 
+// The icon the workflow replaces on request: a one-shot workflow_dispatch input, handed to the settings
+// step only through an env var, and never interpolated into a shell command.
+assert.match(WORKFLOW, /\n {2}workflow_dispatch:\n {4}inputs:\n {6}replace_icon:\n(?: {8}description: .+\n)? {8}type: boolean\n {8}default: false\n/, 'replace_icon is an unticked boolean workflow_dispatch input');
+assert.match(WORKFLOW, /\n {2}push:\n {4}branches: \[main\]\n {4}paths:\n(?: {6}- .+\n)+ {2}workflow_dispatch:/, 'the push trigger has no inputs');
+const replaceLines = WORKFLOW.split('\n').filter((line) => line.includes('DISCORD_SETUP_REPLACE_ICON:'));
+assert.deepEqual(replaceLines, ["          DISCORD_SETUP_REPLACE_ICON: ${{ github.event_name == 'workflow_dispatch' && inputs.replace_icon && 'true' || '' }}"], 'one env line carries the flag, empty unless a manual run ticked it');
+assert.match(WORKFLOW, /run: node scripts\/discord-setup\.mjs settings\n {8}env:\n {10}DISCORD_SETUP_BOT_TOKEN: .+\n(?: {10}#.*\n)? {10}DISCORD_SETUP_REPLACE_ICON:/, 'only the settings step gets the flag');
+assert.equal((WORKFLOW.match(/\$\{\{[^}]*\binputs\./g) ?? []).length, 1, 'the input is read in exactly one place');
+assert.ok(!WORKFLOW.split('\n').some((line) => /\brun:/.test(line) && line.includes('${{')), 'no expression is ever interpolated into a run: command');
+
+// The icon files: the skull badge is the approved logo-v3 avatar (1024 px, never redrawn), the Rift
+// Portal is the icon the server wears today. Both are real PNGs Discord accepts as a server icon.
+const ICON_DIR = path.join(ROOT, 'scripts', 'discord-assets');
+const ICON_NEW = readFileSync(path.join(ICON_DIR, 'riftborn-skull-1024.png'));
+const ICON_OLD = readFileSync(path.join(ICON_DIR, 'riftborn-portal-512.png'));
+const dataUri = (buf) => `data:image/png;base64,${buf.toString('base64')}`;
+for (const [name, buf, side] of [['riftborn-skull-1024.png', ICON_NEW, 1024], ['riftborn-portal-512.png', ICON_OLD, 512]]) {
+  assert.ok(buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) && buf.subarray(12, 16).toString() === 'IHDR', `${name} is a PNG`);
+  assert.deepEqual([buf.readUInt32BE(16), buf.readUInt32BE(20)], [side, side], `${name} is ${side} x ${side}`);
+  assert.ok(buf.length < 1_000_000, `${name} is far under Discord's size limit`);
+}
+assert.equal(createHash('sha256').update(ICON_NEW).digest('hex'), '606420da5aa4e9f969c0c25d6e372f3479f9cd13dec32782e171bc016597008d',
+  'riftborn-skull-1024.png is byte for byte the approved brand/logo-v3/final/avatar-1024.png');
+assert.match(readFileSync(SCRIPT, 'utf8'), /\nconst ICON_REVISION = 2;\n/, 'the script uploads icon revision 2 (the skull badge)');
+
 const fake = createFakeDiscord();
 const base = await fake.start();
 const env = envWith({ DISCORD_SETUP_BOT_TOKEN: TOKEN, DISCORD_SETUP_API_BASE: base });
@@ -637,6 +676,11 @@ try {
   // 1. A fresh server.
   await runAll(phases, env, 'run 1');
   assertDesiredState(fake, 'run 1');
+  const firstIcon = writes().filter((c) => c.method === 'PATCH' && c.route === `/guilds/${G}` && 'icon' in JSON.parse(c.body));
+  assert.equal(firstIcon.length, 1, 'run 1: the icon is uploaded once, to a server with none');
+  assert.deepEqual(Object.keys(JSON.parse(firstIcon[0].body)), ['icon'], 'run 1: the icon goes on its own');
+  assert.equal(JSON.parse(firstIcon[0].body).icon, dataUri(ICON_NEW), 'run 1: the icon is the skull badge, unchanged');
+  assert.equal(fake.state.guild.icon, iconHash(dataUri(ICON_NEW)), 'run 1: the server wears the skull badge');
   assert.ok(fake.calls.some((c) => c.status === 429 && c.method === 'POST' && c.route === `/guilds/${G}/channels`), 'bucket 429 happened');
   assert.ok(fake.calls.some((c) => c.status === 429 && c.route === '/users/@me/guilds'), 'global 429 happened');
   assert.ok(fake.calls.some((c) => c.status === 502 && c.route === `/guilds/${G}`), '502 happened');
@@ -727,6 +771,86 @@ try {
   fake.faults.iconReject = false;
   assert.equal((await run(['settings'], env)).code, 0, 'icon set on the next run');
   assert.ok(s.guild.icon, 'icon set');
+  assert.equal(s.guild.icon, iconHash(dataUri(ICON_NEW)), 'the icon set from nothing is the skull badge');
+
+  // 4c2. The icon on a server that already has one (here the Rift Portal it wears today).
+  const replaceEnv = (flag) => envWith({ DISCORD_SETUP_BOT_TOKEN: TOKEN, DISCORD_SETUP_API_BASE: base, DISCORD_SETUP_REPLACE_ICON: flag });
+  const hashOld = iconHash(dataUri(ICON_OLD));
+  const hashNew = iconHash(dataUri(ICON_NEW));
+  const iconWrites = () => writes().filter((c) => c.method === 'PATCH' && c.route === `/guilds/${G}` && 'icon' in JSON.parse(c.body));
+  // No flag, or the flag off: left exactly as it is, nothing written.
+  for (const flag of [undefined, '', 'false', '0', 'FALSE']) {
+    s.guild.icon = hashOld;
+    fake.calls.length = 0;
+    const kept = await run(['settings'], flag === undefined ? env : replaceEnv(flag));
+    assert.equal(kept.code, 0, `icon present, flag ${JSON.stringify(flag)}\n${kept.text}`);
+    assert.match(kept.stdout, /::notice title=Server settings and icon::server settings unchanged; icon already set \(left as it is\); /, `flag ${JSON.stringify(flag)}: the icon is left as it is`);
+    assert.deepEqual(writes().map((c) => `${c.method} ${c.route}`), [], `flag ${JSON.stringify(flag)}: nothing written`);
+    assert.equal(s.guild.icon, hashOld, `flag ${JSON.stringify(flag)}: the icon is unchanged`);
+  }
+  // The flag on another phase does nothing to the icon.
+  fake.calls.length = 0;
+  assert.equal((await run(['profile'], replaceEnv('true'))).code, 0, 'the flag is ignored by other phases');
+  assert.deepEqual(iconWrites(), [], 'other phases never touch the icon');
+  // Flag on: exactly one PATCH, with the new image alone, and the revision in the audit log reason.
+  for (const flag of ['true', '1']) {
+    s.guild.icon = hashOld;
+    fake.calls.length = 0;
+    const replaced = await run(['settings'], replaceEnv(flag));
+    assert.equal(replaced.code, 0, `replace with flag ${flag}\n${replaced.text}`);
+    assert.deepEqual(writes().map((c) => `${c.method} ${c.route}`), [`PATCH /guilds/${G}`], `flag ${flag}: one write`);
+    const [patch] = writes();
+    assert.deepEqual(JSON.parse(patch.body), { icon: dataUri(ICON_NEW) }, `flag ${flag}: the new image, and nothing else`);
+    assert.equal(patch.reason, 'Riftborn setup: replace server icon with revision 2 (riftborn-skull-1024.png)', `flag ${flag}: audit log reason names the revision`);
+    assert.equal(s.guild.icon, hashNew, `flag ${flag}: the server wears the skull badge`);
+    assert.ok(replaced.stdout.includes(`::notice title=Server settings and icon::server settings unchanged; icon replaced with the Riftborn skull badge (revision 2, riftborn-skull-1024.png): was hash ${hashOld}, now https://cdn.discordapp.com/icons/${G}/${hashNew}.png; `), `flag ${flag}: the annotation says what was replaced`);
+    assert.doesNotMatch(replaced.stdout, /::error/, `flag ${flag}: no error`);
+  }
+  // Flag on and Discord already has this image (same hash): reported, nothing claimed as changed.
+  fake.calls.length = 0;
+  const same = await run(['settings'], replaceEnv('true'));
+  assert.equal(same.code, 0, `replace with the same image\n${same.text}`);
+  assert.match(same.stdout, new RegExp(`icon replace requested: Discord already had this image, nothing changed \\(the Riftborn skull badge \\(revision 2, riftborn-skull-1024\\.png\\), hash ${hashNew}\\)`), 'same image reported');
+  assert.equal(s.guild.icon, hashNew, 'same image: icon unchanged');
+  // The next normal run leaves the new icon alone.
+  fake.calls.length = 0;
+  assert.equal((await run(['settings'], env)).code, 0, 'normal run after the replace');
+  assert.deepEqual(writes().map((c) => `${c.method} ${c.route}`), [], 'normal run after the replace: no writes');
+  // Rejected by Discord: the old icon stays, the error is reported, the other settings still apply.
+  s.guild.icon = hashOld;
+  s.guild.system_channel_flags = 0;
+  fake.faults.iconReject = true;
+  const noReplace = await run(['settings'], replaceEnv('true'));
+  fake.faults.iconReject = false;
+  assert.equal(noReplace.code, 1, 'a rejected replace fails the step');
+  assert.match(noReplace.stdout, /::error title=Server settings and icon::replace server icon: HTTP 400, code 50035: Invalid Form Body \(icon: BASE_TYPE_INVALID Invalid image data\)/, 'replace error reported');
+  assert.match(noReplace.stdout, /::notice title=Server settings and icon::server settings updated \(system_channel_flags\); icon not replaced \(the current icon is kept\); /, 'summary says the icon was kept');
+  assert.deepEqual([s.guild.system_channel_flags, s.guild.icon], [6, hashOld], 'rejected replace: settings applied, icon kept');
+  // Flag on but the server has no icon: it is simply set (and the note says so).
+  s.guild.icon = null;
+  fake.calls.length = 0;
+  const bare = await run(['settings'], replaceEnv('true'));
+  assert.equal(bare.code, 0, `replace on a server with no icon\n${bare.text}`);
+  assert.equal(s.guild.icon, hashNew, 'no icon + flag: the skull badge is set');
+  assert.match(bare.stdout, /icon set to the Riftborn skull badge \(revision 2, riftborn-skull-1024\.png\) \(replace was requested, the server had no icon\)/, 'no icon + flag: noted');
+  assert.equal(writes()[0].reason, 'Riftborn setup', 'setting a first icon keeps the plain audit log reason');
+  // The flag is refused before any request: an unknown value, and any GitHub Actions trigger but a manual run.
+  const sentBefore = fake.calls.length;
+  const junk = await run(['settings'], replaceEnv('yes'));
+  assert.equal(junk.code, 1, 'an unknown flag value is an error');
+  assert.match(junk.stdout, /::error title=Server settings and icon::DISCORD_SETUP_REPLACE_ICON must be "true" or "1" \(or empty\): the icon was not touched/, 'unknown value explained');
+  for (const event of ['push', 'schedule', '']) {
+    const refused = await run(['settings'], envWith({ GITHUB_ACTIONS: 'true', ...(event ? { GITHUB_EVENT_NAME: event } : {}), DISCORD_SETUP_REPLACE_ICON: 'true' }));
+    assert.equal(refused.code, 1, `a ${event || 'no-event'} run cannot replace the icon`);
+    assert.match(refused.stdout, /::error title=Server settings and icon::the server icon is replaced only by a manual run of the workflow \(workflow_dispatch with "replace_icon" ticked\), not by /, `${event || 'no-event'}: refused with the reason`);
+    assert.doesNotMatch(refused.stdout, /BOT_TOKEN is not set/, `${event || 'no-event'}: refused before anything else`);
+  }
+  // A manual run passes that check (and then stops at the missing token: no request is ever sent here).
+  const manual = await run(['settings'], envWith({ GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'workflow_dispatch', DISCORD_SETUP_REPLACE_ICON: 'true' }));
+  assert.equal(manual.code, 1);
+  assert.match(manual.stdout, /::error title=Server settings and icon::DISCORD_SETUP_BOT_TOKEN is not set/, 'workflow_dispatch passes the trigger check');
+  assert.equal(fake.calls.length, sentBefore, 'refused flag runs send nothing');
+  s.guild.system_channel_flags = 6;
 
   // 4d. Busy channels: 60 member messages after the bot's posts, and the bug-report guide archived
   // behind 120 newer archived posts. No second copy is posted.

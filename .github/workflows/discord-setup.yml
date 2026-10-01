@@ -5,6 +5,13 @@ name: Discord server setup
 # phase's pass/fail shows on its own; every outcome is also a job annotation (::notice / ::error).
 # Discord needs Community before announcement and forum channels exist, so the channels phase runs
 # twice: before Community (everything else) and after it (the announcement and forum channels).
+#
+# The server icon is set once, when the server has none. A normal run (a push, or Run workflow with
+# nothing ticked) never touches an icon that is already set. To change it on purpose, run the workflow
+# by hand with "replace_icon" ticked: the settings step then uploads the icon of ICON_REVISION in
+# scripts/discord-setup.mjs (file in scripts/discord-assets) over the current one, and says in its
+# annotation what it replaced. The input is passed through an env var, never into a shell command, and
+# the script itself refuses to replace the icon on any trigger but workflow_dispatch.
 
 on:
   push:
@@ -13,6 +20,11 @@ on:
       - '.github/workflows/discord-setup.yml'
       - 'scripts/discord-setup.mjs'
   workflow_dispatch:
+    inputs:
+      replace_icon:
+        description: 'Replace the server icon with the current one in scripts/discord-assets (one run only; leave unticked for a normal run)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -76,6 +88,8 @@ jobs:
         run: node scripts/discord-setup.mjs settings
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
+          # Only a manual run with replace_icon ticked sets this; every other run passes an empty value.
+          DISCORD_SETUP_REPLACE_ICON: ${{ github.event_name == 'workflow_dispatch' && inputs.replace_icon && 'true' || '' }}
       - name: Posts
         if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
         run: node scripts/discord-setup.mjs posts
