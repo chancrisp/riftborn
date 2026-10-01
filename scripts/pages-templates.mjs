@@ -44,7 +44,7 @@ export const SOCIAL_CARD = Object.freeze({
   imageWidth: 1200,
   imageHeight: 630,
   imageType: 'image/jpeg',
-  imageAlt: 'Riftborn logo and title over a game screenshot: a lone survivor fires green bolts into a horde of monsters around a skull shrine and lava pools. Text: PS1-style browser shooter. Free, no download, play at riftborn.us.'
+  imageAlt: 'Riftborn logo, an octagon badge with a red skull and glowing purple eyes beside purple pixel-art RIFTBORN lettering, over a dark game screenshot: a lone survivor fires green bolts into a horde of red monsters around a skull shrine and lava pools. Tagline: PS1-style browser shooter. Footer: Free, no download, play @ riftborn.us.'
 });
 
 /**
