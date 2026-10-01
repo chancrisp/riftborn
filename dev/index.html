@@ -44,7 +44,7 @@ so a reload before it lands can't lose it, in this tab's sessionStorage. Runs be
 <script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
 the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
 makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
-window.RIFTBORN_BUILD = "8dd3cad4cc";
+window.RIFTBORN_BUILD = "d4a57970be";
 (function () {
   var b = window.RIFTBORN_BUILD;
   if (b === "dev" || !window.fetch || !window.URL) return;
@@ -161,7 +161,7 @@ body:has(#devGate) #riftLoader{display:none}
 /* Reduced motion: a calm, still screen; the bar and skull step between stages, the eyes just switch on. */
 @media (prefers-reduced-motion:reduce){.rl-embers,.rl-heat,.rl-sweep,.rl-dots{display:none}#riftLoader .rl-ring,#riftLoader .rl-bob,#riftLoader .rl-rift-glow{animation:none}.rl-fill,.rl-rider,.rl-mark{transition:none}#riftLoader.rl-lit .rl-eyes{animation:none;opacity:1}#riftLoader.rl-lit .rl-rift-glow{animation:none;opacity:.9}#riftLoader{transition-duration:.25s}}
 </style>
-<link rel="stylesheet" href="css/riftborn.3f72160dff.css">
+<link rel="stylesheet" href="css/riftborn.f6eb6fa5d3.css">
 </head>
 <body class="menu-open">
 <div id="riftLoader" role="dialog" aria-modal="true" aria-label="Loading Riftborn">
@@ -232,7 +232,7 @@ body:has(#devGate) #riftLoader{display:none}
 <div id="stageCard" class="stage-card hidden" aria-live="polite"><small id="stageCardSmall"></small><strong id="stageCardBig"></strong><i class="stage-card-rule" aria-hidden="true"></i></div>
 
 <main id="menu">
-  <button id="deathSkull" type="button" aria-label="Enter Death Mode" aria-pressed="false"><img src="assets/death-skull.png" width="80" height="98" alt="" draggable="false"></button>
+  <button id="deathSkull" type="button" aria-label="Enter Death Mode" aria-pressed="false"><span class="skull-art"><img src="assets/death-skull.png" width="80" height="98" alt="" draggable="false"></span></button>
   <div class="menu-card ui-scaled">
     <h1 class="brand-title"><span class="title-bitmap" role="img" aria-label="RIFTBORN" data-wordmark="marquee"><picture class="title-part-pic"><source media="(min-width:1280px) and (min-height:700px)" srcset="assets/title-marquee-badge-40-x4.png"><source media="(min-width:700px) and (min-height:600px)" srcset="assets/title-marquee-badge-40-x3.png"><source media="(min-width:520px) and (max-height:599px)" srcset="assets/title-marquee-badge-40-x2.png"><img class="title-part title-part-mark" data-part="badge" src="assets/title-marquee-badge-64-x2.png" alt="" width="128" height="128" draggable="false"></picture><img class="title-part title-part-word" data-part="word" src="assets/title-marquee-word.png" alt="" width="146" height="29" draggable="false" style="--w:146;--h:29"></span></h1>
     <div class="edition"></div>
@@ -421,7 +421,7 @@ checks this table before every deploy. */
 (function () {
   var HASH = "6057f115a0d917397c72f5ca48b752fd27cf76370e923af446247ab2f525b87c";
   var KEY = "riftborn-dev-gate";
-  var GAME = "js/riftborn.8dd3cad4cc.js";
+  var GAME = "js/riftborn.d4a57970be.js";
   var gate = document.getElementById("devGate");
   var form = document.getElementById("devGateForm");
   var input = document.getElementById("devGatePass");

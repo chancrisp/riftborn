@@ -1,6 +1,6 @@
 {
-  "version": "2.2.1",
-  "build": "8dd3cad4cc",
+  "version": "2.3.0",
+  "build": "d4a57970be",
   "files": {
     ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "assets/apple-touch-icon-180.png": "6f5c464d0074632096ba97c5d62452718f773f6ce61088d0a5449cbcd1a19a45",
@@ -25,9 +25,9 @@
     "assets/weapon-2.png": "de7c4d11d03777c571f7fcb835bc61ec1f804ddb671e7816f12637a4f6f58e5a",
     "assets/weapon-3.png": "6bd55a9ea48ba40c6a0d9bb167475618ae8f52e217d153b2ca1adeff322dc61e",
     "assets/weapon-4.png": "0d87cf314fd65ad19ac0122dd4279beaab7db3cb02ec71b6ced264597565ee77",
-    "css/riftborn.3f72160dff.css": "3f72160dffe0a17f0d3903d2b9ca6fe81343bf4dbfeeed4572d80db040613ed7",
-    "index.html": "25a44a8d34001b5022ca4f53e6da041bb754c352bcc6d3eb61e2de2c6342222f",
-    "js/riftborn.8dd3cad4cc.js": "8dd3cad4cc858bd5b6f76f2e902161a25e7a16bb97266d2041fc76bb980a5c08",
-    "version.json": "cc065916780f4f1fdd9b76203ea77b415a960699190c75512482294dc2723016"
+    "css/riftborn.f6eb6fa5d3.css": "f6eb6fa5d30125a36d10177b0fa8eec5713f9ab36e1d52609239ca73ac90d343",
+    "index.html": "53f0976a9980625ed1e6bdc995f0aef38fb894ff141e19edd134de4e6da2c35b",
+    "js/riftborn.d4a57970be.js": "d4a57970be12b613d3efd76466104e7f6f2155457132e7c20c2a02f2ae225365",
+    "version.json": "5b92d9fba4404989b29461a5dccf0496eae5f849a332e1024ccd0c3503a7e342"
   }
 }
