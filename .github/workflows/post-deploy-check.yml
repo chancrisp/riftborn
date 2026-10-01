@@ -49,11 +49,11 @@ jobs:
     steps:
       # The commit that was just deployed (the live/ and dev/ version.json to compare with), not
       # whatever main has moved on to since.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -88,13 +88,13 @@ jobs:
     timeout-minutes: 5
     environment: cloudflare-production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
           # The script and the root files it imports (site.config.mjs, site.hosts.mjs).
           sparse-checkout: scripts
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Post the alert to Discord

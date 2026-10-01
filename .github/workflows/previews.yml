@@ -51,14 +51,14 @@ jobs:
     environment: cloudflare-production
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           # The whole history without file contents: the cleanup re-checks the link of every
           # previews/<name> removed by an earlier push (git log), even one Cloudflare lists nothing for.
           fetch-depth: 0
           filter: blob:none
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
