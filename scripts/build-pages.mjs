@@ -2,6 +2,7 @@
 //   _site/     GitHub Pages (https://chancrisp.github.io/riftborn/)
 //   _cf/live/  Cloudflare Pages project "riftborn"      (https://riftborn.us/)
 //   _cf/dev/   Cloudflare Pages project "riftborn-dev"  (https://dev.riftborn.us/)
+//   _cf/feedback/  Cloudflare Pages project "riftborn-feedback"  (https://feedback.riftborn.us/)
 // Hosts, project names and the LAUNCHED switch come from site.config.mjs.
 //
 // Before launch (LAUNCHED = false):
@@ -14,15 +15,19 @@
 //   _cf/live  the game at /, the original at /classic/, /privacy/.
 //   _site     handoff pages that move each player's saved data to riftborn.us (root, /classic/,
 //             /dev/ -> dev.riftborn.us, 404.html for every unknown path), /privacy/ redirects, and
-//             the feedback inbox stays at /feedback/.
+//             the old copy of the feedback inbox at /feedback/.
+// Either way:
+//   _cf/feedback  the private feedback inbox (feedback/) on its own origin, and riftborn.us/feedback
+//                 redirects there. The github.io copy carries a "moved" banner and keeps working
+//                 until GitHub Pages is shut down (same Worker API, api.riftborn.us).
 // Each Cloudflare output gets a _headers file (strict CSP with the hash of every inline script,
-// HSTS and friends, cache rules) generated from its final HTML.
+// HSTS and friends, cache rules) generated from its final HTML; the inbox's is stricter still.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { HOSTS, MIGRATION, ciLaunchRefusals, resolveSiteConfig } from '../site.config.mjs';
-import { buildHeaders, inlineScripts } from './pages-headers.mjs';
+import { buildHeaders, buildInboxHeaders, inlineScripts } from './pages-headers.mjs';
 import { SOCIAL_CARD, classicImportScript, classicLoaderScript, handoffPage, notFoundPage, prelaunchPage, redirectPage } from './pages-templates.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
@@ -37,6 +42,7 @@ const siteOut = path.join(outBase, '_site');
 const cfOut = path.join(outBase, '_cf');
 const cfLive = path.join(cfOut, 'live');
 const cfDev = path.join(cfOut, 'dev');
+const cfFeedback = path.join(cfOut, 'feedback');
 if (!outOverride && !siteOut.startsWith(root + path.sep)) throw new Error('Refusing to build outside the repository');
 
 const apiBase = (process.env.RIFTBORN_SCORE_API_BASE || '').trim().replace(/\/+$/, '');
@@ -187,23 +193,41 @@ if (!config.launched) {
   // GitHub Pages serves a project's 404.html for every unknown path under /riftborn/.
   handoff('404.html', liveRoot, { social: cardShipped });
 }
-// The private player-feedback inbox (noindex; every read needs the Worker's admin key) stays on
-// github.io for good, away from the game origin.
-if (fs.existsSync(inbox)) copy(inbox, path.join(siteOut, 'feedback'));
+// The private player-feedback inbox (noindex; every read needs the Worker's admin key) lives at
+// feedback.riftborn.us (_cf/feedback below). This old copy keeps working until GitHub Pages is shut
+// down, in case the new address has a problem, and says at the top where the inbox went.
+if (!fs.existsSync(path.join(inbox, 'index.html'))) throw new Error('feedback/index.html is missing: nothing to serve at ' + HOSTS.feedback);
+copy(inbox, path.join(siteOut, 'feedback'));
+edit(path.join(siteOut, 'feedback', 'index.html'), html => html.replace('<body>', () => `<body>\n<p class="moved">The inbox has moved to <a href="${HOSTS.feedback}/">${new URL(HOSTS.feedback).host}</a>. This old address keeps working until GitHub Pages is shut down.</p>`));
 fs.writeFileSync(path.join(siteOut, '.nojekyll'), '');
+
+// The pixel heading font (the privacy page before launch, and the inbox).
+const pixelFont = [path.join(live, 'assets', 'crypt-pixel.ttf'), path.join(root, 'dist', 'assets', 'crypt-pixel.ttf')].find(file => fs.existsSync(file));
 
 // ---- Cloudflare Pages: riftborn.us (_cf/live) ------------------------------------------------------
 if (config.launched) {
   copyGame(cfLive, { moveImport: true });
-  write(path.join(cfLive, '_redirects'), '# Old GitHub Pages paths typed on the new domain.\n/riftborn/* /:splat 301\n/riftborn /  301\n');
 } else {
   write(path.join(cfLive, 'index.html'), prelaunchPage({ legacyUrl: config.legacyUrl, param: MIGRATION.param }));
-  const font = [path.join(live, 'assets', 'crypt-pixel.ttf'), path.join(root, 'dist', 'assets', 'crypt-pixel.ttf')].find(file => fs.existsSync(file));
-  if (font) write(path.join(cfLive, 'assets', 'crypt-pixel.ttf'), fs.readFileSync(font)); // the privacy page's heading font
+  if (pixelFont) write(path.join(cfLive, 'assets', 'crypt-pixel.ttf'), fs.readFileSync(pixelFont)); // the privacy page's heading font
 }
 if (fs.existsSync(privacy)) copy(privacy, path.join(cfLive, 'privacy'));
 // Unknown paths: a 404.html also stops Pages from serving the root page for every path.
 write(path.join(cfLive, '404.html'), config.launched ? notFoundPage() : prelaunchPage({ legacyUrl: config.legacyUrl, param: MIGRATION.param }));
+// riftborn.us/feedback (and anything under it) goes to the inbox's own origin. 302, not 301: it is a
+// short address for the owner, not a page that moved for good. Browsers keep a 301 with no expiry,
+// so if /feedback ever becomes something else (or the inbox moves again) a browser that once
+// followed it would keep going to the old place; a 302 costs one extra hop, and nothing indexes it.
+// Nothing in riftborn.us may sit at /feedback: the redirect and that file would fight over the path.
+const taken = ['feedback', 'feedback.html'].filter(name => fs.existsSync(path.join(cfLive, name)));
+if (taken.length) throw new Error(`_cf/live has ${taken.join(' and ')}, but riftborn.us/feedback redirects to ${HOSTS.feedback}/: rename it or change the redirect.`);
+write(path.join(cfLive, '_redirects'), [
+  ...(config.launched ? ['# Old GitHub Pages paths typed on the new domain.', '/riftborn/* /:splat 301', '/riftborn /  301'] : []),
+  '# The feedback inbox lives on its own origin (scripts/build-pages.mjs: why 302).',
+  `/feedback ${HOSTS.feedback}/ 302`,
+  `/feedback/ ${HOSTS.feedback}/ 302`,
+  `/feedback/* ${HOSTS.feedback}/ 302`
+].join('\n') + '\n');
 
 // ---- Cloudflare Pages: dev.riftborn.us (_cf/dev) ----------------------------------------------------
 if (hasDev) {
@@ -214,8 +238,34 @@ if (hasDev) {
   console.warn('No dev/ build: _cf/dev not built.');
 }
 
+// ---- Cloudflare Pages: feedback.riftborn.us (_cf/feedback) -------------------------------------------
+// The inbox on its own origin: its three files, the heading font (inbox.css asks for
+// ../assets/crypt-pixel.ttf, which is /assets/ here; a missing file would be a console error), a
+// plain 404 page with no script (without one Pages would answer every path with the inbox), and a
+// robots.txt that keeps crawlers out. The strict headers come below.
+copy(inbox, cfFeedback);
+if (!pixelFont) throw new Error('No crypt-pixel.ttf in live/assets or dist/assets: the inbox at ' + HOSTS.feedback + ' needs it.');
+write(path.join(cfFeedback, 'assets', 'crypt-pixel.ttf'), fs.readFileSync(pixelFont));
+const inboxIcon = /<link rel="icon"[^>]*>/.exec(fs.readFileSync(path.join(inbox, 'index.html'), 'utf8'))?.[0] || '';
+write(path.join(cfFeedback, '404.html'), `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Riftborn · Feedback inbox</title>
+${inboxIcon}
+<link rel="stylesheet" href="/inbox.css">
+</head>
+<body>
+<main><section class="panel"><h2>NOT FOUND</h2><p><a href="/">Open the feedback inbox</a></p></section></main>
+</body>
+</html>
+`);
+write(path.join(cfFeedback, 'robots.txt'), 'User-agent: *\nDisallow: /\n');
+
 // GitHub Pages markers mean nothing to Cloudflare Pages.
-for (const dir of [cfLive, cfDev]) fs.rmSync(path.join(dir, '.nojekyll'), { force: true });
+for (const dir of [cfLive, cfDev, cfFeedback]) fs.rmSync(path.join(dir, '.nojekyll'), { force: true });
 
 // Launch safety, on the final outputs: every page a handoff sends players to exists and reads the
 // hand-over in an inline script (it has to run before any module reads localStorage, and take the
@@ -244,9 +294,15 @@ for (const [dir, options] of outputs) {
   fs.writeFileSync(path.join(dir, '_headers'), text);
   summary.push(`${path.relative(outBase, dir).split(path.sep).join('/')} (${htmlFiles.length} pages, ${hashes.length} inline script hashes)`);
 }
+// The inbox: its own strict set (connects to the Worker API only; noindex, no referrer).
+{
+  const { text, hashes, htmlFiles } = buildInboxHeaders(cfFeedback, { api: config.api });
+  fs.writeFileSync(path.join(cfFeedback, '_headers'), text);
+  summary.push(`${path.relative(outBase, cfFeedback).split(path.sep).join('/')} (feedback inbox: ${htmlFiles.length} pages, ${hashes.length} inline script hashes, connects to ${config.api} only)`);
+}
 
 const mode = config.launched ? 'LAUNCHED' : 'pre-launch';
 const overrides = config.testOverrides.length ? ` [test overrides: ${config.testOverrides.join(', ')}]` : '';
 console.log(`Built Riftborn Pages outputs (${mode})${overrides}:`);
-console.log(`  _site/ (GitHub Pages): ${config.launched ? 'handoff pages to ' + config.live + ', feedback inbox' : (hasLive ? 'Riftborn Reborn at the root, original at /classic/' : 'original game at the root') + (apiBase ? ', Worker API configured' : ', same-origin API mode')}`);
+console.log(`  _site/ (GitHub Pages): ${config.launched ? 'handoff pages to ' + config.live + ', old feedback inbox copy (moved banner)' : (hasLive ? 'Riftborn Reborn at the root, original at /classic/' : 'original game at the root') + (apiBase ? ', Worker API configured' : ', same-origin API mode')}`);
 console.log(`  ${summary.join('\n  ')}`);

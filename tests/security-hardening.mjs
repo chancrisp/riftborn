@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import worker from '../cloudflare/worker.js';
 import { inlineScripts, scriptHash } from '../scripts/pages-headers.mjs';
+import { HOSTS } from '../site.hosts.mjs';
 
 const ORIGIN = 'https://riftborn.us';
 const API = 'https://api.riftborn.us';
@@ -95,8 +96,11 @@ console.log('PASS Pages HSTS: includeSubDomains, no preload.');
   assert.deepEqual([...policy['script-src']].sort(), ["'self'", ...hashes].sort(), 'Every inline script is listed by its hash');
   const script = fs.readFileSync('feedback/inbox.js', 'utf8');
   const api = /const API = '([^']+)'/.exec(script)[1];
-  assert.ok(policy['connect-src'].includes(api), 'The inbox may reach its API');
-  assert.ok(policy['connect-src'].every(source => source.startsWith('https://')), 'Only https API hosts');
+  // The inbox moved to feedback.riftborn.us: both copies talk to api.riftborn.us, and only to it.
+  assert.equal(api, HOSTS.api, 'The inbox uses api.riftborn.us (not the workers.dev address)');
+  assert.deepEqual(policy['connect-src'], [api], 'The inbox may reach its API, and nothing else');
+  assert.ok(!script.includes(HOSTS.workersDev), 'No workers.dev address left in the inbox');
+  assert.deepEqual(JSON.parse(/const HOMES = (\[[^\]]*\])/.exec(script)[1].replace(/'/g, '"')), [new URL(HOSTS.feedback).hostname, new URL(HOSTS.legacyOrigin).hostname], 'The inbox knows its two homes');
   assert.ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function/.test(script), 'Nothing is rendered as HTML');
   assert.ok(!/style\s*=|<style/i.test(html.replace(meta[0], '')), 'No inline styles (style-src is same-origin only)');
   // The key: sessionStorage only (this tab). No "Remember on this device" option any more, and a copy

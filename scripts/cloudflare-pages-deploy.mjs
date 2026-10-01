@@ -1,17 +1,22 @@
 // Deploys the Cloudflare Pages outputs built by scripts/build-pages.mjs with Wrangler:
-//   _cf/live -> project "riftborn"      (https://riftborn.us)
-//   _cf/dev  -> project "riftborn-dev"  (https://dev.riftborn.us)
+//   _cf/live     -> project "riftborn"           (https://riftborn.us)
+//   _cf/dev      -> project "riftborn-dev"       (https://dev.riftborn.us)
+// and, with --feedback, only the feedback inbox:
+//   _cf/feedback -> project "riftborn-feedback"  (https://feedback.riftborn.us; its custom domain is
+//                   connected by scripts/cloudflare-pages-domains.mjs)
 // Each project is created first (production branch main); "already exists" is fine.
-// Run by the "cloudflare" job of .github/workflows/pages.yml (only on main, and only when the
-// repository variable CF_PAGES_ENABLED is 1), with CLOUDFLARE_API_TOKEN (secret) and
-// CLOUDFLARE_ACCOUNT_ID (variable).
+// Run by .github/workflows/pages.yml (only on main, and only when the repository variable
+// CF_PAGES_ENABLED is 1), with CLOUDFLARE_API_TOKEN (secret) and CLOUDFLARE_ACCOUNT_ID (variable):
+// the game's two by the "cloudflare" job, the inbox by its own "feedback" job, so a problem with the
+// inbox never stops the game's deploy, its check or the github.io handoff.
 //
 // Wrangler runs with the production API token, so it is never fetched at deploy time: it is
 // exact-pinned in tools/wrangler/package.json + package-lock.json (integrity hashes), installed by
 // the job with `npm ci --prefix tools/wrangler --ignore-scripts`, run from there with this Node (no
 // npx, no shell), and handed only the environment it needs (wranglerEnv) instead of all of it.
 //
-//   node scripts/cloudflare-pages-deploy.mjs --dry-run   prints the plan; runs nothing
+//   node scripts/cloudflare-pages-deploy.mjs --dry-run              prints the plan; runs nothing
+//   node scripts/cloudflare-pages-deploy.mjs --feedback --dry-run   the same for the inbox
 //
 // --previews (the "previews" job of .github/workflows/previews.yml, after node scripts/pages-previews.mjs):
 // the per-branch preview links instead. Each _cf/previews/<name> becomes a branch deployment of
@@ -35,9 +40,19 @@ export const WRANGLER_DIR = 'tools/wrangler';
 export const WRANGLER_VERSION = JSON.parse(fs.readFileSync(path.join(root, WRANGLER_DIR, 'package.json'), 'utf8')).dependencies.wrangler;
 const WRANGLER_BIN = path.join(root, WRANGLER_DIR, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
 
-/** The Wrangler commands, in order: riftborn.us first (the github.io handoff waits for it). */
-export function deployPlan({ sha = '', message = '' } = {}) {
-  const outputs = [[PAGES_PROJECTS.live, '_cf/live'], [PAGES_PROJECTS.dev, '_cf/dev']];
+/**
+ * [project, output] per deploy: the game's two (riftborn.us first: the github.io handoff waits for
+ * it), and the feedback inbox on its own (another job, which nothing waits for).
+ */
+export const DEPLOY_OUTPUTS = Object.freeze({
+  game: Object.freeze([[PAGES_PROJECTS.live, '_cf/live'], [PAGES_PROJECTS.dev, '_cf/dev']]),
+  feedback: Object.freeze([[PAGES_PROJECTS.feedback, '_cf/feedback']])
+});
+
+/** The Wrangler commands for one deploy (`site`: game or feedback), in order. */
+export function deployPlan({ sha = '', message = '', site = 'game' } = {}) {
+  const outputs = DEPLOY_OUTPUTS[site];
+  if (!outputs) throw new Error(`Unknown deploy ${site}: ${Object.keys(DEPLOY_OUTPUTS).join(' or ')}.`);
   const commit = [
     ...(/^[0-9a-f]{7,40}$/i.test(sha) ? ['--commit-hash', sha] : []),
     ...(message ? ['--commit-message', String(message).split('\n')[0].slice(0, 100)] : []),
@@ -89,7 +104,7 @@ export function wranglerEnv(env = process.env) {
 export function deployRefusals(env = process.env) {
   const refusals = [];
   if ((env.CI || env.GITHUB_ACTIONS) && env.GITHUB_REF !== `refs/heads/${PRODUCTION_BRANCH}`) {
-    refusals.push(`Refusing to deploy ${env.GITHUB_REF || 'an unknown ref'} to production: only refs/heads/${PRODUCTION_BRANCH} deploys riftborn.us and dev.riftborn.us.`);
+    refusals.push(`Refusing to deploy ${env.GITHUB_REF || 'an unknown ref'} to production: only refs/heads/${PRODUCTION_BRANCH} deploys riftborn.us, dev.riftborn.us and feedback.riftborn.us.`);
   }
   if (!env.CLOUDFLARE_API_TOKEN) refusals.push('Set the CLOUDFLARE_API_TOKEN secret (it needs Cloudflare Pages: Edit).');
   if (!/^[0-9a-f]{32}$/i.test(env.CLOUDFLARE_ACCOUNT_ID || '')) refusals.push('Set the CLOUDFLARE_ACCOUNT_ID repository variable.');
@@ -116,7 +131,7 @@ function wrangler(args) {
 
 function main() {
   const dryRun = process.argv.includes('--dry-run');
-  const plan = deployPlan({ sha: process.env.COMMIT_SHA || process.env.GITHUB_SHA, message: process.env.COMMIT_MESSAGE });
+  const plan = deployPlan({ sha: process.env.COMMIT_SHA || process.env.GITHUB_SHA, message: process.env.COMMIT_MESSAGE, site: process.argv.includes('--feedback') ? 'feedback' : 'game' });
   for (const step of plan) {
     if (!fs.existsSync(path.join(root, step.dir, 'index.html')) || !fs.existsSync(path.join(root, step.dir, '_headers'))) {
       if (!dryRun) throw new Error(`${step.dir} is missing or incomplete: run npm run build:pages first.`);

@@ -22,11 +22,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  DEPLOY_WORKFLOW, EXTRA_PAGES, GET_TRIES, PLAYWRIGHT_DIR, PRELOAD_SESSION, PRELOAD_STORAGE, SOCIAL_TAGS, TOLERATED, checkLiveFiles, checkVersion, committedPage,
-  discordPayload, dryRun, escData, expectedVersions, get, githubContext, isDiscordWebhook, isWriteRequest, linkedFiles, metaTags, missingCommittedFiles,
-  newerDeploy, pageExpectations, report, retryable, sameBuild, scrub, sendAlert, servedAsPage, socialImages, socialProblems, splitTolerated, supersededReason,
-  versionProblem
+  DEPLOY_WORKFLOW, EXTRA_PAGES, FEEDBACK_DOMAIN_GRACE_UNTIL, FEEDBACK_REDIRECTS, GET_TRIES, INBOX_KEY_STORE, PLAYWRIGHT_DIR, PRELOAD_SESSION, PRELOAD_STORAGE, SOCIAL_TAGS,
+  TOLERATED, checkFeedbackRedirects, checkInbox, checkLiveFiles, checkVersion, committedPage, discordPayload, dryRun, escData, expectedVersions, get, githubContext,
+  inboxHeaderProblems, isDiscordWebhook, isWriteRequest, linkedFiles, metaTags, missingCommittedFiles, newerDeploy, notAttached, pageExpectations, report, retryable,
+  sameBuild, scrub, sendAlert, servedAsPage, socialImages, socialProblems, splitTolerated, supersededReason, versionProblem
 } from '../scripts/post-deploy-check.mjs';
+import { buildInboxHeaders, matchHeaders, parseHeaders } from '../scripts/pages-headers.mjs';
 import { HOSTS } from '../site.config.mjs';
 
 const read = file => fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
@@ -401,6 +402,129 @@ console.log('PASS no sound, no run, no writes: muted and popups pre-answered bef
   assert.equal((await sendAlert({ webhook: hook, text: 'x', fetchImpl: async () => ({ ok: false, status: 404 }) })).note, 'Discord answered HTTP 404: no alert');
 }
 console.log('PASS reporting: annotations (capped), job summary and a one-line Discord alert, scrubbed; the alert never pings and only ever goes to a Discord webhook.');
+
+// --- the feedback inbox (feedback.riftborn.us) and riftborn.us/feedback -----------------------------
+{
+  const INBOX = HOSTS.feedback;
+  // What "not attached yet" looks like (no DNS name, no certificate, Cloudflare's edge errors), and
+  // what it does not (any real answer, and plain network trouble, which get() already retried).
+  for (const result of [{ status: 0, error: 'ENOTFOUND' }, { status: 0, error: 'EAI_AGAIN' }, { status: 0, error: 'ERR_TLS_CERT_ALTNAME_INVALID' },
+    { status: 0, error: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' }, { status: 0, error: 'ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE' }, { status: 522 }, { status: 523 }, { status: 525 }, { status: 526 }, { status: 530 }]) {
+    assert.ok(notAttached(result), JSON.stringify(result));
+  }
+  for (const result of [{ status: 200 }, { status: 301 }, { status: 403 }, { status: 404 }, { status: 500 }, { status: 503 }, { status: 0, error: 'timed out' }, { status: 0, error: 'ECONNRESET' }]) {
+    assert.equal(notAttached(result), '', JSON.stringify(result));
+  }
+
+  // The headers checked are exactly the ones the build writes (scripts/pages-headers.mjs buildInboxHeaders).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'riftborn-inbox-'));
+  let built;
+  try {
+    fs.copyFileSync(new URL('../feedback/index.html', import.meta.url), path.join(tmp, 'index.html'));
+    const rules = parseHeaders(buildInboxHeaders(tmp, { api: HOSTS.api }).text);
+    built = Object.fromEntries([...matchHeaders(rules, '/').entries()].map(([name, { value }]) => [name, value]));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  assert.deepEqual(inboxHeaderProblems(built), [], 'what the build writes passes');
+  const looser = (name, value) => inboxHeaderProblems({ ...built, [name]: value }).join('; ');
+  const csp = built['content-security-policy'];
+  assert.match(looser('content-security-policy', csp.replace(`connect-src ${HOSTS.api}`, `connect-src 'self' ${HOSTS.api} ${HOSTS.workersDev}`)), /CSP connect-src is 'self' https:\/\/api\.riftborn\.us/);
+  assert.match(looser('content-security-policy', csp.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")), /CSP script-src/);
+  assert.deepEqual(inboxHeaderProblems({ ...built, 'content-security-policy': csp.replace("script-src 'self'", "script-src 'self' 'sha256-AbC+/12=' ") }), [], 'hashed inline scripts are fine');
+  assert.match(looser('content-security-policy', csp.replace("frame-ancestors 'none'", "frame-ancestors 'self'")), /frame-ancestors/);
+  assert.match(looser('content-security-policy', csp.replace("; form-action 'self'", '')), /CSP form-action is missing/);
+  assert.match(looser('content-security-policy', ''), /no Content-Security-Policy/);
+  assert.match(looser('x-robots-tag', 'noindex'), /X-Robots-Tag is noindex, expected noindex, nofollow/);
+  assert.match(looser('referrer-policy', 'strict-origin-when-cross-origin'), /Referrer-Policy is strict-origin-when-cross-origin/);
+  assert.match(looser('cache-control', 'public, max-age=600'), /Cache-Control is public, max-age=600/);
+  assert.match(looser('x-content-type-options', ''), /nosniff/);
+  assert.match(looser('permissions-policy', 'camera=(), usb=()'), /Permissions-Policy does not switch off microphone, geolocation, clipboard-read, payment/);
+
+  // The redirect: each path answers a redirect to the inbox's root, read without following it.
+  const asked = [];
+  const redirecting = (location, status = 302, except = {}) => async (url, options) => {
+    asked.push([url, options]);
+    const hit = except[new URL(url).pathname];
+    return hit || { status, headers: { location }, text: '', tries: 1 };
+  };
+  const good = await checkFeedbackRedirects(HOSTS.live, { getImpl: redirecting(`${INBOX}/`) });
+  assert.deepEqual([good.ok, good.site, good.name], [true, 'riftborn.us', '/feedback redirects to feedback.riftborn.us']);
+  assert.match(good.detail, /\/feedback, \/feedback\/, \/feedback\/messages: HTTP 302 to https:\/\/feedback\.riftborn\.us\//);
+  assert.deepEqual(asked.map(([url]) => url), FEEDBACK_REDIRECTS.map(p => HOSTS.live + p));
+  assert.ok(asked.every(([, options]) => options.redirect === 'manual' && options.fresh === false), 'never followed, no cache-buster in the URL');
+  assert.ok((await checkFeedbackRedirects(HOSTS.live, { getImpl: redirecting(`${INBOX}/`, 301) })).ok, 'a 301 would do too');
+  const wrongPlace = await checkFeedbackRedirects(HOSTS.live, { getImpl: redirecting('https://chancrisp.github.io/riftborn/feedback/') });
+  assert.equal(wrongPlace.ok, false);
+  assert.match(wrongPlace.detail, /\/feedback HTTP 302 to https:\/\/chancrisp\.github\.io\/riftborn\/feedback\//);
+  const gamePage = await checkFeedbackRedirects(HOSTS.live, { getImpl: redirecting(`${INBOX}/`, 302, { '/feedback/messages': { status: 404, headers: {}, text: 'not found', tries: 1 } }) });
+  assert.match(gamePage.detail, /^\/feedback\/messages HTTP 404 \(expected a redirect to https:\/\/feedback\.riftborn\.us\/\)$/, 'the game answering /feedback/... itself fails');
+  assert.equal((await checkFeedbackRedirects(HOSTS.live, { getImpl: redirecting(`${INBOX}/x`) })).ok, false, 'only the inbox root');
+  assert.equal((await checkFeedbackRedirects(HOSTS.live, { getImpl: redirecting('') })).ok, false, 'a redirect without a Location');
+
+  // The inbox page: a fake feedback.riftborn.us serving the committed inbox with the built headers.
+  const files = {
+    '/': { status: 200, type: 'text/html; charset=utf-8', text: read('feedback/index.html'), headers: built },
+    '/inbox.js': { status: 200, type: 'text/javascript', text: read('feedback/inbox.js') },
+    '/inbox.css': { status: 200, type: 'text/css', text: read('feedback/inbox.css') },
+    '/assets/crypt-pixel.ttf': { status: 200, type: 'font/ttf', text: 'x' }
+  };
+  const inboxSite = (overrides = {}) => async url => {
+    const hit = { ...files, ...overrides }[new URL(url).pathname];
+    return hit ? { tries: 1, headers: {}, ...hit } : { status: 404, type: 'text/html', text: '<!doctype html>not found', headers: {}, tries: 1 };
+  };
+  const healthy = await checkInbox(INBOX, { getImpl: inboxSite() });
+  assert.equal(healthy.attached, true);
+  assert.deepEqual(healthy.checks.map(check => [check.site, check.name, check.ok]), [['feedback.riftborn.us', 'inbox page', true], ['feedback.riftborn.us', 'security headers', true], ['feedback.riftborn.us', 'inbox files', true]]);
+  const failing = async overrides => (await checkInbox(INBOX, { getImpl: inboxSite(overrides) })).checks.filter(check => !check.ok).map(check => `${check.name}: ${check.detail}`).join('\n');
+  assert.match(await failing({ '/': { ...files['/'], status: 404 } }), /^inbox page: HTTP 404$/, 'attached but not serving the inbox fails');
+  assert.match(await failing({ '/': { ...files['/'], text: read('live/index.html') } }), /inbox page: HTTP 200 but no key form/, 'the game instead of the inbox fails');
+  assert.match(await failing({ '/': { ...files['/'], headers: { ...built, 'referrer-policy': 'origin' } } }), /security headers: Referrer-Policy is origin/);
+  assert.match(await failing({ '/inbox.js': { ...files['/inbox.js'], text: read('feedback/inbox.js').replace(`'${HOSTS.api}'`, `'${HOSTS.workersDev}'`) } }), /inbox files: \/inbox\.js does not use https:\/\/api\.riftborn\.us/);
+  assert.match(await failing({ '/assets/crypt-pixel.ttf': undefined }), /inbox files: \/assets\/crypt-pixel\.ttf HTTP 404/, 'a missing font would be a console error');
+  assert.match(await failing({ '/inbox.css': { status: 200, type: 'text/html', text: '<!doctype html>' } }), /\/inbox\.css answers with an HTML page/);
+
+  // Not attached yet: a warning until the grace day ends (UTC), a failure after it; nothing else is fetched.
+  const fetched = [];
+  const nowhere = async url => { fetched.push(url); return { status: 0, error: 'ENOTFOUND', text: '', headers: {}, tries: GET_TRIES }; };
+  const early = await checkInbox(INBOX, { getImpl: nowhere, now: Date.parse('2026-10-01T18:00:00Z') });
+  assert.equal(early.attached, false);
+  assert.deepEqual(early.checks.map(check => [check.name, check.ok]), [['inbox', true]]);
+  assert.match(early.checks[0].warning, /feedback\.riftborn\.us is not attached to its Pages project yet \(no answer \(ENOTFOUND\)\): the deploy's feedback job connects it.*Only a warning until 2026-10-15\./);
+  assert.deepEqual(fetched, [`${INBOX}/`], 'one request, then it stops');
+  assert.equal(FEEDBACK_DOMAIN_GRACE_UNTIL, '2026-10-15');
+  assert.equal((await checkInbox(INBOX, { getImpl: nowhere, now: Date.parse('2026-10-15T23:59:00Z') })).checks[0].ok, true, 'the whole last day counts');
+  const late = await checkInbox(INBOX, { getImpl: nowhere, now: Date.parse('2026-10-16T00:00:01Z') });
+  assert.deepEqual([late.attached, late.checks[0].ok], [false, false]);
+  assert.match(late.checks[0].detail, /it should have been live by 2026-10-15/);
+  const edge = await checkInbox(INBOX, { getImpl: async () => ({ status: 522, text: 'error code: 522', headers: {}, tries: GET_TRIES }), now: Date.parse('2026-10-02T00:00:00Z') });
+  assert.match(edge.checks[0].warning, /Cloudflare answers HTTP 522/);
+  // A tolerated warning still reports as a pass with a warning (annotation), never an alert.
+  const warned = report({ checks: [{ site: 'riftborn.us', name: 'version.json', ok: true, detail: 'v' }, ...early.checks], expected: { live: { version: '2.3.1', build: 'b' } } });
+  assert.equal(warned.ok, true);
+  assert.equal(warned.alert, '');
+  assert.ok(warned.annotations.some(line => line.startsWith('::warning title=Post-deploy check%3A feedback.riftborn.us::inbox: feedback.riftborn.us is not attached')));
+
+  // get() hands back the headers and can leave a redirect unfollowed.
+  const seen = [];
+  const redirect = await get(`${HOSTS.live}/feedback`, { fresh: false, redirect: 'manual', fetchImpl: async (url, init) => { seen.push(init.redirect); return new Response(null, { status: 302, headers: { Location: `${INBOX}/`, 'X-Robots-Tag': 'noindex' } }); } });
+  assert.deepEqual([redirect.status, redirect.headers.location, redirect.headers['x-robots-tag'], seen], [302, `${INBOX}/`, 'noindex', ['manual']]);
+  assert.equal((await get(`${HOSTS.live}/`, { fetchImpl: async (url, init) => { seen.push(init.redirect); return new Response('ok'); } })).status, 200);
+  assert.equal(seen.at(-1), 'follow', 'everything else follows redirects as before');
+
+  // The browser part never types a key and never lets one go out: the key field is only waited for,
+  // the page opens with empty storage, and any request to the API or with an Authorization header fails it.
+  const script = read('scripts/post-deploy-check.mjs');
+  const browse = script.slice(script.indexOf('async function browseInbox('), script.indexOf('/** Every check, in order.'));
+  assert.ok(browse.length > 500, 'browseInbox found');
+  assert.ok(!/\.(fill|type|press|click|check|setInputFiles)\(/.test(browse), 'browseInbox never fills, types or clicks anything');
+  assert.match(browse, /openPage\(browser, `\$\{feedback\}\/`, \{ storage: \{\}, session: \{\} \}\)/, 'opened with nothing preloaded (not the game preferences)');
+  assert.match(browse, /request\.authorization \|\| new URL\(request\.url\)\.origin === apiOrigin/, 'any request to the API or with an Authorization header fails it');
+  assert.ok(browse.includes('INBOX_KEY_STORE') && INBOX_KEY_STORE === /const STORE_KEY = '([^']+)'/.exec(read('feedback/inbox.js'))[1], 'the key store checked is the inbox\'s own');
+  assert.match(script, /if \(inbox\.attached && inbox\.checks\[0\]\.ok\) checks\.push\(\.\.\.\(await browseInbox\(browser, feedback\)\)\)/, 'the browser only opens an inbox that answered');
+  assert.match(dryRun().lines.join('\n'), /feedback: https:\/\/riftborn\.us\/feedback, .* redirect to https:\/\/feedback\.riftborn\.us\/; .*not attached yet = a warning until 2026-10-15/);
+}
+console.log('PASS feedback inbox: riftborn.us/feedback[/...] must redirect to feedback.riftborn.us/ (read, not followed); the inbox must serve its key form, the exact headers the build writes and its files; not attached yet (DNS, certificate, 52x/530) is a warning until 2026-10-15, then a failure; the browser never types or sends a key.');
 
 // --- the workflow --------------------------------------------------------------------------------
 {

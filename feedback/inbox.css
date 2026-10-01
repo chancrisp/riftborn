@@ -376,3 +376,17 @@ button.ghost {
     padding: 14px;
   }
 }
+
+/* The old github.io copy only (scripts/build-pages.mjs adds this banner there): the inbox moved. */
+.moved {
+  margin: 0;
+  padding: 10px 16px;
+  background: #2e2812;
+  border-bottom: 2px solid var(--yellow);
+  font-family: var(--pixel);
+  letter-spacing: 1px;
+}
+
+.moved a {
+  color: var(--yellow);
+}

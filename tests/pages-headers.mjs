@@ -70,6 +70,73 @@ function auditOutput(dir, { noindex = false } = {}) {
 
 const cspOf = dir => matchHeaders(parseHeaders(fs.readFileSync(path.join(dir, '_headers'), 'utf8')), '/').get('content-security-policy').value;
 
+// The feedback inbox output (_cf/feedback, https://feedback.riftborn.us): exactly its files, and on
+// every path the strict set the lead asked for, as Cloudflare would attach it. -> problems
+const INBOX_FILES = ['404.html', '_headers', 'assets/crypt-pixel.ttf', 'inbox.css', 'inbox.js', 'index.html', 'robots.txt'];
+const INBOX_REQUIRED = {
+  'x-robots-tag': 'noindex, nofollow',
+  'referrer-policy': 'no-referrer',
+  'cache-control': 'no-cache',
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'cross-origin-opener-policy': 'same-origin',
+  'strict-transport-security': 'max-age=31536000; includeSubDomains'
+};
+function auditInbox(dir) {
+  const problems = [];
+  const files = walk(dir);
+  if (files.join() !== INBOX_FILES.join()) problems.push(`files: ${files.join(', ')}`);
+  const rules = parseHeaders(fs.readFileSync(path.join(dir, '_headers'), 'utf8'));
+  for (const urlPath of ['/', '/index.html', '/inbox.js', '/inbox.css', '/404.html', '/nothing-here', '/assets/crypt-pixel.ttf']) {
+    const headers = matchHeaders(rules, urlPath);
+    const csp = headers.get('content-security-policy');
+    if (!csp || csp.joined) { problems.push(`${urlPath}: ${csp ? 'CSP set twice' : 'no CSP'}`); continue; }
+    const policy = Object.fromEntries(csp.value.split(';').map(part => part.trim().split(/\s+/)).map(([name, ...values]) => [name, values.join(' ')]));
+    const want = { 'default-src': "'self'", 'script-src': "'self'", 'style-src': "'self'", 'img-src': "'self' data:", 'font-src': "'self'", 'connect-src': HOSTS.api,
+      'frame-ancestors': "'none'", 'form-action': "'self'", 'base-uri': "'none'", 'object-src': "'none'" };
+    for (const [name, value] of Object.entries(want)) if (policy[name] !== value) problems.push(`${urlPath}: CSP ${name} is ${policy[name]}`);
+    if (Object.keys(policy).length !== Object.keys(want).length) problems.push(`${urlPath}: CSP has other directives: ${Object.keys(policy).join(' ')}`);
+    for (const [name, value] of Object.entries(INBOX_REQUIRED)) if (headers.get(name)?.value !== value || headers.get(name)?.joined) problems.push(`${urlPath}: ${name} is ${headers.get(name)?.value}`);
+    const features = (headers.get('permissions-policy')?.value || '').split(', ');
+    for (const feature of ['camera', 'microphone', 'geolocation', 'clipboard-read', 'clipboard-write', 'payment', 'usb', 'fullscreen', 'autoplay']) {
+      if (!features.includes(`${feature}=()`)) problems.push(`${urlPath}: Permissions-Policy leaves ${feature} on`);
+    }
+  }
+  // No inline code to hash, no inline style (style-src 'self'), nothing that is not https://api.riftborn.us.
+  for (const file of files.filter(name => name.endsWith('.html'))) {
+    const html = fs.readFileSync(path.join(dir, file), 'utf8');
+    if (inlineScripts(html).length) problems.push(`${file}: inline script`);
+    if (/<style\b|\sstyle\s*=/i.test(html)) problems.push(`${file}: inline style`);
+  }
+  for (const file of files.filter(name => /\.(html|js|css)$/.test(name))) {
+    const text = fs.readFileSync(path.join(dir, file), 'utf8');
+    if (text.includes(HOSTS.workersDev)) problems.push(`${file}: names the workers.dev address`);
+    if (/googletagmanager|google-analytics|cloudflareinsights|plausible|analytics/i.test(text)) problems.push(`${file}: analytics`);
+  }
+  if (!/const API = 'https:\/\/api\.riftborn\.us';/.test(fs.readFileSync(path.join(dir, 'inbox.js'), 'utf8'))) problems.push('inbox.js: API is not https://api.riftborn.us');
+  if (fs.readFileSync(path.join(dir, 'robots.txt'), 'utf8') !== 'User-agent: *\nDisallow: /\n') problems.push('robots.txt');
+  return problems;
+}
+// The github.io copy of the inbox: the source files, plus the "moved" banner as the first thing in <body>.
+function auditOldInbox(dir) {
+  const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+  const source = fs.readFileSync('feedback/index.html', 'utf8');
+  assert.equal(html, source.replace('<body>', `<body>\n<p class="moved">The inbox has moved to <a href="https://feedback.riftborn.us/">feedback.riftborn.us</a>. This old address keeps working until GitHub Pages is shut down.</p>`), 'The old copy is the inbox with the banner on top');
+  assert.ok(html.replace(/<[^>]+>/g, '').includes('The inbox has moved to feedback.riftborn.us'), 'The banner reads as asked');
+  assert.match(html, /id="loginForm"/, 'and still works as the inbox');
+  assert.equal(fs.readFileSync(path.join(dir, 'inbox.js'), 'utf8'), fs.readFileSync('feedback/inbox.js', 'utf8'), 'The same inbox.js (api.riftborn.us, which answers chancrisp.github.io too)');
+  assert.match(fs.readFileSync(path.join(dir, 'inbox.css'), 'utf8'), /\.moved \{/, 'The banner is styled from inbox.css (no inline style)');
+}
+// riftborn.us/feedback and anything under it go to the inbox's own origin; nothing else does.
+function auditFeedbackRedirects(live) {
+  const redirects = parseRedirects(fs.readFileSync(path.join(live, '_redirects'), 'utf8'));
+  for (const from of ['/feedback', '/feedback/', '/feedback/anything', '/feedback/a/b?c']) {
+    assert.deepEqual(matchRedirect(redirects, from), { location: 'https://feedback.riftborn.us/', status: 302 }, from);
+  }
+  for (const other of ['/', '/feedbacks', '/classic/', '/privacy/', '/my-feedback/']) assert.equal(matchRedirect(redirects, other), null, other + ' is not redirected');
+  assert.ok(!walk(live).some(file => file === 'feedback.html' || file.startsWith('feedback/')), 'Nothing in riftborn.us sits at /feedback (the redirect would hide it)');
+}
+
 // ---- the committed switch --------------------------------------------------------------------
 assert.equal(LAUNCHED, true, 'LAUNCHED since the 2.2 launch (2026-09-30)');
 assert.throws(() => resolveSiteConfig({ CI: 'true', RIFTBORN_FORCE_LAUNCHED: '1' }), /not allowed in CI/, 'Overrides are refused in CI');
@@ -83,8 +150,13 @@ console.log('PASS site config: LAUNCHED is committed true since the 2.2 launch, 
 const pre = build('pre', { RIFTBORN_FORCE_LAUNCHED: '0' });
 {
   const live = path.join(pre, '_cf', 'live');
-  assert.deepEqual(walk(live), ['404.html', '_headers', 'assets/crypt-pixel.ttf', 'index.html', 'privacy/index.html'],
-    'Pre-launch riftborn.us holds only the privacy page and the pages that send visitors to github.io');
+  assert.deepEqual(walk(live), ['404.html', '_headers', '_redirects', 'assets/crypt-pixel.ttf', 'index.html', 'privacy/index.html'],
+    'Pre-launch riftborn.us holds only the privacy page and the pages that send visitors to github.io (and the /feedback redirect)');
+  auditFeedbackRedirects(live);
+  assert.equal(matchRedirect(parseRedirects(fs.readFileSync(path.join(live, '_redirects'), 'utf8')), '/riftborn/'), null, 'No GitHub Pages paths before launch');
+  // The feedback inbox has its own origin before launch too.
+  assert.deepEqual(auditInbox(path.join(pre, '_cf', 'feedback')), []);
+  auditOldInbox(path.join(pre, '_site', 'feedback'));
   const root = fs.readFileSync(path.join(live, 'index.html'), 'utf8');
   assert.match(root, /"https:\/\/chancrisp\.github\.io\/riftborn\/"/, 'The root page sends visitors to the github.io game');
   assert.match(root, /location\.replace\(dest\)/);
@@ -130,10 +202,27 @@ const post = build('post', { RIFTBORN_FORCE_LAUNCHED: '1' });
   assert.deepEqual(matchRedirect(redirects, '/riftborn/classic/'), { location: '/classic/', status: 301 });
   assert.deepEqual(matchRedirect(redirects, '/riftborn/'), { location: '/', status: 301 });
   assert.equal(matchRedirect(redirects, '/'), null);
-  // github.io: handoff pages only, and the feedback inbox.
+  // The feedback inbox: riftborn.us/feedback goes to its own origin (an old /riftborn/feedback/ link
+  // typed on the new domain lands on /feedback/ first, then there).
+  auditFeedbackRedirects(live);
+  assert.deepEqual(matchRedirect(redirects, '/riftborn/feedback/'), { location: '/feedback/', status: 301 });
+  assert.deepEqual(auditInbox(path.join(post, '_cf', 'feedback')), []);
+  auditOldInbox(path.join(post, '_site', 'feedback'));
+  {
+    // The inbox audit is not vacuous: a looser policy, an inline script and a stray file are all caught.
+    const loose = path.join(tmp, 'loose-inbox');
+    fs.cpSync(path.join(post, '_cf', 'feedback'), loose, { recursive: true });
+    const headers = path.join(loose, '_headers');
+    fs.writeFileSync(headers, fs.readFileSync(headers, 'utf8').replace('connect-src https://api.riftborn.us', `connect-src 'self' https://api.riftborn.us ${HOSTS.workersDev}`).replace('Referrer-Policy: no-referrer', 'Referrer-Policy: origin'));
+    fs.appendFileSync(path.join(loose, 'index.html'), '<script>fetch("https://evil.example")</script>');
+    fs.writeFileSync(path.join(loose, 'extra.html'), '<p style="color:red">x</p>');
+    const caught = auditInbox(loose).join('\n');
+    for (const problem of [/^files: /m, /\/: CSP connect-src is 'self' https:\/\/api\.riftborn\.us/, /\/: referrer-policy is origin/, /index\.html: inline script/, /extra\.html: inline style/]) assert.match(caught, problem);
+  }
+  // github.io: handoff pages only, and the old copy of the feedback inbox (until GitHub Pages is shut down).
   const site = path.join(post, '_site');
   assert.deepEqual(walk(site).filter(file => !file.startsWith('feedback/')), ['.nojekyll', '404.html', 'classic/index.html', 'dev/index.html', 'index.html', 'privacy/index.html']);
-  assert.ok(fs.existsSync(path.join(site, 'feedback', 'inbox.js')), 'The feedback inbox stays on github.io');
+  assert.deepEqual(walk(path.join(site, 'feedback')), ['inbox.css', 'inbox.js', 'index.html'], 'The old feedback inbox copy stays on github.io');
   // A tampered page is caught (the audit is not vacuous).
   const tampered = path.join(tmp, 'tampered');
   fs.cpSync(live, tampered, { recursive: true });
@@ -147,18 +236,29 @@ const post = build('post', { RIFTBORN_FORCE_LAUNCHED: '1' });
   const joined = matchHeaders(parseHeaders('/*\n  Content-Security-Policy: a\n/x\n  Content-Security-Policy: b\n'), '/x').get('content-security-policy');
   assert.deepEqual([joined.value, joined.joined], ['a, b', true]);
 }
-console.log('PASS launched: riftborn.us = game + classic + privacy with strict CSP (all inline scripts hashed, tamper detected), github.io = handoff pages + feedback inbox.');
+console.log('PASS launched: riftborn.us = game + classic + privacy with strict CSP (all inline scripts hashed, tamper detected), github.io = handoff pages + old feedback inbox copy with a "moved" banner.');
+console.log('PASS feedback inbox: feedback.riftborn.us = inbox + font + 404 + robots under its own strict headers (CSP connect-src api.riftborn.us only, frame-ancestors none, noindex, no referrer, no-cache, nosniff, features off, no analytics); riftborn.us/feedback[/...] 302s there, nothing in riftborn.us collides.');
 
 // ---- the deploy workflow ---------------------------------------------------------------------------
 {
   const { deployPlan, deployRefusals, wranglerEnv, WRANGLER_DIR, WRANGLER_VERSION } = await import('../scripts/cloudflare-pages-deploy.mjs');
   const plan = deployPlan({ sha: 'abc1234', message: 'Launch riftborn.us\nmore' });
-  assert.deepEqual(plan.map(step => [step.project, step.dir]), [['riftborn', '_cf/live'], ['riftborn-dev', '_cf/dev']], 'riftborn.us first');
+  assert.deepEqual(plan.map(step => [step.project, step.dir]), [['riftborn', '_cf/live'], ['riftborn-dev', '_cf/dev']], 'riftborn.us first; the game deploy never includes the inbox');
   assert.deepEqual(plan[0].create, ['pages', 'project', 'create', 'riftborn', '--production-branch', 'main']);
   assert.deepEqual(plan[1].deploy, ['pages', 'deploy', '_cf/dev', '--project-name', 'riftborn-dev', '--branch', 'main', '--commit-hash', 'abc1234', '--commit-message', 'Launch riftborn.us', '--commit-dirty=true']);
+  // The inbox is its own deploy (--feedback, the feedback job), so its failure never fails the game's.
+  const inbox = deployPlan({ sha: 'abc1234', message: 'Launch riftborn.us\nmore', site: 'feedback' });
+  assert.deepEqual(inbox.map(step => [step.project, step.dir]), [['riftborn-feedback', '_cf/feedback']]);
+  assert.deepEqual(inbox[0].create, ['pages', 'project', 'create', 'riftborn-feedback', '--production-branch', 'main'], 'The inbox project is created if missing, like the others');
+  assert.deepEqual(inbox[0].deploy, ['pages', 'deploy', '_cf/feedback', '--project-name', 'riftborn-feedback', '--branch', 'main', '--commit-hash', 'abc1234', '--commit-message', 'Launch riftborn.us', '--commit-dirty=true']);
+  assert.throws(() => deployPlan({ site: 'previews' }), /Unknown deploy previews/);
   const dry = spawnSync(process.execPath, ['scripts/cloudflare-pages-deploy.mjs', '--dry-run'], { encoding: 'utf8', env: baseEnv });
   assert.equal(dry.status, 0, dry.stderr);
   assert.match(dry.stdout, /pages project create riftborn --production-branch main/);
+  assert.ok(!dry.stdout.includes('riftborn-feedback'), 'The game dry run has no inbox');
+  const dryInbox = spawnSync(process.execPath, ['scripts/cloudflare-pages-deploy.mjs', '--feedback', '--dry-run'], { encoding: 'utf8', env: baseEnv });
+  assert.equal(dryInbox.status, 0, dryInbox.stderr);
+  assert.match(dryInbox.stdout, /^wrangler@\S+ pages project create riftborn-feedback --production-branch main\nwrangler@\S+ pages deploy _cf\/feedback --project-name riftborn-feedback --branch main --commit-dirty=true\n$/);
   const outputs = spawnSync(process.execPath, ['scripts/site-config.mjs'], { encoding: 'utf8' }).stdout;
   assert.equal(outputs, 'launched=true\nlive_project=riftborn\ndev_project=riftborn-dev\n');
 
@@ -202,8 +302,32 @@ console.log('PASS launched: riftborn.us = game + classic + privacy with strict C
   assert.ok(workflow.includes('CF_PAGES_ENABLED: ${{ vars.CF_PAGES_ENABLED }}'), 'The build knows the switch (a launch without Cloudflare is refused)');
   assert.ok(workflow.includes('needs: [build, cloudflare]') && workflow.includes("needs.build.outputs.launched != 'true'"), 'After launch github.io waits for Cloudflare');
   assert.ok(workflow.includes('uses: actions/deploy-pages@v4'), 'The GitHub Pages deploy stays');
+  // feedback.riftborn.us: deployed and connected by its own job, only on main, with the deploy token
+  // from the main-only environment. Nothing waits for it, and continue-on-error keeps its failure
+  // from failing the run (discord-setup.yml posts releases only after a run that succeeded).
+  assert.ok(!/^\s*pull_request/m.test(workflow), 'The deploy workflow never runs for pull requests');
+  const gameJob = workflow.slice(workflow.indexOf('\n  cloudflare:\n'), workflow.indexOf('\n  feedback:\n'));
+  assert.ok(gameJob.includes('run: node scripts/cloudflare-pages-deploy.mjs\n'), 'The game job deploys the game');
+  assert.ok(!gameJob.includes('--feedback') && !gameJob.includes('cloudflare-pages-domains'), 'The game job neither deploys nor connects the inbox');
+  const inboxJob = workflow.slice(workflow.indexOf('\n  feedback:\n'), workflow.indexOf('\n  deploy:\n'));
+  assert.match(inboxJob, /^\n  feedback:\n(    #.*\n)*    if: vars\.CF_PAGES_ENABLED == '1' && github\.ref == 'refs\/heads\/main'\n    needs: build\n    continue-on-error: true\n/, 'The inbox job runs only on main, after the build, and never fails the run');
+  assert.match(inboxJob, /\n    environment: cloudflare-production\n/);
+  assert.match(inboxJob, /permissions:\n      contents: read\n/);
+  assert.match(inboxJob, /persist-credentials: false/);
+  const inboxInstall = inboxJob.indexOf('run: npm ci --prefix tools/wrangler --ignore-scripts');
+  const inboxDeploy = inboxJob.indexOf('run: node scripts/cloudflare-pages-deploy.mjs --feedback\n');
+  const inboxConnect = inboxJob.indexOf('run: node scripts/cloudflare-pages-domains.mjs\n');
+  assert.ok(inboxInstall !== -1 && inboxInstall < inboxDeploy && inboxDeploy < inboxConnect, 'Install the pinned Wrangler, deploy the inbox, then connect its domain');
+  assert.ok(inboxJob.includes('cache-dependency-path: tools/wrangler/package-lock.json'));
+  assert.equal(inboxJob.split('CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}').length - 1, 2);
+  assert.equal(inboxJob.split('CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}').length - 1, 2);
+  assert.ok(!workflow.includes('feedback-domain'), 'One inbox job');
+  assert.match(workflow, /\n  deploy:\n[\s\S]*needs: \[build, cloudflare\]\n/, 'github.io does not wait for the inbox job');
+  assert.equal((workflow.match(/^\s+continue-on-error:/gm) || []).length, 1, 'Only the inbox job may fail without failing the run');
+  // The release posts follow only a deploy run that succeeded: why the inbox job must not fail it.
+  assert.ok(fs.readFileSync('.github/workflows/discord-setup.yml', 'utf8').includes("github.event.workflow_run.conclusion == 'success'"));
 }
-console.log('PASS deploy workflow: Cloudflare job only on main and gated on CF_PAGES_ENABLED, Wrangler pinned by lockfile with a minimal environment, project create + deploy per output (riftborn.us first), github.io waits for it after launch.');
+console.log('PASS deploy workflow: Cloudflare job only on main and gated on CF_PAGES_ENABLED, Wrangler pinned by lockfile with a minimal environment, project create + deploy per output (riftborn.us first), github.io waits for it after launch; feedback.riftborn.us is deployed and connected by its own main-only job that nothing waits for and that never fails the run (release posts still follow).');
 
 // ---- after a launched deploy: the real hosts must serve it before github.io hands over ------------
 {

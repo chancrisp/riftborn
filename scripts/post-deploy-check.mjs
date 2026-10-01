@@ -15,6 +15,16 @@
 //                              answer 200, and the served page still links everything the committed one does
 //   dev.riftborn.us/           the password gate shows (it is never opened); version.json is the
 //                              build committed in dev/version.json
+//   riftborn.us/feedback       /feedback, /feedback/ and /feedback/messages redirect to
+//                              https://feedback.riftborn.us/ (the _redirects of riftborn.us)
+//   feedback.riftborn.us/      the feedback inbox: 200 with the key form, its strict headers (CSP
+//                              connecting to api.riftborn.us only, noindex, no referrer, no-cache,
+//                              nosniff, Permissions-Policy), inbox.js / inbox.css / the font answer;
+//                              in the browser it stays locked with zero console errors and sends
+//                              nothing at all (the key field is never filled: no key is ever sent).
+//                              A custom domain not attached yet (no DNS name, no certificate yet, or
+//                              Cloudflare's 522/523/525/526/530) is only a warning until
+//                              FEEDBACK_DOMAIN_GRACE_UNTIL; any real answer that is wrong fails.
 // Every HTTP GET is tried up to 3 times (backing off) on a timeout, a network error, 408, 429 or 5xx,
 // so one slow edge never pages anyone. Overlapping deploys: when something fails and main has moved
 // on (a newer Build and deploy run is still going, or riftborn.us already serves the newer
@@ -29,8 +39,10 @@
 //
 //   npm ci --prefix tools/post-deploy-check --ignore-scripts      once (pinned Playwright, no browser:
 //                                                                 it drives the installed Chrome or Edge)
-//   node scripts/post-deploy-check.mjs                            riftborn.us + dev.riftborn.us
+//   node scripts/post-deploy-check.mjs                            riftborn.us + dev.riftborn.us +
+//                                                                 feedback.riftborn.us
 //   node scripts/post-deploy-check.mjs --live http://localhost:8791 --dev http://localhost:8792
+//                                      --feedback http://localhost:8793
 //                                                                 local builds (scripts/serve-cf.mjs)
 //   node scripts/post-deploy-check.mjs --dry-run                  offline: what the committed live/ and
 //                                                                 dev/ expect, and whether every file the
@@ -74,6 +86,20 @@ export const SOCIAL_TAGS = Object.freeze(['og:type', 'og:url', 'og:title', 'og:d
 export const EXTRA_PAGES = Object.freeze(['/classic/', '/privacy/']);
 /** The deploy workflow (pages.yml) whose newer runs on main supersede this check. */
 export const DEPLOY_WORKFLOW = 'pages.yml';
+/** riftborn.us paths that must redirect to the inbox's own origin (the _redirects scripts/build-pages.mjs writes). */
+export const FEEDBACK_REDIRECTS = Object.freeze(['/feedback', '/feedback/', '/feedback/messages']);
+/**
+ * Until the end of this day (UTC) a feedback.riftborn.us that is not attached yet (notAttached()) is
+ * only a warning: the deploy's feedback job connects it, and a new custom domain takes minutes
+ * to go live. After it, an unattached domain fails like anything else, so a domain that never came up
+ * (or later loses its DNS record) cannot stay a quiet warning for good. Delete this (and the grace
+ * branch in checkInbox) once feedback.riftborn.us is live.
+ */
+export const FEEDBACK_DOMAIN_GRACE_UNTIL = '2026-10-15';
+/** Where the inbox keeps the admin key for a tab (feedback/inbox.js STORE_KEY): empty all through the check. */
+export const INBOX_KEY_STORE = 'riftborn-feedback-admin-key';
+/** Features the inbox's Permissions-Policy must switch off (a sample of scripts/pages-headers.mjs INBOX_PERMISSIONS_POLICY). */
+export const INBOX_DENIED_FEATURES = Object.freeze(['camera', 'microphone', 'geolocation', 'clipboard-read', 'payment', 'usb']);
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const MAX_ANNOTATIONS = 8; // GitHub shows 10 error annotations per step; the rest go to the log
 /** Every HTTP GET: this many tries, waiting RETRY_BACKOFF_MS, then twice that, between them. */
@@ -253,6 +279,53 @@ export const servedAsPage = (url, contentType) => !/(\/|\.html?)$/i.test(new URL
 /** True for requests the check never lets the page send (anything that could write). */
 export const isWriteRequest = method => !READ_METHODS.has(String(method).toUpperCase());
 
+/**
+ * Why a get() answer looks like a custom domain that is not attached to its Pages project (yet), or
+ * '' when it does not: no such DNS name, no certificate for it, or Cloudflare's own edge errors for a
+ * proxied name with nothing behind it (522/523/525/526/530). Any real answer (a 404, a wrong page,
+ * missing headers) is not this: those fail.
+ */
+export function notAttached(result) {
+  if (result.status === 0) return /ENOTFOUND|EAI_AGAIN|ERR_NAME_NOT_RESOLVED|CERT|TLS|SSL|UNABLE_TO_VERIFY|EPROTO/i.test(result.error || '') ? `no answer (${result.error})` : '';
+  return [522, 523, 525, 526, 530].includes(result.status) ? `Cloudflare answers HTTP ${result.status}` : '';
+}
+
+/**
+ * Problems with the inbox's response headers ([] when they are what scripts/pages-headers.mjs
+ * buildInboxHeaders writes): `headers` is { lowercased name: value }.
+ */
+export function inboxHeaderProblems(headers, api = HOSTS.api) {
+  const problems = [];
+  const csp = headers['content-security-policy'] || '';
+  if (!csp) problems.push('no Content-Security-Policy');
+  else {
+    const directives = new Map(csp.split(';').map(part => part.trim().split(/\s+/)).filter(([name]) => name).map(([name, ...values]) => [name.toLowerCase(), values]));
+    const exactly = (name, values) => {
+      const got = directives.get(name);
+      if (got?.join(' ') !== values.join(' ')) problems.push(`CSP ${name} is ${got ? got.join(' ') : 'missing'}, expected ${values.join(' ')}`);
+    };
+    exactly('default-src', ["'self'"]);
+    exactly('connect-src', [api]);
+    exactly('frame-ancestors', ["'none'"]);
+    exactly('form-action', ["'self'"]);
+    exactly('base-uri', ["'none'"]);
+    exactly('object-src', ["'none'"]);
+    const scripts = directives.get('script-src') || [];
+    if (scripts[0] !== "'self'" || scripts.slice(1).some(source => !/^'sha256-[A-Za-z0-9+/=]+'$/.test(source))) {
+      problems.push(`CSP script-src is ${scripts.join(' ') || 'missing'}, expected 'self' (plus inline script hashes only)`);
+    }
+  }
+  const robots = (headers['x-robots-tag'] || '').toLowerCase();
+  if (!robots.includes('noindex') || !robots.includes('nofollow')) problems.push(`X-Robots-Tag is ${robots || 'missing'}, expected noindex, nofollow`);
+  if ((headers['referrer-policy'] || '').toLowerCase() !== 'no-referrer') problems.push(`Referrer-Policy is ${headers['referrer-policy'] || 'missing'}, expected no-referrer`);
+  if (!/\bno-(cache|store)\b/i.test(headers['cache-control'] || '')) problems.push(`Cache-Control is ${headers['cache-control'] || 'missing'}, expected no-cache`);
+  if ((headers['x-content-type-options'] || '').toLowerCase() !== 'nosniff') problems.push('X-Content-Type-Options nosniff is missing');
+  const policy = (headers['permissions-policy'] || '').split(',').map(part => part.trim());
+  const allowed = INBOX_DENIED_FEATURES.filter(feature => !policy.includes(`${feature}=()`));
+  if (allowed.length) problems.push(`Permissions-Policy does not switch off ${allowed.join(', ')}`);
+  return problems;
+}
+
 /** Accepts only a Discord webhook URL, so a mistyped secret never sends the alert anywhere else. */
 export const isDiscordWebhook = value => /^https:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/api\/(?:v\d+\/)?webhooks\/\d+\/[\w-]+$/.test(String(value || '').trim());
 
@@ -334,18 +407,21 @@ export const retryable = status => status === 0 || status === 408 || status === 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * One HTTP GET -> { status, type, text, bytes, tries, error? } (status 0: no answer). Tried up to
- * `tries` times while the answer is retryable(), waiting backoffMs, 2 x backoffMs, ... in between.
- * `fresh` adds a cache-busting ?t= (the sites); API calls pass fresh: false.
+ * One HTTP GET -> { status, type, text, bytes, headers, tries, error? } (status 0: no answer; headers:
+ * { lowercased name: value }). Tried up to `tries` times while the answer is retryable(), waiting
+ * backoffMs, 2 x backoffMs, ... in between. `fresh` adds a cache-busting ?t= (the sites); API calls
+ * pass fresh: false. redirect: 'manual' returns a redirect itself (its Location in headers).
  */
-export async function get(url, { timeoutMs = 20000, tries = GET_TRIES, backoffMs = RETRY_BACKOFF_MS, fresh = true, headers = {}, fetchImpl = fetch, sleep = pause } = {}) {
+export async function get(url, { timeoutMs = 20000, tries = GET_TRIES, backoffMs = RETRY_BACKOFF_MS, fresh = true, redirect = 'follow', headers = {}, fetchImpl = fetch, sleep = pause } = {}) {
   let result;
   for (let attempt = 1; attempt <= tries; attempt++) {
     const target = fresh ? url + (url.includes('?') ? '&' : '?') + 't=' + Date.now() : url;
     try {
-      const response = await fetchImpl(target, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache', ...headers }, signal: AbortSignal.timeout(timeoutMs) });
+      const response = await fetchImpl(target, { cache: 'no-store', redirect, headers: { 'Cache-Control': 'no-cache', ...headers }, signal: AbortSignal.timeout(timeoutMs) });
       const body = Buffer.from(await response.arrayBuffer());
-      result = { status: response.status, type: response.headers.get('content-type') || '', text: body.toString('utf8'), bytes: body.length };
+      const seen = {};
+      if (typeof response.headers.forEach === 'function') response.headers.forEach((value, name) => { seen[name.toLowerCase()] = value; });
+      result = { status: response.status, type: response.headers.get('content-type') || '', text: body.toString('utf8'), bytes: body.length, headers: seen };
     } catch (error) {
       result = { status: 0, type: '', text: '', bytes: 0, error: error?.name === 'TimeoutError' ? 'timed out' : String(error?.cause?.code || error?.message || error) };
     }
@@ -409,6 +485,57 @@ export async function checkLiveFiles(live, expect, { getImpl = get } = {}) {
   }
   checks.push({ site, name: 'key files', ok: !failures.length, detail: failures.length ? failures.join('; ') : `${files.length} files and pages answer 200` });
   return checks;
+}
+
+/** riftborn.us/feedback (FEEDBACK_REDIRECTS) redirects to the inbox's root, without following it. -> check */
+export async function checkFeedbackRedirects(live, { getImpl = get, inbox = HOSTS.feedback } = {}) {
+  const site = new URL(live).host;
+  const failures = [];
+  const statuses = new Set();
+  for (const pathname of FEEDBACK_REDIRECTS) {
+    const result = await getImpl(`${live}${pathname}`, { fresh: false, redirect: 'manual' });
+    const location = result.headers?.location || '';
+    let to = null;
+    try { to = location ? new URL(location, `${live}${pathname}`) : null; } catch { to = null; }
+    if ([301, 302, 303, 307, 308].includes(result.status) && to?.origin === inbox && to.pathname === '/') statuses.add(result.status);
+    else failures.push(`${pathname} ${result.status >= 300 && result.status < 400 ? `HTTP ${result.status} to ${location || 'nowhere'}` : statusText(result)}`);
+  }
+  return {
+    site, name: `/feedback redirects to ${new URL(inbox).host}`, ok: !failures.length,
+    detail: failures.length ? `${failures.join('; ')} (expected a redirect to ${inbox}/)` : `${FEEDBACK_REDIRECTS.join(', ')}: HTTP ${[...statuses].join('/')} to ${inbox}/`
+  };
+}
+
+/**
+ * The feedback inbox over plain HTTP: the page with its key form, its headers (inboxHeaderProblems)
+ * and its files. -> { attached, checks }. attached false: the custom domain does not answer as one
+ * yet (notAttached()), a warning until FEEDBACK_DOMAIN_GRACE_UNTIL and a failure after it.
+ */
+export async function checkInbox(feedback, { getImpl = get, api = HOSTS.api, now = Date.now(), graceUntil = FEEDBACK_DOMAIN_GRACE_UNTIL } = {}) {
+  const site = new URL(feedback).host;
+  const page = await getImpl(`${feedback}/`);
+  const absent = notAttached(page);
+  if (absent) {
+    const detail = `${site} is not attached to its Pages project yet (${absent}): the deploy's feedback job connects it, and a new custom domain takes minutes to go live`;
+    return now <= Date.parse(`${graceUntil}T23:59:59Z`)
+      ? { attached: false, checks: [{ site, name: 'inbox', ok: true, detail, warning: `${detail}. Only a warning until ${graceUntil}.` }] }
+      : { attached: false, checks: [{ site, name: 'inbox', ok: false, detail: `${detail}; it should have been live by ${graceUntil}` }] };
+  }
+  if (page.status !== 200) return { attached: true, checks: [{ site, name: 'inbox page', ok: false, detail: statusText(page) }] };
+  const checks = [];
+  const form = ['id="loginForm"', 'id="keyInput"', 'src="inbox.js"'].every(marker => page.text.includes(marker));
+  checks.push({ site, name: 'inbox page', ok: form, detail: form ? 'HTTP 200 with the key form and inbox.js' : 'HTTP 200 but no key form (loginForm, keyInput) or no inbox.js: not the inbox' });
+  const headers = inboxHeaderProblems(page.headers || {}, api);
+  checks.push({ site, name: 'security headers', ok: !headers.length, detail: headers.length ? headers.join('; ') : `CSP connects to ${api} only, noindex, no referrer, no-cache, nosniff, Permissions-Policy` });
+  const failures = [];
+  for (const file of ['inbox.js', 'inbox.css', 'assets/crypt-pixel.ttf']) {
+    const result = await getImpl(`${feedback}/${file}`);
+    if (result.status !== 200) failures.push(`/${file} ${statusText(result)}`);
+    else if (servedAsPage(`${feedback}/${file}`, result.type)) failures.push(`/${file} answers with an HTML page, not the file`);
+    else if (file === 'inbox.js' && !result.text.includes(`const API = '${api}'`)) failures.push(`/inbox.js does not use ${api}`);
+  }
+  checks.push({ site, name: 'inbox files', ok: !failures.length, detail: failures.length ? failures.join('; ') : `inbox.js (API ${api}), inbox.css and the font answer 200` });
+  return { attached: true, checks };
 }
 
 /**
@@ -478,20 +605,23 @@ export async function launchBrowser({ channel = process.env.CHECK_BROWSER_CHANNE
 /**
  * Opens one page in a fresh, muted context with writes blocked. -> { page, context, events }
  * events: errors (console errors and uncaught exceptions), blocked (write requests stopped), bad
- * (same-origin responses >= 400 and failed requests).
+ * (same-origin responses >= 400 and failed requests), requests (every request: method, url, and
+ * whether it carried an Authorization header). storage / session: set on the page's origin before it
+ * loads (the game's muted, popup-free preferences unless told otherwise).
  */
-async function openPage(browser, url) {
+async function openPage(browser, url, { storage = PRELOAD_STORAGE, session = PRELOAD_SESSION } = {}) {
   const origin = new URL(url).origin;
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'en-US', serviceWorkers: 'block' });
   await context.addInitScript(({ origin, storage, session }) => {
     if (location.origin !== origin) return;
     try { for (const [key, value] of Object.entries(storage)) localStorage.setItem(key, value); } catch {}
     try { for (const [key, value] of Object.entries(session)) sessionStorage.setItem(key, value); } catch {}
-  }, { origin, storage: PRELOAD_STORAGE, session: PRELOAD_SESSION });
-  const events = { errors: [], blocked: [], bad: [] };
+  }, { origin, storage, session });
+  const events = { errors: [], blocked: [], bad: [], requests: [] };
   const aborted = new Set();
   await context.route('**/*', route => {
     const request = route.request();
+    events.requests.push({ method: request.method(), url: request.url(), authorization: Boolean(request.headers().authorization) });
     if (isWriteRequest(request.method())) {
       events.blocked.push(`${request.method()} ${request.url()}`);
       aborted.add(request);
@@ -635,8 +765,47 @@ async function browseDevGate(browser, dev) {
   }
 }
 
+/**
+ * The feedback inbox in the browser, as a fresh visit: it stays locked (the key form shows, the inbox
+ * is hidden, no key in this tab), nothing errors, and it sends nothing at all: no request to the
+ * Worker, no Authorization header. The key field is never filled. -> checks
+ */
+async function browseInbox(browser, feedback, { api = HOSTS.api } = {}) {
+  const site = new URL(feedback).host;
+  const { page, context, events } = await openPage(browser, `${feedback}/`, { storage: {}, session: {} });
+  try {
+    const response = await page.goto(`${feedback}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    if (!response || response.status() !== 200) return [{ site, name: 'key form shows', ok: false, detail: `HTTP ${response?.status() ?? 'no response'}` }];
+    await page.waitForSelector('#keyInput', { state: 'visible', timeout: 20000 });
+    await page.waitForTimeout(1500);
+    const state = await page.evaluate(store => {
+      let key = null;
+      try { key = sessionStorage.getItem(store); } catch {}
+      return { locked: document.getElementById('inbox')?.hidden === true && document.getElementById('login')?.hidden === false, key: Boolean(key) };
+    }, INBOX_KEY_STORE);
+    const checks = [{ site, name: 'key form shows', ok: state.locked && !state.key, detail: state.locked && !state.key ? 'locked: the key form shows, the inbox is hidden, no key in this tab' : 'a fresh visit is not locked' }];
+    const [errors, knownErrors] = splitTolerated(events.errors);
+    const [bad, knownBad] = splitTolerated(events.bad);
+    checks.push({
+      site, name: 'zero console errors', ok: !errors.length && !bad.length, warning: toleratedNote([...knownErrors, ...knownBad]),
+      detail: errors.length || bad.length ? `${errors.length + bad.length}: ${[...errors, ...bad].slice(0, 3).join(' | ')}` : 'none, every request answered'
+    });
+    const apiOrigin = new URL(api).origin;
+    const sent = events.requests.filter(request => request.authorization || new URL(request.url).origin === apiOrigin).map(request => `${request.method} ${request.url}`);
+    checks.push({
+      site, name: 'never sends a key', ok: !sent.length && !events.blocked.length,
+      detail: sent.length || events.blocked.length ? `the locked page sent ${[...sent, ...events.blocked].slice(0, 3).join(' | ')}` : `nothing to ${new URL(api).host}, no Authorization header, no writes`
+    });
+    return checks;
+  } catch (error) {
+    return [{ site, name: 'key form shows', ok: false, detail: scrub(error.message.split('\n')[0], 300) }];
+  } finally {
+    await context.close();
+  }
+}
+
 /** Every check, in order. -> { checks, expected, superseded } (superseded: supersededReason(), or '') */
-export async function runChecks({ live = HOSTS.live, dev = HOSTS.dev, base = root, outDir, log = () => {}, github = githubContext(base) } = {}) {
+export async function runChecks({ live = HOSTS.live, dev = HOSTS.dev, feedback = HOSTS.feedback, base = root, outDir, log = () => {}, github = githubContext(base) } = {}) {
   const expected = expectedVersions(base);
   const expect = committedPage(base);
   const checks = [];
@@ -659,6 +828,11 @@ export async function runChecks({ live = HOSTS.live, dev = HOSTS.dev, base = roo
   }
   if (expect) checks.push(...(await checkLiveFiles(live, expect)));
   else checks.push({ site: liveSite, name: 'game page', ok: false, detail: 'live/index.html is not in this checkout: nothing to compare the served page with' });
+  // The feedback inbox: riftborn.us/feedback sends it to its own origin, which serves it locked.
+  checks.push(await checkFeedbackRedirects(live));
+  const inbox = await checkInbox(feedback);
+  checks.push(...inbox.checks);
+  log(inbox.attached ? `${feedback}/ answers.` : `${feedback}/ is not attached yet: ${inbox.checks[0].ok ? 'a warning' : 'a failure'}; the browser skips it.`);
   log(`HTTP checks done (${checks.filter(c => c.ok).length}/${checks.length} passed); starting the browser.`);
   let browser;
   try {
@@ -683,6 +857,7 @@ export async function runChecks({ live = HOSTS.live, dev = HOSTS.dev, base = roo
       }
       checks.push(...first.checks);
       checks.push(...(await browseDevGate(browser, dev)));
+      if (inbox.attached && inbox.checks[0].ok) checks.push(...(await browseInbox(browser, feedback)));
     } finally {
       await browser.close();
     }
@@ -716,6 +891,7 @@ export function dryRun(base = root) {
   }
   lines.push(missing.length ? `MISSING from live/: ${missing.join(', ')}` : 'every file the committed page links is in live/');
   lines.push('always: version.json match, the page boots with zero console errors, the menu shows the title and START RUN, SETTINGS opens and closes');
+  lines.push(`feedback: ${FEEDBACK_REDIRECTS.map(p => HOSTS.live + p).join(', ')} redirect to ${HOSTS.feedback}/; ${HOSTS.feedback}/ answers 200 with the key form (never filled), CSP connect-src ${HOSTS.api} only, noindex, no referrer, no-cache, nosniff, Permissions-Policy; locked with zero console errors and no request to the API; not attached yet = a warning until ${FEEDBACK_DOMAIN_GRACE_UNTIL}`);
   return { lines, ok: Boolean(expected.live) && !missing.length };
 }
 
@@ -769,8 +945,9 @@ async function main() {
   }
   const live = flag('--live') || HOSTS.live;
   const dev = flag('--dev') || HOSTS.dev;
+  const feedback = flag('--feedback') || HOSTS.feedback;
   const outDir = process.env.CHECK_OUT_DIR || path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'riftborn-post-deploy-check');
-  const { checks, expected, superseded } = await runChecks({ live, dev, base, outDir, log: message => console.log(scrub(message, 1000)) });
+  const { checks, expected, superseded } = await runChecks({ live, dev, feedback, base, outDir, log: message => console.log(scrub(message, 1000)) });
   const result = report({ checks, expected, live, runUrl, superseded });
   for (const check of checks) console.log(`${check.ok ? (check.warning ? 'warn' : ' ok ') : superseded ? 'skip' : 'FAIL'}  ${check.site}  ${check.name}: ${scrub(check.ok ? check.warning || check.detail : check.detail, 600)}`);
   if (process.env.GITHUB_ACTIONS) {

@@ -1,11 +1,18 @@
-// Riftborn feedback inbox: reads the leaderboard Worker's /api/feedback with the admin key.
+// Riftborn feedback inbox (https://feedback.riftborn.us/, its own origin; an old copy with a "moved"
+// banner stays at https://chancrisp.github.io/riftborn/feedback/ until GitHub Pages is shut down):
+// reads the leaderboard Worker's /api/feedback with the admin key. Both copies use API below; the
+// Worker answers its admin routes for exactly these two origins (FEEDBACK_ADMIN_ORIGINS).
 // The key never leaves this page except as the Authorization header to API below. It lives in
-// sessionStorage only (this tab; closing it forgets the key): this origin is shared with other
-// pages, so the key is never kept on the device. A copy an older inbox kept in localStorage (its
-// "Remember on this device" option) is deleted as the page starts. A refused key (401) is wiped.
+// sessionStorage only (this tab; closing it forgets the key). This origin is no longer shared with
+// other pages, but the key is still never kept on the device (a shared or stolen machine never holds
+// it). A copy an older inbox kept in localStorage (its "Remember on this device" option) is deleted
+// as the page starts. A refused key (401) is wiped.
 // Every field the Worker returns is player-written or player-influenced: it is only ever shown with
-// textContent, class names and URL parts come from fixed lists, and index.html sets a CSP.
-const API = 'https://riftborn-leaderboard.chanmanc10.workers.dev';
+// textContent, class names and URL parts come from fixed lists, and the page has a strict CSP (the
+// _headers of feedback.riftborn.us, and index.html's own meta policy).
+const API = 'https://api.riftborn.us';
+// Where this inbox lives (any other copy cannot reach the Worker: CORS).
+const HOMES = ['feedback.riftborn.us', 'chancrisp.github.io'];
 const STORE_KEY = 'riftborn-feedback-admin-key';
 const FILTER_KEY = 'riftborn-feedback-filters';
 const PAGE = 50;
@@ -37,9 +44,9 @@ async function api(path, init = {}) {
   try {
     response = await fetch(API + path, { ...init, cache: 'no-store', headers: { Authorization: `Bearer ${key}`, ...(init.headers || {}) } });
   } catch {
-    throw new HttpError(0, location.hostname === 'chancrisp.github.io'
+    throw new HttpError(0, HOMES.includes(location.hostname)
       ? 'Could not reach the feedback Worker. Check your connection and try again.'
-      : 'Could not reach the feedback Worker. The Worker only answers this page at chancrisp.github.io.');
+      : 'Could not reach the feedback Worker. The Worker only answers this page at feedback.riftborn.us.');
   }
   if (!response.ok) {
     let message = `Request failed (${response.status})`;

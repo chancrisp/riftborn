@@ -1,7 +1,7 @@
 import { build } from 'esbuild';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { AUTH_PUBLIC_BASE, SCORE_READ_ONLY_ORIGINS, WORKER_ALLOWED_ORIGINS } from '../site.hosts.mjs';
+import { AUTH_PUBLIC_BASE, FEEDBACK_ADMIN_ORIGINS, SCORE_READ_ONLY_ORIGINS, WORKER_ALLOWED_ORIGINS } from '../site.hosts.mjs';
 
 const ACCOUNT_API = 'https://api.cloudflare.com/client/v4/accounts';
 const WORKER_NAME = 'riftborn-leaderboard';
@@ -41,7 +41,9 @@ export function workerDeployRefusals(env = process.env) {
 /**
  * The browser origins the Worker answers (CORS): riftborn.us, dev.riftborn.us and the GitHub Pages
  * origin from site.hosts.mjs, plus any in RIFTBORN_SITE_ORIGIN (optional; one origin or a comma
- * list, each an exact http(s) origin without a path).
+ * list, each an exact http(s) origin without a path). An admin-only origin (in FEEDBACK_ADMIN_ORIGINS
+ * but not WORKER_ALLOWED_ORIGINS: feedback.riftborn.us) is refused there: in ALLOWED_ORIGINS it would
+ * stop being admin only (server/feedback-api.js) and could post scores, feedback and sign-ins.
  */
 export function allowedOrigins(siteOrigin) {
   const extra = String(siteOrigin ?? '').split(',').map(value => value.trim()).filter(Boolean);
@@ -50,6 +52,9 @@ export function allowedOrigins(siteOrigin) {
     try { url = new URL(value); } catch { url = null; }
     if (!url || !/^https?:$/.test(url.protocol) || url.origin !== value) {
       throw new Error('RIFTBORN_SITE_ORIGIN must be exact http(s) origins without a path (comma-separated).');
+    }
+    if (FEEDBACK_ADMIN_ORIGINS.includes(value) && !WORKER_ALLOWED_ORIGINS.includes(value)) {
+      throw new Error(`RIFTBORN_SITE_ORIGIN cannot add ${value}: it is admin only (site.hosts.mjs FEEDBACK_ADMIN_ORIGINS), never an origin for scores, accounts or player feedback. Remove it from the variable.`);
     }
   }
   return [...new Set([...WORKER_ALLOWED_ORIGINS, ...extra])];
@@ -74,6 +79,11 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
       // dev.riftborn.us reads the leaderboard but never writes it (server/scores-api.js). Always
       // from site.hosts.mjs: RIFTBORN_SITE_ORIGIN can add origins but never lift this.
       { type: 'plain_text', name: 'SCORE_READ_ONLY_ORIGINS', text: SCORE_READ_ONLY_ORIGINS.join(',') },
+      // The feedback inbox (feedback.riftborn.us, and its old github.io copy) may use the feedback
+      // admin routes, and nothing else (server/feedback-api.js). Always from site.hosts.mjs:
+      // RIFTBORN_SITE_ORIGIN never adds to it, and cannot put an admin-only origin in
+      // ALLOWED_ORIGINS either (allowedOrigins refuses).
+      { type: 'plain_text', name: 'FEEDBACK_ADMIN_ORIGINS', text: FEEDBACK_ADMIN_ORIGINS.join(',') },
       // Sign-in runs on this host only (server/accounts-api.js publicBase); callback URLs live there.
       { type: 'plain_text', name: 'AUTH_PUBLIC_BASE', text: AUTH_PUBLIC_BASE },
       {

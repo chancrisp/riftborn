@@ -1,5 +1,6 @@
 // Player feedback API on the leaderboard Worker. Players POST from the game's FEEDBACK form;
-// the private inbox page (feedback/) lists, triages and exports it with a bearer admin key.
+// the private inbox page (feedback/, at https://feedback.riftborn.us) lists, triages and exports it
+// with a bearer admin key.
 // No IP address is ever stored: CF-Connecting-IP only becomes a rate-limit key, as a keyed hash
 // (ipLimitKey) wherever the Worker has its signing key.
 import { ipLimitKey } from './accounts-api.js';
@@ -41,11 +42,27 @@ const json = (value, status = 200, origin = null, extra = {}) => new Response(JS
 });
 
 // Same origin rule as server/scores-api.js (kept separate so the score route stays untouched).
+// These origins (the games) submit feedback; they have always been able to reach the admin routes
+// too, which still need the admin key.
 function originAllowed(origin, env) {
   if (!origin) return true;
   const defaults = 'https://riftborn.chanmanc10.chatgpt.site' +
     (env.ENVIRONMENT === 'production' ? '' : ',http://127.0.0.1:4173,http://localhost:4173');
   return `${defaults},${env.ALLOWED_ORIGINS || ''}`
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean)
+    .includes(origin);
+}
+
+// Admin-only origins (FEEDBACK_ADMIN_ORIGINS, from site.hosts.mjs: the inbox at feedback.riftborn.us
+// and its old github.io copy). An origin listed there but not allowed above (feedback.riftborn.us)
+// may use the admin routes only (list, CSV, status changes: the same key check and admin rate limit
+// as everyone), never submit player feedback: its POST gets 403 before the rate limiter, the body or
+// the database, and its preflight offers only that route's admin method. Scores and accounts never
+// read this list, so they refuse it like any unknown origin.
+function adminOnlyOrigin(origin, env) {
+  return Boolean(origin) && String(env.FEEDBACK_ADMIN_ORIGINS || '')
     .split(',')
     .map(value => value.trim())
     .filter(Boolean)
@@ -413,15 +430,18 @@ export async function handleFeedback(request, env, ctx) {
   if (path !== '/api/feedback' && path !== '/api/feedback.csv' && !item) return null;
 
   const origin = request.headers.get('Origin');
-  if (!originAllowed(origin, env)) return json({ error: 'Forbidden origin' }, 403);
+  const allowed = originAllowed(origin, env);
+  const adminOnly = !allowed && adminOnlyOrigin(origin, env);
+  if (!allowed && !adminOnly) return json({ error: 'Forbidden origin' }, 403);
   if (request.method === 'OPTIONS') {
     if (!origin) return json({ error: 'Origin required' }, 400);
     return new Response(null, {
       status: 204,
       headers: {
         'Access-Control-Allow-Origin': origin,
-        'Access-Control-Allow-Methods': METHODS,
-        'Access-Control-Allow-Headers': ALLOW_HEADERS,
+        // Admin-only origins: PATCH (JSON) on an item, GET with the key everywhere else.
+        'Access-Control-Allow-Methods': adminOnly ? (item ? 'PATCH, OPTIONS' : 'GET, OPTIONS') : METHODS,
+        'Access-Control-Allow-Headers': adminOnly && !item ? 'Authorization' : ALLOW_HEADERS,
         'Access-Control-Max-Age': '86400',
         'Cache-Control': 'no-store',
         Vary: 'Origin'
@@ -434,6 +454,7 @@ export async function handleFeedback(request, env, ctx) {
     : path === '/api/feedback.csv' ? (request.method === 'GET' ? 'csv' : null)
       : request.method === 'POST' ? 'submit' : request.method === 'GET' ? 'list' : null;
   if (!route) return json({ error: 'Method not allowed' }, 405, origin, { Allow: item ? 'PATCH, OPTIONS' : path.endsWith('.csv') ? 'GET, OPTIONS' : 'GET, POST, OPTIONS' });
+  if (adminOnly && route === 'submit') return json({ error: 'Feedback is sent from the game, not from here' }, 403, origin);
 
   try {
     if (route !== 'submit') {

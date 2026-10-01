@@ -5,7 +5,11 @@ name: Check riftborn.us after deploy
 # game is not healthy (scripts/post-deploy-check.mjs): version.json is the build committed in live/,
 # the page boots with zero console errors, the menu shows the title and START RUN and answers a
 # click, the link-preview tags and key files answer; dev.riftborn.us shows its password gate and
-# serves the build committed in dev/. It asks a build only for what its committed live/index.html
+# serves the build committed in dev/; riftborn.us/feedback redirects to https://feedback.riftborn.us/,
+# which serves the feedback inbox locked, under its strict headers, with zero console errors and
+# without sending anything (no key is ever typed). Until that custom domain is attached (the deploy's
+# feedback job) it is only a warning, up to the date in FEEDBACK_DOMAIN_GRACE_UNTIL.
+# It asks a build only for what its committed live/index.html
 # carries (a rollback to a build without link-preview tags is not failed for them), and retries every
 # HTTP GET. Results: annotations on the run plus a table in the job summary. A failure also posts one
 # line to the feedback Discord channel (DISCORD_WEBHOOK_URL), unless a newer deploy of main is
@@ -59,7 +63,7 @@ jobs:
       - name: Install the pinned Playwright
         run: npm ci --prefix tools/post-deploy-check --ignore-scripts --no-audit --no-fund
       - id: check
-        name: Check riftborn.us and dev.riftborn.us in headless Chrome
+        name: Check riftborn.us, dev.riftborn.us and feedback.riftborn.us in headless Chrome
         env:
           CHECK_BROWSER_CHANNEL: chrome
           CHECK_OUT_DIR: ${{ runner.temp }}/post-deploy-check

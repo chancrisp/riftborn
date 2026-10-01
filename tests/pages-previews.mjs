@@ -245,6 +245,7 @@ console.log('PASS refused previews: main, bad or old-style names, a name for ano
   assert.throws(() => previewDeployPlan([{ name: 'main', build: 'x', digest: 'y' }]), /production branch/);
   assert.throws(() => previewDeployPlan([{ name: '../x', build: 'x', digest: 'y' }]), /preview name/);
   assert.deepEqual(deployPlan().map(step => step.dir), ['_cf/live', '_cf/dev'], 'The production plan has no previews');
+  assert.deepEqual(deployPlan({ site: 'feedback' }).map(step => step.dir), ['_cf/feedback'], 'Nor does the inbox plan');
   assert.ok(previewCommitMessage(first).length <= 100);
 
   // Already served as staged -> skipped; anything else -> deployed.

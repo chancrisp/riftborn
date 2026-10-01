@@ -2,9 +2,13 @@ name: Build and deploy Riftborn to GitHub Pages and Cloudflare Pages
 
 # One build (scripts/build-pages.mjs, hosts and switches in site.config.mjs), two hosts:
 #   GitHub Pages      https://chancrisp.github.io/riftborn/  (the game until launch; afterwards
-#                     handoff pages that move saved data to riftborn.us, plus the feedback inbox)
+#                     handoff pages that move saved data to riftborn.us, plus the old copy of the
+#                     feedback inbox with a "moved" banner)
 #   Cloudflare Pages  https://riftborn.us/ (project "riftborn") and https://dev.riftborn.us/
-#                     (project "riftborn-dev"); only while the repository variable CF_PAGES_ENABLED is 1
+#                     (project "riftborn-dev"), job cloudflare; the feedback inbox
+#                     https://feedback.riftborn.us/ (project "riftborn-feedback", deployed and its
+#                     custom domain connected by the feedback job, which nothing waits for); only
+#                     while the repository variable CF_PAGES_ENABLED is 1
 # Launch = LAUNCHED = true in site.config.mjs, pushed to main. Then the github.io handoff is only
 # published after riftborn.us has the game and is checked to serve it over its real address (never
 # a handoff to a site that is not there yet). Only main ever deploys to Cloudflare production.
@@ -92,6 +96,50 @@ jobs:
       - name: Check riftborn.us and dev.riftborn.us serve this deploy
         if: needs.build.outputs.launched == 'true'
         run: node scripts/cloudflare-pages-verify.mjs
+
+  feedback:
+    # The feedback inbox, https://feedback.riftborn.us/: deploys _cf/feedback to the
+    # riftborn-feedback project with the pinned Wrangler (created if missing), then connects
+    # feedback.riftborn.us to it through the Cloudflare API with the same token (Pages custom domain,
+    # then a proxied CNAME in the riftborn.us zone; scripts/cloudflare-pages-domains.mjs). Idempotent:
+    # once the domain is in place every run only reads. Only on main.
+    # Apart from the game on purpose: nothing waits for this job, and continue-on-error keeps a
+    # failure here (its ::error annotation names a missing token permission exactly) from failing the
+    # run, which would skip RiftBot's release posts (discord-setup.yml runs only after a deploy run
+    # that succeeded). The post-deploy check still checks feedback.riftborn.us after every run.
+    if: vars.CF_PAGES_ENABLED == '1' && github.ref == 'refs/heads/main'
+    needs: build
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    environment: cloudflare-production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tools/wrangler/package-lock.json
+      - name: Install the pinned Wrangler
+        run: npm ci --prefix tools/wrangler --ignore-scripts --no-audit --no-fund
+      - uses: actions/download-artifact@v4
+        with:
+          name: cloudflare-pages
+          path: _cf
+      - name: Deploy feedback.riftborn.us with Wrangler
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: node scripts/cloudflare-pages-deploy.mjs --feedback
+      - name: Connect feedback.riftborn.us to its Pages project
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/cloudflare-pages-domains.mjs
 
   deploy:
     # Before launch a Cloudflare failure (or the job being off) never holds up github.io. After

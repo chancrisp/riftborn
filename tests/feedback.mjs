@@ -323,4 +323,64 @@ assert.equal((await worker.fetch(new Request('https://api.test/elsewhere'), env)
 }
 console.log('PASS feedback hardening: admin routes limited per IP before the key check (429 even for the right key), hashed limiter keys, Discord post without contact or context.');
 
+// ---- the inbox at feedback.riftborn.us: the admin routes, and nothing else (FEEDBACK_ADMIN_ORIGINS) ----
+{
+  const INBOX = 'https://feedback.riftborn.us';
+  const limiterKeys = [];
+  const adminLimiter = { async limit({ key }) { limiterKeys.push(key); return { success: true }; } };
+  const playerKeys = [];
+  const playerLimiter = { async limit({ key }) { playerKeys.push(key); return { success: true }; } };
+  const inboxEnv = { ...env, FEEDBACK_ADMIN_ORIGINS: `${INBOX},${ORIGIN}`, ACCOUNTS_RATE_LIMITER: adminLimiter, FEEDBACK_RATE_LIMITER: playerLimiter };
+  const fromInbox = (path, opts = {}) => call(path, { ...opts, e: opts.e || inboxEnv, headers: { Origin: INBOX, ...(opts.headers || {}) } });
+  const asAdmin = { Authorization: `Bearer ${KEY}` };
+  // List, CSV and status changes with the key, readable by the inbox (CORS).
+  let r = await fromInbox('/api/feedback?status=all&limit=5', { headers: asAdmin });
+  assert.equal(r.status, 200, 'The inbox lists feedback');
+  assert.equal(r.headers.get('Access-Control-Allow-Origin'), INBOX);
+  const listed = (await r.json()).items;
+  assert.ok(listed.length > 0);
+  r = await fromInbox('/api/feedback.csv?status=all', { headers: asAdmin });
+  assert.equal(r.status, 200, 'and exports CSV');
+  assert.equal(r.headers.get('Access-Control-Allow-Origin'), INBOX);
+  assert.equal(r.headers.get('Access-Control-Expose-Headers'), 'Content-Disposition', 'the file name is readable');
+  r = await fromInbox('/api/feedback/' + listed[0].id, { method: 'PATCH', body: { status: listed[0].status === 'read' ? 'new' : 'read' }, headers: asAdmin });
+  assert.equal(r.status, 200, 'and changes a status');
+  assert.equal(r.headers.get('Access-Control-Allow-Origin'), INBOX);
+  // The key check and the admin rate limit are exactly as before.
+  assert.equal((await fromInbox('/api/feedback')).status, 401, 'No key: 401');
+  assert.equal((await fromInbox('/api/feedback', { headers: { Authorization: 'Bearer wrong-key-000000000000000' } })).status, 401, 'Wrong key: 401');
+  assert.equal((await fromInbox('/api/feedback.csv')).status, 401);
+  assert.equal((await fromInbox('/api/feedback/' + listed[0].id, { method: 'PATCH', body: { status: 'read' } })).status, 401);
+  assert.ok(limiterKeys.length >= 7 && limiterKeys.every(key => key.startsWith('feedback-admin:')), 'Every inbox request took an admin rate-limit slot first');
+  const refused = await fromInbox('/api/feedback', { headers: asAdmin, e: { ...inboxEnv, ACCOUNTS_RATE_LIMITER: { async limit() { return { success: false }; } } } });
+  assert.equal(refused.status, 429, 'The admin limit applies to the new origin too');
+  // Player feedback from the inbox origin: 403 before the rate limiter, the body or the database.
+  const before = count();
+  r = await fromInbox('/api/feedback', { method: 'POST', body: { ...good, message: 'Posted from the inbox origin, never stored.' } });
+  assert.equal(r.status, 403, 'feedback.riftborn.us cannot submit player feedback');
+  assert.equal(r.headers.get('Access-Control-Allow-Origin'), INBOX);
+  assert.equal(count(), before, 'Nothing stored');
+  assert.equal(playerKeys.length, 0, 'The player limiter was not even consulted');
+  // Its preflights offer only what the inbox does.
+  r = await fromInbox('/api/feedback', { method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' } });
+  assert.equal(r.status, 204);
+  assert.equal(r.headers.get('Access-Control-Allow-Methods'), 'GET, OPTIONS', 'No POST offered to the inbox origin');
+  assert.equal(r.headers.get('Access-Control-Allow-Headers'), 'Authorization', 'and no Content-Type, so a JSON post stops at the preflight');
+  r = await fromInbox('/api/feedback/' + listed[0].id, { method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'PATCH' } });
+  assert.equal(r.headers.get('Access-Control-Allow-Methods'), 'PATCH, OPTIONS');
+  assert.equal(r.headers.get('Access-Control-Allow-Headers'), 'Content-Type, Authorization');
+  // The games are unchanged: github.io (in both lists) still submits, with the full preflight.
+  r = await call('/api/feedback', { method: 'POST', body: { ...good, message: 'Still sent from the github.io game.' }, e: inboxEnv });
+  assert.equal(r.status, 201, 'Player feedback from an allowed origin is unchanged');
+  assert.equal(count(), before + 1);
+  r = await call('/api/feedback', { method: 'OPTIONS', e: inboxEnv, headers: { 'Access-Control-Request-Method': 'POST' } });
+  assert.equal(r.headers.get('Access-Control-Allow-Methods'), 'GET, POST, PATCH, OPTIONS');
+  // Without the list (the Worker before this change) the inbox origin is refused outright.
+  assert.equal((await fromInbox('/api/feedback', { headers: asAdmin, e: env })).status, 403);
+  // An origin only in the admin list never becomes a player origin, whatever the path.
+  assert.equal((await call('/api/scores', { e: inboxEnv, headers: { Origin: INBOX } })).status, 403, 'Scores refuse it');
+  assert.equal((await call('/api/account', { e: inboxEnv, headers: { Origin: INBOX } })).status, 403, 'Accounts refuse it');
+}
+console.log('PASS feedback inbox origin: feedback.riftborn.us lists, exports and triages with the key (same key check, same admin rate limit), never submits (403 before any work), preflights offer only the admin methods; the games are unchanged.');
+
 console.log('PASS feedback: validation, honeypot, rate limit, no IPs, Discord ping, admin auth, filters, paging, status, CSV, CORS, self-bootstrap.');

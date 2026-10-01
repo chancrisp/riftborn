@@ -1,10 +1,10 @@
 // Riftborn hosting: the single source of truth for where each part of Riftborn lives and for the
 // two launch switches. Read by scripts/build-pages.mjs (GitHub Pages + Cloudflare Pages outputs),
-// scripts/cloudflare-pages-deploy.mjs and .github/workflows/pages.yml (through
-// scripts/site-config.mjs). The hosts themselves live in site.hosts.mjs (re-exported here), the
-// only file the Worker reads (scripts/cloudflare-worker-upload.mjs CORS origins,
-// server/accounts-api.js sign-in return URLs and the public auth host): flipping LAUNCHED here never
-// redeploys the Worker.
+// scripts/cloudflare-pages-deploy.mjs, scripts/cloudflare-pages-domains.mjs and
+// .github/workflows/pages.yml (through scripts/site-config.mjs). The hosts themselves live in
+// site.hosts.mjs (re-exported here), the only file the Worker reads
+// (scripts/cloudflare-worker-upload.mjs CORS origins, server/accounts-api.js sign-in return URLs and
+// the public auth host): flipping LAUNCHED here never redeploys the Worker.
 //
 // Switch 1, CF_PAGES_ENABLED (GitHub repository variable, "1"): turns the Cloudflare Pages deploy
 // job on at all. Before launch it deploys dev.riftborn.us (the password-gated test build) and a
@@ -20,11 +20,13 @@
 // riftborn.us without their saved data (localStorage belongs to the old origin).
 
 import { HOSTS } from './site.hosts.mjs';
-export { HOSTS, WORKER_ALLOWED_ORIGINS, SCORE_READ_ONLY_ORIGINS, AUTH_RETURN_ORIGINS, AUTH_RETURN_PATHS, AUTH_PUBLIC_BASE } from './site.hosts.mjs';
+export { HOSTS, WORKER_ALLOWED_ORIGINS, SCORE_READ_ONLY_ORIGINS, FEEDBACK_ADMIN_ORIGINS, AUTH_RETURN_ORIGINS, AUTH_RETURN_PATHS, AUTH_PUBLIC_BASE } from './site.hosts.mjs';
 
 export const LAUNCHED = true;
 
-export const PAGES_PROJECTS = Object.freeze({ live: 'riftborn', dev: 'riftborn-dev' });
+// The Cloudflare Pages projects: riftborn.us, dev.riftborn.us and the feedback inbox
+// (feedback.riftborn.us, its custom domain connected by scripts/cloudflare-pages-domains.mjs).
+export const PAGES_PROJECTS = Object.freeze({ live: 'riftborn', dev: 'riftborn-dev', feedback: 'riftborn-feedback' });
 export const PRODUCTION_BRANCH = 'main';
 
 // The migration contract (sending side: scripts/pages-templates.mjs handoff page; receiving side:
@@ -130,6 +132,7 @@ export function resolveSiteConfig(env = {}) {
     dev,
     api: HOSTS.api,
     workersDev: HOSTS.workersDev,
+    feedback: HOSTS.feedback,
     legacyUrl,
     projects: PAGES_PROJECTS
   });

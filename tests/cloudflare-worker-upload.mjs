@@ -57,6 +57,67 @@ const readOnlyOf = meta => meta.bindings.find(binding => binding.type === 'plain
     assert.equal(evil.status, 403, `${path} refuses other origins`);
   }
 }
+// Feedback admin origins (the inbox moved to feedback.riftborn.us): one list (site.hosts.mjs), bound as
+// FEEDBACK_ADMIN_ORIGINS whatever RIFTBORN_SITE_ORIGIN says, the same in wrangler.jsonc. The new
+// inbox origin is admin only: never a CORS origin for scores, accounts or player feedback.
+const INBOX = 'https://feedback.riftborn.us';
+const ADMIN = `${INBOX},https://chancrisp.github.io`;
+const adminOf = meta => meta.bindings.find(binding => binding.type === 'plain_text' && binding.name === 'FEEDBACK_ADMIN_ORIGINS')?.text;
+{
+  const { FEEDBACK_ADMIN_ORIGINS, WORKER_ALLOWED_ORIGINS, SCORE_READ_ONLY_ORIGINS, HOSTS } = await import('../site.hosts.mjs');
+  assert.equal(FEEDBACK_ADMIN_ORIGINS.join(','), ADMIN, 'site.hosts.mjs: the inbox and its old github.io copy');
+  assert.equal(HOSTS.feedback, INBOX);
+  assert.ok(!WORKER_ALLOWED_ORIGINS.includes(INBOX) && !SCORE_READ_ONLY_ORIGINS.includes(INBOX), 'feedback.riftborn.us is in no other list');
+  assert.ok(WORKER_ALLOWED_ORIGINS.includes(HOSTS.legacyOrigin), 'The github.io copy keeps everything it had until GitHub Pages is shut down');
+  assert.equal((await import('../site.config.mjs')).FEEDBACK_ADMIN_ORIGINS, FEEDBACK_ADMIN_ORIGINS, 'site.config.mjs re-exports it');
+  assert.equal(adminOf(metadata), ADMIN, 'The upload binds the admin list');
+  const extra = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin: 'https://preview.example' }).get('metadata').text());
+  assert.equal(adminOf(extra), ADMIN, 'RIFTBORN_SITE_ORIGIN never changes the admin list');
+  assert.equal(originsOf(extra), SITE_ORIGINS + ',https://preview.example', 'and the admin list never reaches ALLOWED_ORIGINS');
+  // ...nor can the variable put it there: feedback.riftborn.us in ALLOWED_ORIGINS would stop being
+  // admin only (scores, accounts and player feedback would answer it), so the deploy refuses.
+  for (const value of [INBOX, `https://preview.example,${INBOX}`, ` ${INBOX} `]) {
+    assert.throws(() => uploadModule.allowedOrigins(value), /RIFTBORN_SITE_ORIGIN cannot add https:\/\/feedback\.riftborn\.us: it is admin only/, 'Refused: ' + value);
+    assert.throws(() => uploadModule.createWorkerUpload('x', { databaseId, siteOrigin: value }), /admin only/, 'No upload with it: ' + value);
+  }
+  assert.equal(uploadModule.allowedOrigins(HOSTS.legacyOrigin).join(','), SITE_ORIGINS, 'An origin in both lists (github.io) is still fine');
+  assert.equal(JSON.parse(fs.readFileSync('cloudflare/wrangler.jsonc', 'utf8')).vars.FEEDBACK_ADMIN_ORIGINS, ADMIN, 'wrangler.jsonc lists the same admin origins');
+}
+{
+  // The deployed Worker with these bindings: the inbox's own requests pass their preflight (with
+  // Authorization), and nothing else from feedback.riftborn.us does.
+  const worker = (await import('../cloudflare/worker.js')).default;
+  const env = { ENVIRONMENT: 'production', ALLOWED_ORIGINS: originsOf(metadata), SCORE_READ_ONLY_ORIGINS: readOnlyOf(metadata), FEEDBACK_ADMIN_ORIGINS: adminOf(metadata) };
+  const send = (path, init) => worker.fetch(new Request('https://api.riftborn.us' + path, init), env, { waitUntil() {} });
+  const preflight = (path, method, requestHeaders, origin = INBOX) => send(path, { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': method, ...(requestHeaders ? { 'Access-Control-Request-Headers': requestHeaders } : {}) } });
+  // What feedback/inbox.js sends: GET list and CSV with Authorization, PATCH with Authorization + JSON.
+  for (const [path, method, requestHeaders, methods, allowHeaders] of [
+    ['/api/feedback?status=active&limit=50', 'GET', 'authorization', 'GET, OPTIONS', 'Authorization'],
+    ['/api/feedback.csv?status=active', 'GET', 'authorization', 'GET, OPTIONS', 'Authorization'],
+    ['/api/feedback/11111111-1111-4111-8111-111111111111', 'PATCH', 'authorization,content-type', 'PATCH, OPTIONS', 'Content-Type, Authorization']
+  ]) {
+    const response = await preflight(path, method, requestHeaders);
+    assert.equal(response.status, 204, `the inbox's ${method} ${path} passes its preflight`);
+    assert.equal(response.headers.get('Access-Control-Allow-Origin'), INBOX);
+    assert.equal(response.headers.get('Access-Control-Allow-Methods'), methods, 'only the admin method: ' + path);
+    assert.equal(response.headers.get('Access-Control-Allow-Headers'), allowHeaders);
+  }
+  // Player feedback: refused before any work (this env has no database or limiter: reaching them would be a 503).
+  const submit = await send('/api/feedback', { method: 'POST', headers: { Origin: INBOX, 'Content-Type': 'application/json' }, body: '{"category":"bug","message":"posted from the inbox origin"}' });
+  assert.equal(submit.status, 403, 'feedback.riftborn.us never submits player feedback');
+  assert.equal(submit.headers.get('Access-Control-Allow-Origin'), INBOX, 'and can read why');
+  // Scores and accounts: refused like any unknown origin.
+  for (const path of ['/api/scores', '/api/account', '/api/profile', '/auth/session', '/api/auth/providers']) {
+    for (const method of ['GET', 'POST']) assert.equal((await preflight(path, method, 'content-type')).status, 403, `${path} ${method} preflight from feedback.riftborn.us`);
+    const direct = await send(path, { method: 'GET', headers: { Origin: INBOX } });
+    assert.equal(direct.status, 403, `${path} from feedback.riftborn.us`);
+    assert.equal(direct.headers.get('Access-Control-Allow-Origin'), null);
+  }
+  // The github.io copy keeps the full feedback preflight; the old Worker (no admin list) refuses the new origin.
+  assert.match((await preflight('/api/feedback', 'POST', 'content-type', 'https://chancrisp.github.io')).headers.get('Access-Control-Allow-Methods'), /POST/);
+  const old = await worker.fetch(new Request('https://api.riftborn.us/api/feedback', { method: 'OPTIONS', headers: { Origin: INBOX, 'Access-Control-Request-Method': 'GET' } }), { ...env, FEEDBACK_ADMIN_ORIGINS: undefined }, { waitUntil() {} });
+  assert.equal(old.status, 403, 'Before this Worker deploys, feedback.riftborn.us gets 403 (the inbox there needs it)');
+}
 assert.ok(metadata.bindings.some(binding => binding.type === 'ratelimit' && binding.name === 'SCORE_RATE_LIMITER' && binding.namespace_id === '9280928'));
 assert.ok(metadata.bindings.some(binding => binding.type === 'ratelimit' && binding.name === 'FEEDBACK_RATE_LIMITER' &&
   binding.namespace_id !== '9280928' && binding.simple.limit === 3 && binding.simple.period === 60), 'Feedback has its own tight rate limit');
@@ -188,4 +249,4 @@ assert.ok(!/FAKE_OAUTH/.test(wrangler + workflow), 'FAKE_OAUTH never reaches a d
   assert.ok(uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, feedbackAdminKey: long, feedbackKeyStrict: '1', warn }), 'Strict with a long key deploys');
 }
 
-console.log('PASS Cloudflare Worker upload: entry module, D1, production origin, and score rate limit, feedback rate limit and optional feedback secrets, optional account secrets, previous signing key, ACCOUNTS_LIVE guard, accounts rate limiter, main-only deploys, admin key length, read-only score origins (site.hosts.mjs = upload = wrangler.jsonc, dev preflight offers no score write).');
+console.log('PASS Cloudflare Worker upload: entry module, D1, production origin, and score rate limit, feedback rate limit and optional feedback secrets, optional account secrets, previous signing key, ACCOUNTS_LIVE guard, accounts rate limiter, main-only deploys, admin key length, read-only score origins (site.hosts.mjs = upload = wrangler.jsonc, dev preflight offers no score write), feedback admin origins (feedback.riftborn.us: only the inbox admin preflights; scores, accounts and player feedback refused; RIFTBORN_SITE_ORIGIN cannot add it to ALLOWED_ORIGINS).');

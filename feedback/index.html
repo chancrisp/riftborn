@@ -2,10 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<!-- GitHub Pages cannot send headers, so the policy is here. No inline script or style: the module
-     and stylesheet are same-origin files, and any inline script added later must be listed by its
-     sha256 hash (tests/security-hardening.mjs checks). The key only ever goes to the Worker hosts. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src data:; connect-src https://riftborn-leaderboard.chanmanc10.workers.dev https://api.riftborn.us; base-uri 'none'; form-action 'none'; object-src 'none'">
+<!-- GitHub Pages cannot send headers, so the policy is here (feedback.riftborn.us also sends its
+     _headers policy, scripts/pages-headers.mjs; the browser enforces both). No inline script or
+     style: the module and stylesheet are same-origin files, and any inline script added later must
+     be listed by its sha256 hash (tests/security-hardening.mjs checks). The key only ever goes to
+     the Worker host. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src data:; connect-src https://api.riftborn.us; base-uri 'none'; form-action 'none'; object-src 'none'">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 <meta name="referrer" content="no-referrer">

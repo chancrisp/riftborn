@@ -4,6 +4,7 @@
 //   node scripts/serve-cf.mjs _cf/live [--port 8791]           Cloudflare Pages: applies _headers
 //                                                              and _redirects, 404.html, clean URLs
 //   node scripts/serve-cf.mjs _cf/dev --port 8792
+//   node scripts/serve-cf.mjs _cf/feedback --port 8793          the feedback inbox (feedback.riftborn.us)
 //   node scripts/serve-cf.mjs _site --github [--port 8790]     GitHub Pages project site under
 //                                                              /riftborn/ (no custom headers)
 //
