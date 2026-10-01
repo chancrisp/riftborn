@@ -301,7 +301,7 @@ console.log('PASS feedback inbox: feedback.riftborn.us = inbox + font + 404 + ro
   assert.ok(job.includes('CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}') && job.includes('CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}'));
   assert.ok(workflow.includes('CF_PAGES_ENABLED: ${{ vars.CF_PAGES_ENABLED }}'), 'The build knows the switch (a launch without Cloudflare is refused)');
   assert.ok(workflow.includes('needs: [build, cloudflare]') && workflow.includes("needs.build.outputs.launched != 'true'"), 'After launch github.io waits for Cloudflare');
-  assert.ok(workflow.includes('uses: actions/deploy-pages@v4'), 'The GitHub Pages deploy stays');
+  assert.match(workflow, /uses: actions\/deploy-pages@v\d+\n/, 'The GitHub Pages deploy stays');
   // feedback.riftborn.us: deployed and connected by its own job, only on main, with the deploy token
   // from the main-only environment. Nothing waits for it, and continue-on-error keeps its failure
   // from failing the run (discord-setup.yml posts releases only after a run that succeeded).

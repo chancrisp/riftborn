@@ -49,11 +49,13 @@ jobs:
         env:
           RIFTBORN_SCORE_API_BASE: ${{ vars.RIFTBORN_SCORE_API_BASE || 'https://riftborn-leaderboard.chanmanc10.workers.dev' }}
           CF_PAGES_ENABLED: ${{ vars.CF_PAGES_ENABLED }}
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
+          # v4+ leaves dotfiles out unless asked; keep shipping them (.nojekyll) as v3 did.
+          include-hidden-files: true
       - if: vars.CF_PAGES_ENABLED == '1'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cloudflare-pages
           path: _cf
@@ -80,7 +82,7 @@ jobs:
       # fetched at deploy time, no install scripts.
       - name: Install the pinned Wrangler
         run: npm ci --prefix tools/wrangler --ignore-scripts --no-audit --no-fund
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: cloudflare-pages
           path: _cf
@@ -125,7 +127,7 @@ jobs:
           cache-dependency-path: tools/wrangler/package-lock.json
       - name: Install the pinned Wrangler
         run: npm ci --prefix tools/wrangler --ignore-scripts --no-audit --no-fund
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: cloudflare-pages
           path: _cf
@@ -156,4 +158,4 @@ jobs:
       id-token: write
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
