@@ -1,0 +1,11 @@
+{
+  "name": "v2-3-1-looks",
+  "url": "https://v2-3-1-looks.riftborn-dev.pages.dev/",
+  "version": "2.3.1",
+  "build": "631a95e35d",
+  "module": "js/riftborn.0e1d8012d8.js",
+  "branch": "look-test-fix",
+  "commit": "c4fa855e7a649907a12d78a4329dfdf01afa3c57",
+  "dirty": false,
+  "staged": "2026-10-01T19:06:38.235Z"
+}
