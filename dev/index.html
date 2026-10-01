@@ -44,7 +44,7 @@ so a reload before it lands can't lose it, in this tab's sessionStorage. Runs be
 <script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
 the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
 makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
-window.RIFTBORN_BUILD = "8b25596a8b";
+window.RIFTBORN_BUILD = "1649532551";
 (function () {
   var b = window.RIFTBORN_BUILD;
   if (b === "dev" || !window.fetch || !window.URL) return;
@@ -64,6 +64,15 @@ they work on every host; the build copies assets/ as is. -->
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon-180.png">
+<!-- HOME SCREEN WEB APP (v2.3.2, tests/manifest.test.mjs): iPhone browsers never let a page go fullscreen, so
+Add to Home Screen is the way: from there the game opens with no browser bars (black-translucent: the page runs
+under the status bar, css/safe-area.css keeps the HUD clear of it, the notch and the home indicator). The manifest
+gives Android and desktop the same (its start_url is the root game page, "/") and the icons; the build copies it. -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Riftborn">
 <link rel="preload" href="assets/ps1-atlas.png" as="image" crossorigin="anonymous">
 <link rel="preload" href="assets/crypt-pixel.ttf" as="font" type="font/ttf" crossorigin>
 <style>/* LOADING SCREEN (#riftLoader, src/ui/boot-loader.js): inline so it is in the very first paint and needs
@@ -161,7 +170,7 @@ body:has(#devGate) #riftLoader{display:none}
 /* Reduced motion: a calm, still screen; the bar and skull step between stages, the eyes just switch on. */
 @media (prefers-reduced-motion:reduce){.rl-embers,.rl-heat,.rl-sweep,.rl-dots{display:none}#riftLoader .rl-ring,#riftLoader .rl-bob,#riftLoader .rl-rift-glow{animation:none}.rl-fill,.rl-rider,.rl-mark{transition:none}#riftLoader.rl-lit .rl-eyes{animation:none;opacity:1}#riftLoader.rl-lit .rl-rift-glow{animation:none;opacity:.9}#riftLoader{transition-duration:.25s}}
 </style>
-<link rel="stylesheet" href="css/riftborn.8d16e45920.css">
+<link rel="stylesheet" href="css/riftborn.e6f1761db6.css">
 </head>
 <body class="menu-open">
 <div id="riftLoader" role="dialog" aria-modal="true" aria-label="Loading Riftborn">
@@ -290,11 +299,13 @@ body:has(#devGate) #riftLoader{display:none}
       <button id="tabAudio" type="button" role="tab" aria-selected="false" aria-controls="panelAudio" tabindex="-1">AUDIO</button>
       <button id="tabControls" type="button" role="tab" aria-selected="false" aria-controls="panelControls" tabindex="-1">CONTROLS</button>
       <button id="tabAccess" type="button" role="tab" aria-selected="false" aria-controls="panelAccess" tabindex="-1">ACCESS</button>
+      <button id="tabCursor" type="button" role="tab" aria-selected="false" aria-controls="panelCursor" tabindex="-1">CURSOR</button>
     </div>
     <div id="panelGraphics" role="tabpanel" aria-labelledby="tabGraphics"></div>
     <div id="panelAudio" role="tabpanel" aria-labelledby="tabAudio" hidden></div>
     <div id="panelControls" role="tabpanel" aria-labelledby="tabControls" hidden></div>
     <div id="panelAccess" role="tabpanel" aria-labelledby="tabAccess" hidden></div>
+    <div id="panelCursor" role="tabpanel" aria-labelledby="tabCursor" hidden></div>
   </div>
 </section>
 
@@ -426,7 +437,7 @@ checks this table before every deploy. */
 (function () {
   var HASH = "6057f115a0d917397c72f5ca48b752fd27cf76370e923af446247ab2f525b87c";
   var KEY = "riftborn-dev-gate";
-  var GAME = "js/riftborn.8ec76aac8e.js";
+  var GAME = "js/riftborn.b8de36be30.js";
   var gate = document.getElementById("devGate");
   var form = document.getElementById("devGateForm");
   var input = document.getElementById("devGatePass");
