@@ -1,0 +1,9 @@
+{
+  "name": "riftborn-post-deploy-check",
+  "private": true,
+  "description": "Playwright (core only: no browser download, no dependencies) for scripts/post-deploy-check.mjs, exact-pinned with a lockfile. Installed only by .github/workflows/post-deploy-check.yml (npm ci --prefix tools/post-deploy-check --ignore-scripts), which drives the Google Chrome already on the runner; kept out of the root package.json so the game build and the deploys never pull it.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "playwright-core": "1.63.0"
+  }
+}

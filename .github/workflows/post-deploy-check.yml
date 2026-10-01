@@ -1,0 +1,100 @@
+name: Check riftborn.us after deploy
+
+# After every run of "Build and deploy Riftborn to GitHub Pages and Cloudflare Pages" (pages.yml) on
+# main, opens https://riftborn.us/ in headless Chrome the way a player would and fails if the live
+# game is not healthy (scripts/post-deploy-check.mjs): version.json is the build committed in live/,
+# the page boots with zero console errors, the menu shows the title and START RUN and answers a
+# click, the link-preview tags and key files answer; dev.riftborn.us shows its password gate and
+# serves the build committed in dev/. It asks a build only for what its committed live/index.html
+# carries (a rollback to a build without link-preview tags is not failed for them), and retries every
+# HTTP GET. Results: annotations on the run plus a table in the job summary. A failure also posts one
+# line to the feedback Discord channel (DISCORD_WEBHOOK_URL), unless a newer deploy of main is
+# running or already served (then the run passes as "superseded": that deploy's check covers it).
+# Never a scored run and never a sound: START RUN is only read, audio is muted before the page
+# loads, and every write request from the page is blocked. Reads only; it deploys nothing.
+# Re-run it any time from Actions > Check riftborn.us after deploy > Run workflow.
+
+on:
+  workflow_run:
+    workflows: [Build and deploy Riftborn to GitHub Pages and Cloudflare Pages]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Superseded detection reads the deploy workflow's runs on main (GitHub API, read only).
+  actions: read
+
+concurrency:
+  group: post-deploy-check
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # Only while Cloudflare Pages is on, and only against main (what riftborn.us serves). A cancelled
+    # deploy is not checked; a failed one is (players still get whatever riftborn.us serves, and the
+    # check says which build that is).
+    if: >-
+      vars.CF_PAGES_ENABLED == '1' && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      alert: ${{ steps.check.outputs.alert }}
+    steps:
+      # The commit that was just deployed (the live/ and dev/ version.json to compare with), not
+      # whatever main has moved on to since.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tools/post-deploy-check/package-lock.json
+      # Playwright core only: exact-pinned by its lockfile, no install scripts, no browser download.
+      # It drives the Google Chrome that the GitHub runner image already has.
+      - name: Install the pinned Playwright
+        run: npm ci --prefix tools/post-deploy-check --ignore-scripts --no-audit --no-fund
+      - id: check
+        name: Check riftborn.us and dev.riftborn.us in headless Chrome
+        env:
+          CHECK_BROWSER_CHANNEL: chrome
+          CHECK_OUT_DIR: ${{ runner.temp }}/post-deploy-check
+          # Read only (contents + actions): main's head, its version.json files, running deploys.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/post-deploy-check.mjs
+      - name: Keep the screenshots of a failed check
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-deploy-check-screenshots
+          path: ${{ runner.temp }}/post-deploy-check
+          if-no-files-found: ignore
+          retention-days: 7
+
+  alert:
+    # One line to the feedback channel when the check failed. DISCORD_WEBHOOK_URL is a secret of the
+    # cloudflare-production environment (main only), hence the environment here; nothing deploys.
+    needs: check
+    if: failure() && needs.check.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: cloudflare-production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+          # The script and the root files it imports (site.config.mjs, site.hosts.mjs).
+          sparse-checkout: scripts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Post the alert to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          ALERT_TEXT: ${{ needs.check.outputs.alert || 'Riftborn post-deploy check FAILED (see the run)' }}
+        run: node scripts/post-deploy-check.mjs --alert
