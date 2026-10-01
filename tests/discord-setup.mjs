@@ -16,15 +16,23 @@
 //     replaced only when DISCORD_SETUP_REPLACE_ICON asks (one PATCH with the new image, the revision in
 //     the audit log reason, old and new hash in the annotation), reported when Discord rejects it or
 //     already had the image, and refused in GitHub Actions on any trigger but workflow_dispatch; the
-//     workflow passes the flag from the workflow_dispatch input to the settings step only.
+//     workflow passes the flag from the workflow_dispatch input to the settings step only;
+//   - release posts (scripts/discord-releases.mjs, run from a copy of the script beside test lists):
+//     2.2 already up means nothing is sent; a new version is posted once to #announcements and
+//     #patch-notes, crossposted, with exactly its ping role in allowed_mentions; a second run writes
+//     nothing; a placeholder (and anything after it) is never posted; a failed crosspost is retried
+//     by the next run without a second post, and a long publish rate limit fails fast; a bad list
+//     posts nothing; a version older than one already up is never posted.
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { RELEASES } from '../scripts/discord-releases.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(ROOT, 'scripts', 'discord-setup.mjs');
@@ -75,6 +83,7 @@ function createFakeDiscord() {
     threads: [],
     members: new Map([[OWNER, { user: { id: OWNER }, roles: [] }], [BOT, { user: { id: BOT }, roles: [BOT_ROLE] }]]),
     messages: new Map(),
+    crossposted: new Set(), // message ids Discord has published
     automod: [],
     onboarding: { guild_id: G, prompts: [], default_channel_ids: [], enabled: false, mode: 0 },
   };
@@ -87,6 +96,7 @@ function createFakeDiscord() {
     iconReject: false,
     messagesReadDenied: false,
     membersIntentOff: false,
+    crosspostRateLimit: new Set(), // channel ids whose next crosspost gets an hour-long 429
   };
   const calls = [];
 
@@ -315,6 +325,7 @@ function createFakeDiscord() {
     if ((m = route.match(/^\/channels\/(\d+)(\/.*)?$/))) {
       const id = m[1];
       const sub = m[2] ?? '';
+      let s2;
       if (sub === '' && method === 'PATCH') return patchChannel(id, body);
       if (sub === '/invites' && method === 'POST') {
         state.invites ??= [];
@@ -333,15 +344,37 @@ function createFakeDiscord() {
         if (faults.messagesReadDenied) return err(403, 'Missing Access', 50001);
         const all = state.messages.get(id) ?? []; // oldest first
         const limit = Math.min(100, Number(params.get('limit') ?? 50));
-        const page = params.has('after') ? all.filter((msg) => BigInt(msg.id) > BigInt(params.get('after'))).slice(0, limit) : all.slice(-limit);
+        const page = params.has('after') ? all.filter((msg) => BigInt(msg.id) > BigInt(params.get('after'))).slice(0, limit)
+          : params.has('before') ? all.filter((msg) => BigInt(msg.id) < BigInt(params.get('before'))).slice(-limit)
+            : all.slice(-limit);
         return [200, [...page].reverse()]; // newest first, like Discord
       }
       if (sub === '/messages' && method === 'POST') {
         const target = ch(id) ?? state.threads.find((t) => t.id === id);
         if (!target || ![0, 5, 11].includes(target.type)) return err(400, 'Cannot send messages in this channel', 50008);
         if (!body.content || body.content.length > 2000) return formErr('content', 'Must be 2000 or fewer in length.');
-        const message = { id: sf(), channel_id: id, author: { id: BOT, username: state.me.username, bot: true }, content: body.content, flags: body.flags ?? 0 };
+        // Like Discord: parse "roles" and a roles list are exclusive; with no allowed_mentions every
+        // role mention pings (RiftBot is an admin, so even roles nobody else may mention).
+        const allowed = body.allowed_mentions;
+        if (allowed?.parse?.includes('roles') && allowed?.roles) return formErr('allowed_mentions', 'parse roles and roles are mutually exclusive');
+        const pinged = [...body.content.matchAll(/<@&(\d+)>/g)].map((m) => m[1])
+          .filter((roleId) => role(roleId) && (!allowed || allowed.parse?.includes('roles') || allowed.roles?.includes(roleId)));
+        const message = { id: sf(), channel_id: id, author: { id: BOT, username: state.me.username, bot: true }, content: body.content, flags: body.flags ?? 0,
+          allowed_mentions: allowed ?? null, pinged };
         state.messages.set(id, [...(state.messages.get(id) ?? []), message]);
+        return [200, message];
+      }
+      if ((s2 = sub.match(/^\/messages\/(\d+)\/crosspost$/)) && method === 'POST') {
+        const c = ch(id);
+        const message = (state.messages.get(id) ?? []).find((msg) => msg.id === s2[1]);
+        if (!c || !message) return err(404, 'Unknown Message', 10008);
+        if (c.type !== 5) return err(400, 'Cannot execute action on this channel type', 50024);
+        // Like Discord's hourly publish limit: the bucket headers say it resets in an hour too.
+        if (faults.crosspostRateLimit.delete(id)) return [429, { message: 'You are being rate limited.', retry_after: 3600, global: false }, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset-after': '3600' }];
+        if (faults.echoSecret.has('crosspost')) return err(400, `Invalid token ${TOKEN} for ${WEBHOOK}`, 50001);
+        if (message.flags & 1 || state.crossposted.has(message.id)) return err(400, 'This message has already been crossposted.', 40033);
+        message.flags |= 1;
+        state.crossposted.add(message.id);
         return [200, message];
       }
       if (sub === '/threads' && method === 'POST') {
@@ -395,8 +428,8 @@ function createFakeDiscord() {
       try { body = JSON.parse(raw); } catch { return send(400, { message: 'Invalid JSON', code: 50109 }); }
     }
     try {
-      const [status, data] = handle(req.method, route, body, url.searchParams);
-      send(status, data);
+      const [status, data, headers] = handle(req.method, route, body, url.searchParams);
+      send(status, data, headers);
     } catch (error) {
       send(500, { message: `fake crashed: ${error.message}`, code: 0 });
     }
@@ -418,21 +451,23 @@ function envWith(extra) {
   for (const key of Object.keys(env)) if (/^(CI|GITHUB_ACTIONS|GITHUB_EVENT_NAME|DISCORD_SETUP_.*)$/i.test(key)) delete env[key];
   return { ...env, ...extra };
 }
-function run(args, env) {
+// A run that hangs (a rate limit gate pushed far ahead, say) is killed and fails instead.
+function run(args, env, script = SCRIPT, timeout = 120_000) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [SCRIPT, ...args], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [script, ...args], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], timeout, killSignal: 'SIGKILL' });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       output.push(stdout, stderr);
+      assert.ok(!signal, `${args.join(' ')} hung and was killed after ${timeout / 1000} s`);
       const count = (kind) => stdout.split('\n').filter((line) => line.startsWith(`::${kind} `)).length;
-      // GitHub keeps 50 annotations per job and the job has 11 steps: each step writes exactly one
-      // summary notice and at most 4 errors ("all" runs every phase in one process).
-      const steps = args[0] === 'all' ? 11 : 1;
+      // GitHub keeps 50 annotations per job and the job has 12 steps: each step writes exactly one
+      // summary notice and at most 3 errors, 48 in all ("all" runs every phase in one process).
+      const steps = args[0] === 'all' ? 12 : 1;
       if (args[0] !== 'nonsense') assert.equal(count('notice'), steps, `one summary notice per step for ${args.join(' ')}`);
-      assert.ok(count('error') <= 4 * steps, `too many error annotations for ${args.join(' ')}`);
+      assert.ok(count('error') <= 3 * steps, `too many error annotations for ${args.join(' ')}`);
       resolve({ code, stdout, stderr, text: `${stdout}${stderr}` });
     });
   });
@@ -585,7 +620,18 @@ function assertDesiredState(fake, label) {
   for (const name of ['welcome', 'rules', 'faq']) {
     assert.deepEqual(botMessages(named[name]).map((msg) => msg.content), [mention(APPROVED[name])], at(`#${name} has the approved post, once`));
   }
-  for (const name of ['announcements', 'patch-notes', 'secret-hunt', 'dev-builds']) assert.equal(botMessages(named[name]).length, 1, at(`#${name} posted once`));
+  for (const name of ['secret-hunt', 'dev-builds']) assert.equal(botMessages(named[name]).length, 1, at(`#${name} posted once`));
+  // The News channels hold the release posts a fresh server gets from scripts/discord-releases.mjs:
+  // each live version not marked posted, up to the first placeholder, once, crossposted.
+  const link = (text) => text.replace(/\{#([a-z0-9-]+)\}/g, (_, name) => `<#${named[name].id}>`);
+  const live = releasesDue(RELEASES).filter((rel) => !rel.posted);
+  for (const [name, key, pingRole, flags] of [['announcements', 'announcement', newsPing, 0], ['patch-notes', 'patchNotes', patchPing, 4]]) {
+    assert.deepEqual(botMessages(named[name]).map((msg) => [msg.content, msg.flags, msg.pinged]),
+      live.map((rel) => [`${rel.ping?.[key] ? `<@&${pingRole.id}>\n` : ''}${link(rel[key])}`, flags | 1, rel.ping?.[key] ? [pingRole.id] : []]),
+      at(`#${name} holds the live release posts, once each, crossposted`));
+  }
+  // A release post may ping its channel's one role, on its own first line; nothing else pings.
+  const pingOf = { [named.announcements.id]: newsPing.id, [named['patch-notes'].id]: patchPing.id };
   for (const name of ['sneak-peeks', 'general', 'introductions', 'leaderboard-brags', 'builds-and-strategy', 'tester-chat', 'mod-chat', 'mod-log', 'game-feedback']) {
     assert.equal(botMessages(named[name]).length, 0, at(`#${name} has no bot post`));
   }
@@ -596,13 +642,21 @@ function assertDesiredState(fake, label) {
   const allMessages = [...s.messages.values()].flat();
   for (const msg of allMessages) {
     assert.ok(msg.content.length <= 2000, at('message within 2000 characters'));
-    assert.ok(!/@everyone|@here|<@&?\d+>/.test(msg.content), at('no pings in posts'));
+    const ownPing = `<@&${pingOf[msg.channel_id]}>\n`;
+    const rest = pingOf[msg.channel_id] && msg.content.startsWith(ownPing) ? msg.content.slice(ownPing.length) : msg.content;
+    assert.ok(!/@everyone|@here|<@&?\d+>/.test(rest), at('no pings in posts, but a release post\'s own role'));
     if (msg.author.id === BOT) assert.ok(!/password\s*[:=]/i.test(msg.content), at('no password in posts'));
   }
   assert.ok(allMessages.find((msg) => msg.content.includes('https://dev.riftborn.us')), at('dev build post'));
 }
 
 function role(s, id) { return s.roles.find((r) => r.id === id); }
+
+// The release entries the script may post: everything before the first placeholder.
+function releasesDue(list) {
+  const block = list.findIndex((rel) => rel.announcement == null && rel.patchNotes == null);
+  return block < 0 ? list : list.slice(0, block);
+}
 
 // Discord's role ranking: higher position first, and on a tie the older role (lower id).
 function ranksAbove(a, b) { return a.position > b.position || (a.position === b.position && BigInt(a.id) < BigInt(b.id)); }
@@ -629,7 +683,8 @@ function canView(s, channel, roleIds) {
 // The test
 
 const phases = [...WORKFLOW.matchAll(/run: node scripts\/discord-setup\.mjs ([a-z-]+)/g)].map((m) => m[1]);
-assert.deepEqual(phases, ['discover', 'roles', 'channels', 'community', 'news-forums', 'onboarding', 'automod', 'settings', 'posts', 'profile', 'invite'], 'workflow phases and order');
+assert.deepEqual(phases, ['discover', 'roles', 'channels', 'community', 'news-forums', 'onboarding', 'automod', 'settings', 'posts', 'releases', 'profile', 'invite'], 'workflow phases and order');
+assert.match(WORKFLOW, /\n {6}- name: Release posts\n {8}if: .+\n {8}run: node scripts\/discord-setup\.mjs releases\n {8}env:\n {10}DISCORD_SETUP_BOT_TOKEN: \$\{\{ secrets\.DISCORD_SETUP_BOT_TOKEN \}\}\n {6}- name: Bot profile\n/, 'the Release posts step runs after Posts with the step-level token');
 assert.match(WORKFLOW, /permissions:\n {2}contents: read\n/, 'workflow permissions');
 assert.doesNotMatch(WORKFLOW, /environment:/, 'workflow uses no environment');
 const tokenLines = WORKFLOW.split('\n').filter((line) => line.includes('secrets.DISCORD_SETUP_BOT_TOKEN'));
@@ -638,7 +693,31 @@ assert.ok(tokenLines.every((line) => line === '          DISCORD_SETUP_BOT_TOKEN
 assert.equal((WORKFLOW.match(/run: node scripts\/discord-setup\.mjs [a-z-]+\n {8}env:\n {10}DISCORD_SETUP_BOT_TOKEN:/g) ?? []).length, phases.length, 'each setup step gets the token');
 assert.doesNotMatch(WORKFLOW, /\n {4}env:/, 'no job-level env: checkout and setup-node never see the token');
 assert.match(WORKFLOW, /workflow_dispatch:/, 'workflow can be run by hand');
-for (const p of ['.github/workflows/discord-setup.yml', 'scripts/discord-setup.mjs']) assert.ok(WORKFLOW.includes(`- '${p}'`), `workflow runs on changes to ${p}`);
+for (const p of ['.github/workflows/discord-setup.yml', 'scripts/discord-setup.mjs', 'scripts/discord-releases.mjs']) assert.ok(WORKFLOW.includes(`- '${p}'`), `workflow runs on changes to ${p}`);
+
+// The release list. 2.2.0 went out with the setup posts on 30 Sep 2026: it is marked posted, and its
+// texts are byte for byte the ones posted (that is how it is recognised). Every filled-in entry
+// starts with the bold first lines RiftBot finds it by and fits in a Discord message.
+const shortV = (version) => version.replace(/\.0$/, '');
+const RELEASE_MARK = { announcement: (v) => `**Riftborn ${shortV(v)} · `, patchNotes: (v) => `**v${shortV(v)} · ` };
+assert.equal(RELEASES[0].version, '2.2.0', 'the release list starts at 2.2.0');
+assert.equal(RELEASES[0].posted, true, '2.2.0 is marked posted, never sent again');
+assert.equal(createHash('sha256').update(`${RELEASES[0].announcement}\n\n${RELEASES[0].patchNotes}`).digest('hex'),
+  '6eb89b450b261913bcc1b018e9fa4ba310ccaa04ce9a7ae47c0c076874647224', 'the 2.2.0 texts are exactly the ones posted');
+assert.ok(RELEASES.some((rel) => rel.version === '2.3.0'), '2.3.0 is listed');
+for (const [i, rel] of RELEASES.entries()) {
+  assert.match(rel.version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, `${rel.version}: MAJOR.MINOR.PATCH`);
+  if (i) {
+    const [a, b] = [RELEASES[i - 1].version, rel.version].map((v) => v.split('.').map(Number));
+    assert.ok(b[0] > a[0] || (b[0] === a[0] && (b[1] > a[1] || (b[1] === a[1] && b[2] > a[2]))), `${rel.version} is newer than the entry above it`);
+  }
+  assert.equal(rel.announcement == null, rel.patchNotes == null, `${rel.version}: both texts or neither (a placeholder)`);
+  for (const key of ['announcement', 'patchNotes']) {
+    if (rel[key] == null) continue;
+    assert.ok(rel[key].startsWith(RELEASE_MARK[key](rel.version)), `${rel.version}: ${key} starts with "${RELEASE_MARK[key](rel.version)}"`);
+    assert.ok(rel[key].length + 60 <= 2000, `${rel.version}: ${key} fits in a Discord message`);
+  }
+}
 assert.equal((WORKFLOW.match(/if: \$\{\{ !cancelled\(\) && steps\.discover\.outcome == 'success' \}\}/g) ?? []).length, phases.length - 1, 'later steps run even when an earlier one fails');
 
 // The icon the workflow replaces on request: a one-shot workflow_dispatch input, handed to the settings
@@ -671,6 +750,7 @@ const base = await fake.start();
 const env = envWith({ DISCORD_SETUP_BOT_TOKEN: TOKEN, DISCORD_SETUP_API_BASE: base });
 const G = fake.state.ids.G;
 const writes = () => fake.calls.filter((c) => c.method !== 'GET' && c.status < 400);
+let releaseDir = null; // the script copy the release posts run from (7b)
 
 try {
   // 1. A fresh server.
@@ -688,7 +768,9 @@ try {
   for (const c of fake.calls.filter((x) => x.method !== 'GET')) assert.equal(c.reason, 'Riftborn setup', `audit log reason on ${c.method} ${c.route}`);
   for (const c of fake.calls.filter((x) => x.method === 'POST' && /\/(messages|threads)$/.test(x.route))) {
     const body = JSON.parse(c.body);
-    assert.deepEqual((body.message ?? body).allowed_mentions, { parse: [] }, 'posts never ping');
+    const msg = body.message ?? body;
+    const roles = [...msg.content.matchAll(/<@&(\d+)>/g)].map((m) => m[1]);
+    assert.deepEqual(msg.allowed_mentions, roles.length ? { parse: [], roles } : { parse: [] }, 'posts ping nobody, or exactly the release ping role');
   }
   assert.match(output.join('\n'), /::notice title=Roles::.*@everyone lost MENTION_EVERYONE, CREATE_GUILD_EXPRESSIONS, CREATE_EVENTS \(was \d+, now \d+\)/, 'roles notice names what @everyone lost');
   const run1Writes = writes().length;
@@ -871,14 +953,14 @@ try {
   assert.deepEqual(writes().map((c) => `${c.method} ${c.route}`), [], 'busy channels: no second post');
   assert.ok(fake.calls.filter((c) => c.route === `/channels/${bugForum}/threads/archived/public`).length >= 2, 'archived posts paged');
 
-  // 4e. Many errors in one step: 3 shown, then one "N more" line.
+  // 4e. Many errors in one step: 2 shown, then one "N more" line.
   fake.faults.messagesReadDenied = true;
   const noRead = await run(['posts'], env);
   fake.faults.messagesReadDenied = false;
   assert.equal(noRead.code, 1);
   const errorLines = noRead.stdout.split('\n').filter((line) => line.startsWith('::error '));
-  assert.equal(errorLines.length, 4, 'three errors and a "more" line');
-  assert.match(errorLines[3], /::error title=Posts::4 more errors in the step log/, 'the rest are counted');
+  assert.equal(errorLines.length, 3, 'two errors and a "more" line');
+  assert.match(errorLines[2], /::error title=Posts::3 more errors in the step log/, 'the rest are counted');
   assert.match(noRead.stdout, /::notice title=Posts::posts: 0 posted, 2 already there/, 'summary still written on failure');
 
   // 5. "all" on a finished server: no writes.
@@ -956,6 +1038,182 @@ try {
   s.guild.name = 'Riftborn';
   assert.equal((await run(['nonsense'], env)).code, 2, 'unknown phase');
 
+  // 7b. Release posts, run from a copy of the script beside a test list of releases. The News
+  // channels start as on the live server: RiftBot's 2.2 posts (made by the posts phase, never
+  // crossposted), the announcement behind 150 newer Rift Keeper messages.
+  releaseDir = mkdtempSync(path.join(os.tmpdir(), 'riftborn-releases-'));
+  const COPY = path.join(releaseDir, 'discord-setup.mjs');
+  cpSync(SCRIPT, COPY);
+  const releases = (list) => {
+    writeFileSync(path.join(releaseDir, 'discord-releases.mjs'), typeof list === 'string' ? list : `export const RELEASES = ${JSON.stringify(list, null, 2)};\n`);
+    fake.calls.length = 0;
+    return run(['releases'], env, COPY, 30_000);
+  };
+  const ann = byName('announcements');
+  const pn = byName('patch-notes');
+  const linkNews = (text) => text.replace(/\{#([a-z0-9-]+)\}/g, (_, name) => `<#${byName(name).id}>`);
+  const botPost = (c, content, flags) => ({ id: fake.sf(), channel_id: c.id, author: { id: s.ids.BOT, bot: true }, content, flags, pinged: [] });
+  const keeperPost = (c, i) => ({ id: fake.sf(), channel_id: c.id, author: { id: s.ids.OWNER }, content: `Keeper note ${i}`, flags: 0, pinged: [] });
+  const [r22] = RELEASES;
+  const seedNews = () => {
+    s.messages.set(ann.id, [botPost(ann, linkNews(r22.announcement), 0), ...Array.from({ length: 150 }, (_, i) => keeperPost(ann, i))]);
+    s.messages.set(pn.id, [botPost(pn, linkNews(r22.patchNotes), 4)]);
+  };
+  const PATCH = s.roles.find((r) => r.name === 'Patch pings').id;
+  const NEWS = s.roles.find((r) => r.name === 'News pings').id;
+  const entry = (version, title, ping = { announcement: false, patchNotes: true }) => ({
+    version, ping,
+    announcement: `**Riftborn ${shortV(version)} · ${title}** 🌋\nBigger worlds to get lost in. Highlights in {#patch-notes}, full notes in-game. ▶️ https://riftborn.us`,
+    patchNotes: `**v${shortV(version)} · ${title}** (1 Oct 2026)\n- **Bigger worlds:** every world is larger.\n\nFull notes in-game: **PATCH NOTES** on the main menu.`,
+  });
+  const placeholder = (version) => ({ version, ping: { announcement: false, patchNotes: true }, announcement: null, patchNotes: null });
+  const notice = (result) => result.stdout.split('\n').find((line) => line.startsWith('::notice title=Release posts::'))?.slice('::notice title=Release posts::'.length);
+  const newsWrites = () => writes().map((c) => `${c.method} ${c.route}`);
+  const botNews = (c) => s.messages.get(c.id).filter((msg) => msg.author.id === s.ids.BOT);
+  const PLACEHOLDER_NOTE = 'a placeholder in scripts/discord-releases.mjs';
+
+  // 2.2 up and 2.3 a placeholder: nothing is sent, and the history is paged to find 2.2.
+  seedNews();
+  const waiting = await releases([r22, placeholder('2.3.0')]);
+  assert.equal(waiting.code, 0, `2.2 up, 2.3 a placeholder\n${waiting.text}`);
+  assert.equal(notice(waiting), `releases: 2.2.0 already posted; 2.3.0 waits for its texts (${PLACEHOLDER_NOTE})`, 'placeholder notice');
+  assert.deepEqual(newsWrites(), [], 'placeholder: nothing written');
+  assert.ok(fake.calls.filter((c) => c.route === `/channels/${ann.id}/messages`).length >= 2, 'the announcement history is paged');
+  // The real list never sends 2.2 again (whatever state its 2.3.0 entry is in).
+  fake.calls.length = 0;
+  const realList = await run(['releases'], env);
+  assert.equal(realList.code, 0, `the real release list\n${realList.text}`);
+  assert.match(notice(realList), /^releases: 2\.2\.0 already posted/, 'the real list recognises 2.2');
+  assert.ok(writes().every((c) => !/\*\*(Riftborn 2\.2|v2\.2) ·/.test(c.body)), 'the real list never sends 2.2 again');
+
+  // A new 2.3: posted once to each channel, crossposted, Patch pings pinged and nothing else.
+  seedNews();
+  const list23 = [r22, entry('2.3.0', 'Bigger Worlds')];
+  const posted = await releases(list23);
+  assert.equal(posted.code, 0, `2.3 posted\n${posted.text}`);
+  assert.equal(notice(posted), 'releases: 2.2.0 already posted; 2.3.0 posted to #announcements and #patch-notes (crossposted, pinged Patch pings)', '2.3 notice');
+  const [a23, p23] = [botNews(ann).at(-1), botNews(pn).at(-1)];
+  assert.deepEqual(newsWrites(), [`POST /channels/${ann.id}/messages`, `POST /channels/${ann.id}/messages/${a23.id}/crosspost`,
+    `POST /channels/${pn.id}/messages`, `POST /channels/${pn.id}/messages/${p23.id}/crosspost`], '2.3: one post and one crosspost per channel');
+  const bodies = writes().filter((c) => c.route.endsWith('/messages')).map((c) => JSON.parse(c.body));
+  assert.deepEqual(bodies[0], { content: linkNews(list23[1].announcement), allowed_mentions: { parse: [] } }, 'announcement: no ping, link previews kept');
+  assert.deepEqual(bodies[1], { content: `<@&${PATCH}>\n${linkNews(list23[1].patchNotes)}`, allowed_mentions: { parse: [], roles: [PATCH] }, flags: 4 }, 'patch notes: Patch pings only, previews off');
+  assert.deepEqual([a23.pinged, a23.flags, p23.pinged, p23.flags], [[], 1, [PATCH], 5], 'as Discord sees them: pings and crossposts');
+  assert.deepEqual([botNews(ann).length, botNews(pn).length], [2, 2], 'one new post per channel');
+  assert.deepEqual([botNews(ann)[0].flags, botNews(pn)[0].flags], [0, 4], '2.2 is not crossposted after the fact');
+
+  // A second run writes nothing.
+  const again = await releases(list23);
+  assert.equal(again.code, 0, `second run\n${again.text}`);
+  assert.equal(notice(again), 'releases: 2.2.0 and 2.3.0 already posted', 'second run notice');
+  assert.deepEqual(newsWrites(), [], 'second run: no writes');
+
+  // 2.3.1 pings both roles (and its marker never matches 2.3's post); a placeholder 2.4.0 holds back
+  // itself and the 2.4.1 after it.
+  const list231 = [...list23, entry('2.3.1', 'Hotfix', { announcement: true, patchNotes: true }), placeholder('2.4.0'), entry('2.4.1', 'Later')];
+  const both = await releases(list231);
+  assert.equal(both.code, 0, `2.3.1\n${both.text}`);
+  assert.equal(notice(both), `releases: 2.2.0 and 2.3.0 already posted; 2.3.1 posted to #announcements and #patch-notes (crossposted, pinged News pings and Patch pings); 2.4.0 waits for its texts (${PLACEHOLDER_NOTE}); 2.4.1 waits for 2.4.0`, '2.3.1 notice');
+  assert.equal(writes().length, 4, '2.3.1: two posts, two crossposts');
+  assert.deepEqual(writes().filter((c) => c.route.endsWith('/messages')).map((c) => JSON.parse(c.body).allowed_mentions),
+    [{ parse: [], roles: [NEWS] }, { parse: [], roles: [PATCH] }], 'each ping can reach its one role only');
+  assert.deepEqual([botNews(ann).at(-1).pinged, botNews(pn).at(-1).pinged], [[NEWS], [PATCH]], 'News pings in #announcements, Patch pings in #patch-notes');
+  assert.ok(![...s.messages.values()].flat().some((msg) => /\*\*(Riftborn |v)2\.4/.test(msg.content)), 'a placeholder and what follows it are never posted');
+
+  // Crossposts that fail (an hour-long rate limit, not waited out; an error that echoes secrets) fail
+  // the step after posting; the next run crossposts them without posting again.
+  const list232 = [...list231.slice(0, 3), entry('2.3.2', 'Fixes', { announcement: false, patchNotes: false })];
+  fake.faults.crosspostRateLimit.add(ann.id);
+  fake.faults.echoSecret.add('crosspost');
+  const started = Date.now();
+  const flaky = await releases(list232);
+  fake.faults.echoSecret.clear();
+  assert.equal(flaky.code, 1, 'failed crossposts fail the step');
+  assert.ok(Date.now() - started < 30_000, 'an hour-long publish rate limit is not waited out');
+  assert.match(flaky.stdout, /::error title=Release posts::crosspost 2\.3\.2 in #announcements: HTTP 429: You are being rate limited\. \(retry after 3600 s\) \(the next run crossposts it\)/, 'rate limit reported');
+  assert.match(flaky.stdout, /::error title=Release posts::crosspost 2\.3\.2 in #patch-notes: HTTP 400, code 50001: Invalid token \*\*\* for \[webhook url\]/, 'secret scrubbed from the crosspost error');
+  assert.equal(notice(flaky), 'releases: 2.2.0, 2.3.0 and 2.3.1 already posted; 2.3.2 posted to #announcements and #patch-notes (not crossposted, no pings)', 'not crossposted notice');
+  const retried = await releases(list232);
+  assert.equal(retried.code, 0, `crosspost retry\n${retried.text}`);
+  assert.deepEqual(newsWrites(), [`POST /channels/${ann.id}/messages/${botNews(ann).at(-1).id}/crosspost`, `POST /channels/${pn.id}/messages/${botNews(pn).at(-1).id}/crosspost`], 'the next run crossposts, without a second post');
+  assert.equal(notice(retried), 'releases: 2.2.0, 2.3.0 and 2.3.1 already posted; 2.3.2 already in #announcements and #patch-notes, crossposted now in #announcements and #patch-notes', 'retry notice');
+  // Discord says it is already crossposted (40033): not an error.
+  botNews(ann).at(-1).flags &= ~1;
+  const twice = await releases(list232);
+  botNews(ann).at(-1).flags |= 1;
+  assert.equal(twice.code, 0, `already crossposted\n${twice.text}`);
+  assert.ok(fake.calls.some((c) => c.route.endsWith('/crosspost') && c.status === 400), 'Discord answered 40033');
+  assert.deepEqual(newsWrites(), [], 'already crossposted: nothing written');
+
+  // A version older than one already up is never posted (the channels read in order).
+  const late = await releases([r22, entry('2.2.5', 'Between'), ...list232.slice(1)]);
+  assert.equal(late.code, 0, `older version\n${late.text}`);
+  assert.deepEqual(newsWrites(), [], 'older version: nothing written');
+  assert.equal(notice(late), 'releases: 2.2.0 already posted; 2.2.5 not posted to #announcements and #patch-notes, where the newer 2.3.2 is already up (versions go out in order); 2.3.0, 2.3.1 and 2.3.2 already posted', 'older version notice');
+
+  // A broken list posts nothing and reads nothing.
+  for (const [bad, why] of [
+    ['export const RELEASES = [', /scripts\/discord-releases\.mjs could not be loaded: SyntaxError/],
+    [[r22, { ...entry('2.3.3', 'Half'), patchNotes: null }], /2\.3\.3: fill in both announcement and patchNotes/],
+    [[r22, { ...entry('2.3.3', 'Wrong'), announcement: '**Riftborn 2.3.3: Wrong** oops' }], /2\.3\.3: announcement must start with "\*\*Riftborn 2\.3\.3 · "/],
+    [[r22, entry('2.3.0', 'A'), entry('2.2.9', 'B')], /2\.2\.9 must be newer than 2\.3\.0 above it/],
+    [[r22, { ...entry('2.3.3', 'Typo'), patchnotes: 'x' }], /2\.3\.3: unknown field patchnotes/],
+    [[r22, { ...entry('2.3.3', 'Pings'), ping: { patchnotes: true } }], /2\.3\.3: unknown ping patchnotes/],
+    [[r22, entry('2.3.3', 'x'.repeat(1990))], /2\.3\.3: announcement is about \d+ characters once posted \(Discord allows 2000\)/],
+    [[{ ...placeholder('2.3.0'), posted: true }], /2\.3\.0: an entry marked posted needs both texts/],
+    [[r22, { ...entry('2.3.3', 'Link'), patchNotes: '**v2.3.3 · Link** (1 Oct 2026)\nSee {#patchnotes} and {#mod-chat}.' }], /2\.3\.3: patchNotes links \{#patchnotes\}, \{#mod-chat\}, which is not a public channel/],
+    [[r22, { ...entry('2.3.3', 'Loud'), announcement: '**Riftborn 2.3.3 · Loud** @everyone it is out' }], /2\.3\.3: announcement must not mention anyone/],
+    [[r22, entry('2.03.0', 'Zero')], /2\.03\.0: version must be MAJOR\.MINOR\.PATCH/],
+  ]) {
+    const result = await releases(bad);
+    assert.equal(result.code, 1, `a broken list fails: ${why}\n${result.text}`);
+    assert.match(result.stdout, new RegExp(`::error title=Release posts::(?:scripts/discord-releases\\.mjs: )?${why.source}`), `reported: ${why}`);
+    assert.ok(!fake.calls.some((c) => c.route.startsWith('/channels/')), `a broken list reads and posts nothing: ${why}`);
+  }
+
+  // A busy channel with no release post among its newest 500 messages: nothing is guessed.
+  const annSaved = s.messages.get(ann.id);
+  s.messages.set(ann.id, Array.from({ length: 510 }, (_, i) => keeperPost(ann, i)));
+  const lost = await releases(list232);
+  s.messages.set(ann.id, annSaved);
+  assert.equal(lost.code, 1, 'no release post in sight fails');
+  assert.match(lost.stdout, /::error title=Release posts::2\.3\.0 not posted to #announcements: none of its last 500 messages is a release post/, 'says why');
+  assert.deepEqual(newsWrites(), [], 'nothing posted on a guess');
+
+  // A version whose ping role is missing goes out in neither channel: both messages are built first.
+  const savedRoles = s.roles;
+  s.roles = s.roles.filter((r) => r.id !== PATCH);
+  const list233 = [...list232, entry('2.3.3', 'Roles', { announcement: false, patchNotes: true })];
+  const noRole = await releases(list233);
+  s.roles = savedRoles;
+  assert.equal(noRole.code, 1, `a missing ping role fails the step\n${noRole.text}`);
+  assert.match(noRole.stdout, /::error title=Release posts::2\.3\.3 not posted: its #patch-notes post pings Patch pings, and that role is missing/, 'says why');
+  assert.deepEqual(newsWrites(), [], 'a missing ping role: nothing posted in either channel');
+  assert.equal(notice(noRole), 'releases: 2.2.0, 2.3.0, 2.3.1 and 2.3.2 already posted; 2.3.3 not posted to #announcements and #patch-notes (see the errors)', 'missing role notice');
+
+  // A post that fails in one channel (a 502, never replayed): the version after it waits there only,
+  // and the next run posts both in that channel and nothing in the other.
+  const list234 = [...list233, entry('2.3.4', 'More', { announcement: false, patchNotes: false })];
+  fake.faults.serverError.add(`POST /channels/${pn.id}/messages`);
+  const half = await releases(list234);
+  assert.equal(half.code, 1, `a failed post fails the step\n${half.text}`);
+  assert.equal(fake.faults.serverError.size, 0, 'the patch notes post hit the 502');
+  assert.equal(fake.calls.filter((c) => c.method === 'POST' && c.route === `/channels/${pn.id}/messages`).length, 1, 'a failed post is never replayed');
+  assert.equal(notice(half), 'releases: 2.2.0, 2.3.0, 2.3.1 and 2.3.2 already posted; 2.3.3 posted to #announcements (crossposted, no pings), not posted to #patch-notes (see the errors); '
+    + '2.3.4 posted to #announcements (crossposted, no pings), held back in #patch-notes until the version before it is posted', 'one channel failed notice');
+  const rest = await releases(list234);
+  assert.equal(rest.code, 0, `the failed channel catches up\n${rest.text}`);
+  const [p233, p234] = botNews(pn).slice(-2);
+  assert.deepEqual(newsWrites(), [`POST /channels/${pn.id}/messages`, `POST /channels/${pn.id}/messages/${p233.id}/crosspost`,
+    `POST /channels/${pn.id}/messages`, `POST /channels/${pn.id}/messages/${p234.id}/crosspost`], 'the next run posts 2.3.3 and 2.3.4 in #patch-notes only, in order');
+  assert.deepEqual([p233.content.startsWith(`<@&${PATCH}>\n**v2.3.3 · `), p234.content.startsWith('**v2.3.4 · ')], [true, true], 'the right texts, in order');
+  // An older version left uncrossposted is never crossposted later, behind the newer one.
+  p233.flags &= ~1;
+  const stale = await releases(list234);
+  p233.flags |= 1;
+  assert.equal(stale.code, 0, `older uncrossposted version\n${stale.text}`);
+  assert.ok(!fake.calls.some((c) => c.route.endsWith('/crosspost')), 'an older uncrossposted version is left alone');
+
   // 8. No secret anywhere: output, URLs, request bodies.
   const haystack = [...output, ...fake.calls.flatMap((c) => [c.route, c.query, c.body])].join('\n');
   assert.ok(!haystack.includes(TOKEN), 'the token never appears in output or request bodies');
@@ -965,4 +1223,5 @@ try {
     + `${fake.state.channels.length} channels, ${fake.state.roles.length} roles, ${[...fake.state.messages.values()].flat().filter((msg) => msg.author.id === fake.state.ids.BOT).length} bot posts)`);
 } finally {
   await fake.stop();
+  if (releaseDir) rmSync(releaseDir, { recursive: true, force: true });
 }

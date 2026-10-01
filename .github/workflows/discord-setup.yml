@@ -12,6 +12,10 @@ name: Discord server setup
 # scripts/discord-setup.mjs (file in scripts/discord-assets) over the current one, and says in its
 # annotation what it replaced. The input is passed through an env var, never into a shell command, and
 # the script itself refuses to replace the icon on any trigger but workflow_dispatch.
+#
+# New versions: the Release posts step posts each version in scripts/discord-releases.mjs once, the
+# announcement in #announcements and the patch notes in #patch-notes, and crossposts them to following
+# servers. Pushing a filled-in entry to main is what announces it (that file's header has the steps).
 
 on:
   push:
@@ -19,6 +23,7 @@ on:
     paths:
       - '.github/workflows/discord-setup.yml'
       - 'scripts/discord-setup.mjs'
+      - 'scripts/discord-releases.mjs'
   workflow_dispatch:
     inputs:
       replace_icon:
@@ -93,6 +98,11 @@ jobs:
       - name: Posts
         if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
         run: node scripts/discord-setup.mjs posts
+        env:
+          DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
+      - name: Release posts
+        if: ${{ !cancelled() && steps.discover.outcome == 'success' }}
+        run: node scripts/discord-setup.mjs releases
         env:
           DISCORD_SETUP_BOT_TOKEN: ${{ secrets.DISCORD_SETUP_BOT_TOKEN }}
       - name: Bot profile

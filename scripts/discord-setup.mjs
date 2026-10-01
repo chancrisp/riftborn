@@ -17,15 +17,19 @@
 //                set when the server has none, and left alone when it has one, unless the run was
 //                asked to replace it (DISCORD_SETUP_REPLACE_ICON, below)
 //   posts        the welcome, rules and FAQ posts and the other bot posts (each posted once)
+//   releases     each version in scripts/discord-releases.mjs, once: the announcement in
+//                #announcements and the patch notes in #patch-notes, published to following servers
 //   profile      the bot's username
+//   invite       the permanent invite to #welcome
 //   all          every phase in order (handy locally)
 //
 // Idempotent: everything is looked up by name, only what is missing is created, settings and
-// overwrites are patched only when they differ from the desired state, and a post is skipped
-// when the bot already posted in that channel. A second run makes no changes.
+// overwrites are patched only when they differ from the desired state, a post is skipped when the
+// bot already posted in that channel, and a release post when the bot's post of that version is
+// already there. A second run makes no changes.
 //
 // Every outcome is reported as a GitHub annotation so the result is readable without the logs:
-// one ::notice per phase summing it up, and each ::error (3 per phase, then an "N more" line).
+// one ::notice per phase summing it up, and each ::error (2 per phase, then an "N more" line).
 // Nothing secret is ever printed: the token and anything that looks like a token or a webhook
 // URL is scrubbed from every line.
 //
@@ -117,7 +121,8 @@ const T = { TEXT: 0, VOICE: 2, CATEGORY: 4, NEWS: 5, STAGE: 13, FORUM: 15 };
 const TYPE_GROUP = { [T.TEXT]: [T.TEXT, T.NEWS], [T.NEWS]: [T.TEXT, T.NEWS], [T.VOICE]: [T.VOICE, T.STAGE], [T.CATEGORY]: [T.CATEGORY], [T.FORUM]: [T.FORUM] };
 const OW_ROLE = 0, OW_MEMBER = 1;
 const THREAD_PINNED = 2;
-const SUPPRESS_EMBEDS = 4;
+const CROSSPOSTED = 1, SUPPRESS_EMBEDS = 4; // message flags
+const ALREADY_CROSSPOSTED = 40033; // Discord's error code for publishing a message twice
 const SYS_SUPPRESS_JOIN = 1, SYS_SUPPRESS_BOOSTS = 2, SYS_SUPPRESS_SETUP_TIPS = 4;
 const VERIFICATION_MEDIUM = 2, FILTER_ALL_MEMBERS = 2, NOTIFY_ONLY_MENTIONS = 1;
 
@@ -234,34 +239,8 @@ const FAQ = `**Is it free?** Yes. Play at https://riftborn.us on desktop or phon
 **Secret characters?** There are a few… clues go in {#secret-hunt}. No spoilers elsewhere!
 **Privacy:** https://riftborn.us/privacy/`;
 
-const ANNOUNCEMENT = `**Riftborn 2.2 · Riftborn Accounts is live at riftborn.us** 🌋
-Riftborn has a new home, and your progress can now follow you everywhere.
-
-🔑 **Riftborn Accounts:** sign in with Google, Discord or GitHub and pick your own username. Your progress, characters, cosmetics and settings follow you to every device. Signing in is optional: you can always play as a guest.
-🏠 **New home:** Riftborn now lives at https://riftborn.us. Open your old chancrisp.github.io link once and your progress moves over automatically. Nothing is deleted.
-🔥 **New loading screen:** a molten wordmark, a turning rift ring and drifting embers, with real loading stages.
-🔍 **UI scale slider:** anywhere from 50% to 150%, held to what fits your screen.
-🎨 **Colour-coded patch notes:** names, buttons and numbers picked out so every update is easy to skim.
-
-🛡️ Only your username, a scrambled platform ID, your progress and your settings are stored. No emails, real names or pictures, and no ads or trackers: https://riftborn.us/privacy/
-
-Highlights in {#patch-notes}, full notes in-game. See you in the rift. ▶️ https://riftborn.us`;
-
-const PATCH_NOTES = `**v2.2 · Riftborn Accounts** (30 Sep 2026)
-- **Riftborn accounts:** sign in with Google, Discord or GitHub and your progress, cosmetics and settings follow you to every device. You can always play as a guest.
-- **Your own username:** 3 to 16 characters and unique. Nothing is taken from your platform: no email, no real name, no picture. Rename once every 30 days in Settings.
-- **Link platforms:** put Google, Discord and GitHub on one account and sign in with any of them.
-- **Guest progress merges in** the first time you sign in. Nothing is lowered or replaced.
-- **Verified mark:** leaderboard scores from an account show a check mark, and guests can't post under an account's name.
-- **New ACCOUNT tab** in Settings: your username, linked platforms, sync status and sign-out options, including SIGN OUT OTHER DEVICES.
-- **New home at https://riftborn.us:** your old chancrisp.github.io link hands your progress over automatically. The classic edition is at https://riftborn.us/classic/.
-- **Loading screen:** molten wordmark, rift ring, embers and real loading stages. It holds still with reduced motion on.
-- **UI scale slider:** 50% to 150% in 5% steps. Touch screens stay at 100% or more, and small screens are held to what fits.
-- **Colour-coded patch notes:** each kind of note has its own colour, so long lists are easy to skim.
-- **Fixes:** phone HUD buttons no longer slip under the portal compass, and panels and the title fit at every UI scale.
-- **Balance:** no gameplay changes.
-
-Full notes in-game: **PATCH NOTES** on the main menu.`;
+// The 2.2 announcement and patch notes, and every version since, are in scripts/discord-releases.mjs
+// (the releases phase).
 
 const SECRET_HUNT = `**Welcome to the secret hunt** 🔍
 Riftborn hides a few secrets. Share theories, clues and finds here.
@@ -297,13 +276,12 @@ const IDEA_GUIDE = `**How to suggest an idea** 💡
 Search first, and add a 👍 to ideas you like instead of posting them again. Mods tag posts **under review**, **planned**, **done** or **not planned**.
 Not every idea makes it into the game, but they all help shape it.`;
 
-// embeds: keep the link preview (only the welcome and the launch announcement).
+// embeds: keep the link preview (only the welcome). #announcements and #patch-notes belong to the
+// releases phase.
 const POSTS = [
   { channel: 'welcome', content: WELCOME, embeds: true },
   { channel: 'rules', content: RULES },
   { channel: 'faq', content: FAQ },
-  { channel: 'announcements', content: ANNOUNCEMENT, embeds: true },
-  { channel: 'patch-notes', content: PATCH_NOTES },
   { channel: 'secret-hunt', content: SECRET_HUNT },
   { channel: 'dev-builds', content: DEV_BUILDS },
   { channel: 'bug-reports', thread: 'How to report a bug', content: BUG_GUIDE },
@@ -323,9 +301,9 @@ const automodRules = (modLogId) => [
 // ---------------------------------------------------------------------------------------------
 // Reporting: GitHub annotations, scrubbed
 
-// GitHub keeps at most 50 annotations per job. Each of the 10 steps emits one summary notice and
-// at most 3 errors plus one "N more errors" line: 5 per step, 50 per job.
-const MAX_ERRORS = 3;
+// GitHub keeps at most 50 annotations per job. Each of the 12 steps emits one summary notice and
+// at most 2 errors plus one "N more errors" line: 4 per step, 48 per job.
+const MAX_ERRORS = 2;
 const TOKEN = (process.env.DISCORD_SETUP_BOT_TOKEN || '').trim();
 
 function scrub(text, max = 400) {
@@ -391,7 +369,9 @@ let apiBase = DISCORD_API;
 let replaceIcon = false; // set per phase by runPhase from DISCORD_SETUP_REPLACE_ICON
 let gateUntil = 0; // global pause (a global 429, or a bucket with no requests left)
 
-async function api(method, route, { body, query, reason } = {}) {
+// maxWait: the longest rate limit wait (ms) worth sitting out; a longer one fails the request instead
+// (publishing has an hourly limit, and the job would time out waiting for it).
+async function api(method, route, { body, query, reason, maxWait = Infinity } = {}) {
   const url = `${apiBase}${route}${query ? `?${new URLSearchParams(query)}` : ''}`;
   const headers = { Authorization: `Bot ${TOKEN}`, 'User-Agent': USER_AGENT };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -411,13 +391,19 @@ async function api(method, route, { body, query, reason } = {}) {
     stats.requests += 1;
     const remaining = res.headers.get('x-ratelimit-remaining');
     const resetAfter = Number(res.headers.get('x-ratelimit-reset-after'));
-    if (remaining === '0' && resetAfter > 0) gateUntil = Math.max(gateUntil, Date.now() + resetAfter * 1000 + 50);
+    // A bucket reset longer than this caller will wait (publishing's hourly limit) must not pause the
+    // requests after it: that bucket's own next request gets a 429 and fails at once instead.
+    if (remaining === '0' && resetAfter > 0 && resetAfter * 1000 <= maxWait) gateUntil = Math.max(gateUntil, Date.now() + resetAfter * 1000 + 50);
     if (res.status === 429) {
       const data = await res.json().catch(() => ({}));
       stats.rateLimited += 1;
       if (attemptNo >= 8) throw new DiscordError(429, data, 'still rate limited after 8 tries');
       const retryAfter = Number(data.retry_after ?? res.headers.get('retry-after') ?? 1);
-      const until = Date.now() + (Number.isFinite(retryAfter) ? retryAfter : 1) * 1000 + 100;
+      const waitSeconds = Number.isFinite(retryAfter) ? retryAfter : 1;
+      if (waitSeconds * 1000 > maxWait) {
+        throw new DiscordError(429, { ...data, message: `${data.message || 'rate limited'} (retry after ${Math.ceil(waitSeconds)} s)` });
+      }
+      const until = Date.now() + waitSeconds * 1000 + 100;
       if (data.global || res.headers.get('x-ratelimit-global')) gateUntil = Math.max(gateUntil, until);
       await sleep(until - Date.now());
       continue;
@@ -988,6 +974,17 @@ async function joinReport(ctx, general, flags) {
   return parts.join('; ');
 }
 
+// {#name} becomes a real channel mention; missing lists the names that have no channel yet.
+function linkChannels(text, channels) {
+  const missing = [];
+  const content = text.replace(/\{#([a-z0-9-]+)\}/g, (_, name) => {
+    const target = channelByName(channels, name);
+    if (!target) { missing.push(name); return `#${name}`; }
+    return `<#${target.id}>`;
+  });
+  return { content, missing };
+}
+
 async function phasePosts(r, ctx) {
   const { gid, me, channels } = ctx;
   const n = { posted: 0, skipped: 0 };
@@ -995,12 +992,7 @@ async function phasePosts(r, ctx) {
   for (const post of POSTS) {
     const channel = channelByName(channels, post.channel);
     if (!channel) { r.error(`#${post.channel} not found: its post waits for the channels steps`); continue; }
-    const missing = [];
-    const content = post.content.replace(/\{#([a-z0-9-]+)\}/g, (_, name) => {
-      const target = channelByName(channels, name);
-      if (!target) { missing.push(name); return `#${name}`; }
-      return `<#${target.id}>`;
-    });
+    const { content, missing } = linkChannels(post.content, channels);
     if (missing.length) { r.error(`#${post.channel} post held back: it links #${missing.join(', #')}, which does not exist yet`); continue; }
     if (content.length > 2000) { r.error(`#${post.channel} post is ${content.length} characters (Discord allows 2000)`); continue; }
     const message = { content, allowed_mentions: { parse: [] }, ...(post.embeds ? {} : { flags: SUPPRESS_EMBEDS }) };
@@ -1053,6 +1045,251 @@ async function phasePosts(r, ctx) {
   r.notice(`posts: ${n.posted} posted, ${n.skipped} already there`);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Release posts: the versions in scripts/discord-releases.mjs (its header says how to add one)
+
+const RELEASES_FILE = 'scripts/discord-releases.mjs';
+const RELEASE_FIELDS = ['version', 'posted', 'ping', 'announcement', 'patchNotes'];
+// Where each text goes, the bold first line a version is recognised by, and the role its ping pings.
+const RELEASE_CHANNELS = [
+  { key: 'announcement', channel: 'announcements', marker: (v) => `**Riftborn ${v} ·`, ping: 'newsPing', embeds: true },
+  { key: 'patchNotes', channel: 'patch-notes', marker: (v) => `**v${v} ·`, ping: 'patchPing', embeds: false },
+];
+const RELEASE_HISTORY_PAGES = 5; // the newest 500 messages of each channel are searched
+const PUBLISH_MAX_WAIT = 60_000; // a longer publish rate limit is left to the next run
+const LINK_LENGTH = 23, PING_LENGTH = 25; // "<#id>" and "<@&id>\n" once posted, ids up to 20 digits
+
+const shortVersion = (version) => version.replace(/\.0$/, ''); // 2.3.0 -> 2.3, 2.3.1 stays
+const markerOf = (spec, version) => spec.marker(shortVersion(version));
+const newerVersion = (a, b) => {
+  const [x, y] = [a, b].map((v) => v.split('.').map(Number));
+  const i = x.findIndex((n, k) => n !== y[k]);
+  return i >= 0 && x[i] > y[i];
+};
+const withoutPing = (content) => String(content ?? '').replace(/^(?:\s*<@&\d+>)+\s*/, '');
+const roleName = (key) => ROLES.find((spec) => spec.key === key).name;
+const isPlaceholder = (rel) => rel.announcement == null && rel.patchNotes == null;
+// The channels a release text may link: the public ones (release posts reach following servers too).
+const RELEASE_LINKABLE = new Set(LAYOUT.filter((cat) => PUBLIC_ACCESS.has(cat.access)).flatMap((cat) => cat.channels.map((c) => c.name)));
+const listOf = (items) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
+
+// Everything wrong with the release list, checked before anything is read or posted.
+function checkReleases(list) {
+  if (!Array.isArray(list)) return ['it must export RELEASES, a list'];
+  const problems = [];
+  let previous = null;
+  let unposted = false;
+  list.forEach((rel, n) => {
+    if (!rel || typeof rel !== 'object' || Array.isArray(rel)) { problems.push(`entry ${n + 1} is not an entry`); return; }
+    const at = typeof rel.version === 'string' ? rel.version : `entry ${n + 1}`;
+    const unknown = Object.keys(rel).filter((key) => !RELEASE_FIELDS.includes(key));
+    if (unknown.length) problems.push(`${at}: unknown ${unknown.length === 1 ? 'field' : 'fields'} ${unknown.join(', ')} (the fields are ${RELEASE_FIELDS.join(', ')})`);
+    if (typeof rel.version !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(rel.version)) { problems.push(`${at}: version must be MAJOR.MINOR.PATCH, like 2.3.0`); return; }
+    if (previous && !newerVersion(rel.version, previous)) problems.push(`${at} must be newer than ${previous} above it (oldest first, each version once)`);
+    previous = rel.version;
+    if (rel.posted !== undefined && typeof rel.posted !== 'boolean') problems.push(`${at}: posted must be true or false`);
+    const ping = rel.ping ?? {};
+    if (typeof ping !== 'object' || Array.isArray(ping)) {
+      problems.push(`${at}: ping must be { announcement: true or false, patchNotes: true or false }`);
+    } else {
+      for (const [key, value] of Object.entries(ping)) {
+        if (!RELEASE_CHANNELS.some((spec) => spec.key === key)) problems.push(`${at}: unknown ping ${key} (use announcement and patchNotes)`);
+        else if (typeof value !== 'boolean') problems.push(`${at}: ping.${key} must be true or false`);
+      }
+    }
+    const filled = RELEASE_CHANNELS.filter((spec) => rel[spec.key] != null).length;
+    if (filled === 1) problems.push(`${at}: fill in both announcement and patchNotes (or leave both null for a placeholder)`);
+    if (rel.posted && filled < 2) problems.push(`${at}: an entry marked posted needs both texts, which are how it is recognised`);
+    if (rel.posted && unposted) problems.push(`${at}: entries marked posted come before all the others`);
+    if (!rel.posted) unposted = true;
+    for (const spec of RELEASE_CHANNELS) {
+      const text = rel[spec.key];
+      if (text == null) continue;
+      if (typeof text !== 'string' || !text.trim()) { problems.push(`${at}: ${spec.key} must be text (or null)`); continue; }
+      const marker = markerOf(spec, rel.version);
+      if (!text.startsWith(`${marker} `)) problems.push(`${at}: ${spec.key} must start with "${marker} " (the first line RiftBot recognises it by)`);
+      const badLinks = [...new Set([...text.matchAll(/\{#([^}]*)\}/g)].map((m) => m[1]).filter((name) => !RELEASE_LINKABLE.has(name)))];
+      if (badLinks.length) problems.push(`${at}: ${spec.key} links {#${badLinks.join('}, {#')}}, which is not a public channel (like {#patch-notes})`);
+      if (/@everyone|@here|<@/.test(text)) problems.push(`${at}: ${spec.key} must not mention anyone (@everyone, @here or <@...>): pings are set with ping`);
+      const length = text.replace(/\{#[a-z0-9-]+\}/g, 'x'.repeat(LINK_LENGTH)).length + (ping?.[spec.key] === true ? PING_LENGTH : 0);
+      if (length > 2000) problems.push(`${at}: ${spec.key} is about ${length} characters once posted (Discord allows 2000)`);
+    }
+  });
+  return problems;
+}
+
+// A channel's newest messages, newest first: up to `pages` pages of 100, and whether that was all.
+async function readHistory(channelId, pages) {
+  const messages = [];
+  let before = null;
+  for (let page = 0; page < pages; page += 1) {
+    const got = await api('GET', `/channels/${channelId}/messages`, { query: { limit: '100', ...(before ? { before } : {}) } });
+    const batch = Array.isArray(got) ? got : [];
+    messages.push(...batch);
+    if (batch.length < 100) return { messages, complete: true };
+    before = batch.reduce((oldest, m) => (idCmp(m.id, oldest) < 0 ? m.id : oldest), batch[0].id);
+  }
+  return { messages, complete: false };
+}
+
+// Publishes (crossposts) a message in an announcement channel, so servers following it get a copy.
+async function publish(r, channel, message, what) {
+  try {
+    await api('POST', `/channels/${channel.id}/messages/${message.id}/crosspost`, { maxWait: PUBLISH_MAX_WAIT });
+    return 'done';
+  } catch (err) {
+    if (err?.code === ALREADY_CROSSPOSTED) return 'done';
+    r.error(`crosspost ${what}: ${describe(err)} (the next run crossposts it)`);
+    return 'failed';
+  }
+}
+
+// A version's two messages, ready to send, or what stops them (problems).
+function buildRelease(rel, channels, ids) {
+  const messages = {};
+  const problems = [];
+  for (const spec of RELEASE_CHANNELS) {
+    const label = `its #${spec.channel} post`;
+    const roleId = rel.ping?.[spec.key] ? ids[spec.ping] : null;
+    if (rel.ping?.[spec.key] && !roleId) { problems.push(`${label} pings ${roleName(spec.ping)}, and that role is missing (the Roles step makes it)`); continue; }
+    const { content: linked, missing } = linkChannels(rel[spec.key], channels);
+    if (missing.length) { problems.push(`${label} links #${missing.join(', #')}, which does not exist yet`); continue; }
+    const content = roleId ? `<@&${roleId}>\n${linked}` : linked;
+    if (content.length > 2000) { problems.push(`${label} is ${content.length} characters (Discord allows 2000)`); continue; }
+    // The ping can reach its one role and nobody else; announcements keep the riftborn.us card.
+    const body = { content, allowed_mentions: roleId ? { parse: [], roles: [roleId] } : { parse: [] }, ...(spec.embeds ? {} : { flags: SUPPRESS_EMBEDS }) };
+    messages[spec.key] = { body, pinged: roleId ? roleName(spec.ping) : null };
+  }
+  return { messages, problems };
+}
+
+// Each version once, oldest first, up to the first placeholder: its announcement in #announcements
+// and its patch notes in #patch-notes, each skipped when RiftBot's post of that version is already
+// in the channel (found by its bold first line), then crossposted. Entries marked posted are only
+// recognised. In each channel a version that could not be posted holds back the ones after it, and
+// a version older than one already there is never posted, so the channels always read in order.
+async function phaseReleases(r, ctx) {
+  const { channels, me } = ctx;
+  let releases;
+  try {
+    ({ RELEASES: releases } = await import(new URL('./discord-releases.mjs', import.meta.url).href));
+  } catch (err) {
+    r.error(`${RELEASES_FILE} could not be loaded: ${describe(err)}`);
+    return;
+  }
+  const problems = checkReleases(releases);
+  if (problems.length) {
+    for (const problem of problems) r.error(`${RELEASES_FILE}: ${problem}`);
+    r.notice(`releases: nothing posted until ${RELEASES_FILE} is fixed`);
+    return;
+  }
+  if (!releases.length) { r.notice('releases: none listed'); return; }
+  const block = releases.findIndex(isPlaceholder);
+  const due = block < 0 ? releases : releases.slice(0, block);
+  const ids = roleIds(ctx.roles);
+  // Both of a version's messages are built before anything is posted, so a missing ping role or
+  // linked channel holds the version back in both channels instead of letting one of them go out.
+  const built = due.map((rel) => (rel.posted ? null : buildRelease(rel, channels, ids)));
+  const reported = new Set();
+  const results = due.map(() => []);
+  for (const spec of due.length ? RELEASE_CHANNELS : []) {
+    const label = `#${spec.channel}`;
+    const mark = (i, status, extra = {}) => results[i].push({ label, status, ...extra });
+    const channel = channelByName(channels, spec.channel);
+    if (!channel) { r.error(`${label} not found: release posts wait for the channels steps`); due.forEach((_, i) => mark(i, 'failed')); continue; }
+    const history = await attempt(r, `read ${label}`, () => readHistory(channel.id, RELEASE_HISTORY_PAGES));
+    if (history === FAIL) { due.forEach((_, i) => mark(i, 'failed')); continue; }
+    const mine = history.messages.filter((m) => m.author?.id === me.id);
+    const found = releases.map((rel) => mine.find((m) => withoutPing(m.content).startsWith(markerOf(spec, rel.version))) ?? null);
+    // Anything posted after the newest version found is newer still, so it is in the history read.
+    const newest = found.reduce((last, m, i) => (m ? i : last), -1);
+    const isNews = channel.type === T.NEWS;
+    let stopped = false;
+    for (const [i, rel] of due.entries()) {
+      const what = `${rel.version} in ${label}`;
+      if (found[i]) {
+        // The newest version here, posted by an earlier run that could not crosspost it: crosspost it
+        // now. An older one is left alone, so following servers never get stale news ahead of new.
+        const unpublished = isNews && i === newest && !rel.posted && !((found[i].flags ?? 0) & CROSSPOSTED);
+        mark(i, 'there', unpublished ? { crosspost: await publish(r, channel, found[i], what) } : {});
+        continue;
+      }
+      if (rel.posted) { mark(i, 'marked', { complete: history.complete }); continue; }
+      if (i < newest) { mark(i, 'older', { newer: releases[newest].version }); continue; }
+      if (stopped) { mark(i, 'held'); continue; }
+      stopped = true; // until this version is posted, the ones after it wait
+      if (newest < 0 && !history.complete) {
+        r.error(`${rel.version} not posted to ${label}: none of its last ${history.messages.length} messages is a release post, and an older one may be further up (check the channel by hand)`);
+        mark(i, 'failed');
+        continue;
+      }
+      const { messages, problems: blockers } = built[i];
+      if (blockers.length) {
+        if (!reported.has(i)) { reported.add(i); for (const blocker of blockers) r.error(`${rel.version} not posted: ${blocker}`); }
+        mark(i, 'failed');
+        continue;
+      }
+      const { body, pinged } = messages[spec.key];
+      const sent = await attempt(r, `post ${what}`, () => api('POST', `/channels/${channel.id}/messages`, { body }));
+      if (sent === FAIL) { mark(i, 'failed'); continue; }
+      stopped = false;
+      r.log(`+ ${what}`);
+      mark(i, 'posted', { crosspost: isNews ? await publish(r, channel, sent, what) : 'n/a', pinged });
+    }
+  }
+  r.notice(`releases: ${releaseSummary(releases, due, results, block)}`);
+}
+
+function releaseSummary(releases, due, results, block) {
+  const parts = [];
+  const quiet = []; // versions already in every channel, with nothing done this run
+  const flush = () => { if (quiet.length) parts.push(`${listOf(quiet.splice(0))} already posted`); };
+  due.forEach((rel, i) => {
+    if (results[i].length && results[i].every((x) => x.status === 'there' && !x.crosspost)) { quiet.push(rel.version); return; }
+    flush();
+    parts.push(`${rel.version} ${releaseNote(results[i])}`);
+  });
+  flush();
+  if (block >= 0) {
+    const waiting = releases[block].version;
+    parts.push(`${waiting} waits for its texts (a placeholder in ${RELEASES_FILE})`);
+    const later = releases.slice(block + 1).map((rel) => rel.version);
+    if (later.length) parts.push(`${listOf(later)} ${later.length === 1 ? 'waits' : 'wait'} for ${waiting}`);
+  }
+  return parts.join('; ');
+}
+
+function releaseNote(list) {
+  const labels = (items) => listOf(items.map((x) => x.label));
+  const where = (status) => list.filter((x) => x.status === status);
+  const notes = [];
+  const posted = where('posted');
+  if (posted.length) {
+    const crossed = posted.filter((x) => x.crosspost === 'done');
+    const plain = posted.filter((x) => x.crosspost === 'n/a');
+    const details = [crossed.length === posted.length ? 'crossposted' : crossed.length ? `crossposted in ${labels(crossed)} only` : 'not crossposted'];
+    if (plain.length) details.push(`${labels(plain)} ${plain.length === 1 ? 'is not an announcement channel' : 'are not announcement channels'}`);
+    const pinged = posted.filter((x) => x.pinged).map((x) => x.pinged);
+    details.push(pinged.length ? `pinged ${listOf(pinged)}` : 'no pings');
+    notes.push(`posted to ${labels(posted)} (${details.join(', ')})`);
+  }
+  const there = where('there');
+  if (there.length) {
+    const now = there.filter((x) => x.crosspost === 'done');
+    const still = there.filter((x) => x.crosspost === 'failed');
+    notes.push(`already in ${labels(there)}${now.length ? `, crossposted now in ${labels(now)}` : ''}${still.length ? `, still not crossposted in ${labels(still)}` : ''}`);
+  }
+  const marked = where('marked');
+  if (marked.length) notes.push(`marked as posted but not found in ${marked.every((x) => x.complete) ? '' : 'the recent messages of '}${labels(marked)} (never sent again)`);
+  const older = where('older');
+  if (older.length) notes.push(`not posted to ${labels(older)}, where the newer ${listOf([...new Set(older.map((x) => x.newer))])} is already up (versions go out in order)`);
+  const failed = where('failed');
+  if (failed.length) notes.push(`not posted to ${labels(failed)} (see the errors)`);
+  const held = where('held');
+  if (held.length) notes.push(`held back in ${labels(held)} until the version before it is posted`);
+  return notes.join(', ');
+}
+
 async function phaseProfile(r, ctx) {
   if (ctx.me.username === BOT_NAME) { r.notice(`bot username already ${BOT_NAME}`); return; }
   const done = await attempt(r, `rename the bot to ${BOT_NAME}`, () => api('PATCH', '/users/@me', { body: { username: BOT_NAME } }));
@@ -1086,6 +1323,7 @@ const PHASES = {
   automod: ['AutoMod', phaseAutomod],
   settings: ['Server settings and icon', phaseSettings],
   posts: ['Posts', phasePosts],
+  releases: ['Release posts', phaseReleases],
   profile: ['Bot profile', phaseProfile],
   invite: ['Invite link', phaseInvite],
 };
