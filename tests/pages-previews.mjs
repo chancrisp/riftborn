@@ -432,7 +432,7 @@ console.log('PASS preview deploy: one riftborn-dev branch deployment per preview
   assert.ok(workflow.includes('    environment: cloudflare-production\n'), 'The same environment (and token) as the production deploy');
   // The cleanup re-checks the links of previews removed by earlier pushes: the whole history (trees
   // only, no file contents) is checked out.
-  const checkout = workflow.match(/\n      - uses: actions\/checkout@v4\n        with:\n((?: {10}.*\n)+)/)?.[1] || '';
+  const checkout = workflow.match(/\n      - uses: actions\/checkout@v\d+\n        with:\n((?: {10}.*\n)+)/)?.[1] || '';
   assert.ok(checkout.includes('          fetch-depth: 0\n') && checkout.includes('          filter: blob:none\n') && checkout.includes('          persist-credentials: false\n'), checkout);
   const steps = ['run: npm ci --prefix tools/wrangler --ignore-scripts', 'run: node scripts/pages-previews.mjs', 'run: node scripts/cloudflare-pages-deploy.mjs --previews', 'run: node scripts/cloudflare-pages-verify.mjs --previews'].map(step => workflow.indexOf(step));
   assert.ok(steps.every((at, i) => at !== -1 && (i === 0 || steps[i - 1] < at)), 'Install the pinned Wrangler, stage, deploy, check');
