@@ -43,7 +43,7 @@ so a reload before it lands can't lose it, in this tab's sessionStorage. Runs be
 <script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
 the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
 makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
-window.RIFTBORN_BUILD = "8b25596a8b";
+window.RIFTBORN_BUILD = "ed1036a368";
 (function () {
   var b = window.RIFTBORN_BUILD;
   if (b === "dev" || !window.fetch || !window.URL) return;
@@ -63,6 +63,15 @@ they work on every host; the build copies assets/ as is. -->
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon-180.png">
+<!-- HOME SCREEN WEB APP (v2.3.2, tests/manifest.test.mjs): iPhone browsers never let a page go fullscreen, so
+Add to Home Screen is the way: from there the game opens with no browser bars (black-translucent: the page runs
+under the status bar, css/safe-area.css keeps the HUD clear of it, the notch and the home indicator). The manifest
+gives Android and desktop the same (its start_url is the root game page, "/") and the icons; the build copies it. -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Riftborn">
 <link rel="preload" href="assets/ps1-atlas.png" as="image" crossorigin="anonymous">
 <link rel="preload" href="assets/crypt-pixel.ttf" as="font" type="font/ttf" crossorigin>
 <style>/* LOADING SCREEN (#riftLoader, src/ui/boot-loader.js): inline so it is in the very first paint and needs
@@ -72,9 +81,10 @@ riding its leading edge (translateX) share one transition: --p is the progress (
 long the current stage eases toward it. Over everything but the hand-over question (96), the "moved"
 toast (95) and the dev password gate; hidden while that gate is up. Its title colours are the title
 theme's (--title-*, src/ui/title-theme.js; the fallbacks here are the molten look); the build writes the
-default theme's wordmark into .rl-mark (an SVG as .rl-svg, a pixel-art logo's word as .rl-bitmap at --tkpx css px
-a logo pixel: a whole number of screen pixels, as css/hud.css sizes the title) and main.js swaps in a scheduled
-or previewed one. */
+default theme's wordmark into .rl-mark (an SVG as .rl-svg; a pixel-art logo as its lockup, .rl-lockup: the badge
+over the word, or beside it on a window 500-582 px tall (579 up to 700 px wide; 612 and 609 on a touch screen) and on a phone held sideways, every
+part an .rl-bitmap at --tkpx css px a logo pixel, a whole number of screen pixels, by the same breakpoints as
+css/hud.css lays out the title) and main.js swaps in a scheduled or previewed one. */
 #riftLoader{--p:.3;--rl-dur:10s;--rl-ease:cubic-bezier(.16,.7,.3,1);--sk:40px;position:fixed;inset:0;z-index:94;display:grid;place-items:center;padding:16px;overflow:hidden;contain:strict;color:#ded6be;font-family:"Crypt Pixel","Courier New",monospace;text-align:center;background:radial-gradient(ellipse 80% 42% at 50% 104%,var(--title-floor,rgba(255,90,20,.2)),transparent 70%),radial-gradient(ellipse 55% 45% at 50% 42%,rgba(92,40,140,.2),transparent 75%),#0b0c10;transition:opacity .4s ease-out}
 #riftLoader::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%,transparent 40%,rgba(0,0,0,.6) 100%),repeating-conic-gradient(rgba(0,0,0,.2) 0 25%,transparent 0 50%) 0 0/4px 4px}
 #riftLoader.rl-out{opacity:0;pointer-events:none}
@@ -97,6 +107,8 @@ body:has(#devGate) #riftLoader{display:none}
 .rl-mark{--tk:2;--tkpx:var(--tk)}
 @supports (width:round(1.5px)){.rl-mark{--tkpx:calc(round(var(--tk) * var(--dpr,1)) / var(--dpr,1))}}
 .rl-bitmap{display:block;width:calc(var(--w) * var(--tkpx) * 1px);height:calc(var(--h) * var(--tkpx) * 1px);image-rendering:pixelated}
+.rl-lockup{--bw:64;--bh:64;display:grid;grid-auto-flow:row;gap:calc(6 * var(--tkpx) * 1px);justify-items:center;align-items:start;line-height:0}
+.rl-lockup picture{display:contents}.rl-lockup source{display:none}.rl-bitmap-mark{--w:var(--bw);--h:var(--bh)}
 .rl-track{position:relative;width:min(360px,calc(100vw - 112px));height:10px;margin-top:clamp(40px,9vh,76px)}
 .rl-bar{position:absolute;inset:0;overflow:hidden;background:#0d0f13;border:2px solid;border-color:#111318 #8e9180 #8e9180 #111318;box-shadow:0 0 0 2px #000}
 .rl-fill{position:absolute;inset:0;transform-origin:0 50%;transform:scaleX(var(--p));transition:transform var(--rl-dur) var(--rl-ease);will-change:transform;background:var(--title-bar,linear-gradient(90deg,#4a1606,#b8380c 45%,#ff7a1a 88%,#ffd27a))}
@@ -153,21 +165,22 @@ body:has(#devGate) #riftLoader{display:none}
 @keyframes rlEyes{0%{opacity:0;transform:scale(.6)}9%{opacity:1;transform:scale(1.22)}20%{transform:scale(1)}60%{opacity:1}100%{opacity:.88;transform:scale(1)}}
 @keyframes rlRiftLit{0%{opacity:.6;transform:scale(1)}12%{opacity:1;transform:scale(1.35)}100%{opacity:.9;transform:scale(1.12)}}
 @media (min-width:900px) and (min-height:620px){#riftLoader{--sk:52px}.rl-status{font-size:15px}}
-@media (min-width:700px) and (min-height:600px){.rl-mark{--tk:3}}
-@media (min-width:1280px) and (min-height:700px){.rl-mark{--tk:4}}
+@media (min-width:701px) and (min-height:758px),(min-width:700px) and (max-width:700px) and (min-height:755px){.rl-mark{--tk:3}}
+@media (min-width:1280px) and (min-height:857px){.rl-mark{--tk:4}}
+@media (min-width:701px) and (min-height:500px) and (max-height:582px),(min-width:520px) and (max-width:700px) and (min-height:500px) and (max-height:579px),(min-width:701px) and (min-height:500px) and (max-height:612px) and (pointer:coarse),(min-width:520px) and (max-width:700px) and (min-height:500px) and (max-height:609px) and (pointer:coarse),(max-height:520px) and (orientation:landscape) and (pointer:coarse){.rl-lockup{--bw:40;--bh:40;grid-auto-flow:column;gap:calc(8 * var(--tkpx) * 1px)}.rl-lockup .rl-bitmap-word{margin-top:calc(6 * var(--tkpx) * 1px)}}
 @media (min-width:1800px) and (min-height:1000px){#riftLoader{--sk:68px}.rl-track{width:500px}.rl-status{font-size:18px}}
 @media (max-height:420px){.rl-mark{font-size:clamp(40px,9vw,72px)}.rl-track{margin-top:28px}.rl-status{margin-top:18px}}
 /* Reduced motion: a calm, still screen; the bar and skull step between stages, the eyes just switch on. */
 @media (prefers-reduced-motion:reduce){.rl-embers,.rl-heat,.rl-sweep,.rl-dots{display:none}#riftLoader .rl-ring,#riftLoader .rl-bob,#riftLoader .rl-rift-glow{animation:none}.rl-fill,.rl-rider,.rl-mark{transition:none}#riftLoader.rl-lit .rl-eyes{animation:none;opacity:1}#riftLoader.rl-lit .rl-rift-glow{animation:none;opacity:.9}#riftLoader{transition-duration:.25s}}
 </style>
-<link rel="modulepreload" href="js/riftborn.8ec76aac8e.js">
-<link rel="stylesheet" href="css/riftborn.8d16e45920.css">
+<link rel="modulepreload" href="js/riftborn.9be423be70.js">
+<link rel="stylesheet" href="css/riftborn.55c6e1f363.css">
 </head>
 <body class="menu-open">
 <div id="riftLoader" role="dialog" aria-modal="true" aria-label="Loading Riftborn">
   <div class="rl-embers" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
   <div class="rl-stage">
-    <div class="rl-mark" aria-hidden="true"><span class="rl-word"><img class="rl-bitmap rl-bitmap-word" data-part="word" src="assets/title-marquee-word.png" alt="" width="146" height="29" draggable="false" data-wordmark="marquee" style="--w:146;--h:29"></span></div>
+    <div class="rl-mark" aria-hidden="true"><span class="rl-word rl-lockup"><picture class="rl-bitmap-pic"><source media="(min-width:1280px) and (min-height:857px)" srcset="assets/title-marquee-badge-64-x4.png"><source media="(min-width:701px) and (min-height:758px), (min-width:700px) and (max-width:700px) and (min-height:755px)" srcset="assets/title-marquee-badge-64-x3.png"><source media="(max-height:520px) and (orientation:landscape) and (pointer:coarse)" srcset="assets/title-marquee-badge-40-x2.png"><source media="(min-width:701px) and (min-height:500px) and (max-height:582px), (min-width:520px) and (max-width:700px) and (min-height:500px) and (max-height:579px), (min-width:701px) and (min-height:500px) and (max-height:612px) and (pointer:coarse), (min-width:520px) and (max-width:700px) and (min-height:500px) and (max-height:609px) and (pointer:coarse)" srcset="assets/title-marquee-badge-40-x2.png"><img class="rl-bitmap rl-bitmap-mark" data-part="badge" src="assets/title-marquee-badge-64-x2.png" alt="" width="128" height="128" draggable="false"></picture><img class="rl-bitmap rl-bitmap-word" data-part="word" src="assets/title-marquee-word.png" alt="" width="146" height="29" draggable="false" data-wordmark="marquee" style="--w:146;--h:29"></span></div>
     <div class="rl-track" id="rlBar" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
       <div class="rl-rift" aria-hidden="true"><i class="rl-rift-glow"></i><svg class="rl-ring" viewBox="0 0 32 32" shape-rendering="crispEdges"><path fill="#2a0845" d="M13 1h1v1H13zM15 1h1v1H15zM17 1h3v1H17zM18 2h5v1H18zM21 3h3v1H21zM20 4h1v1H20zM22 4h4v1H22zM21 5h1v1H21zM23 5h4v1H23zM9 6h1v1H9zM22 6h5v1H22zM6 7h3v1H6zM23 7h5v1H23zM5 8h3v1H5zM24 8h4v1H24zM3 9h4v1H3zM25 9h3v1H25zM2 10h4v1H2zM26 10h2v1H26zM2 11h4v1H2zM26 11h2v1H26zM1 12h4v1H1zM27 12h1v1H27zM1 13h4v1H1zM27 13h1v1H27zM1 14h4v1H1zM27 14h1v1H27zM1 15h3v1H1zM1 16h4v1H1zM1 17h1v1H1zM3 17h1v1H3zM1 18h2v1H1zM4 18h1v1H4zM30 18h1v1H30zM1 19h1v1H1zM2 20h1v1H2zM29 21h1v1H29zM2 22h1v1H2zM28 22h2v1H28zM3 23h1v1H3zM4 24h1v1H4zM24 24h1v1H24zM26 24h2v1H26zM23 25h1v1H23zM25 25h1v1H25zM27 25h1v1H27zM11 26h1v1H11zM20 26h3v1H20zM24 26h3v1H24zM12 27h10v1H12zM23 27h3v1H23zM13 28h11v1H13zM15 29h8v1H15zM18 30h2v1H18z"/><path fill="#5b1896" d="M12 1h1v1H12zM14 1h1v1H14zM16 1h1v1H16zM9 2h9v1H9zM9 3h1v1H9zM15 3h1v1H15zM17 3h4v1H17zM6 4h1v1H6zM14 4h6v1H14zM21 4h1v1H21zM5 5h1v1H5zM20 5h1v1H20zM22 5h1v1H22zM4 6h1v1H4zM30 12h1v1H30zM30 14h1v1H30zM4 15h1v1H4zM30 16h1v1H30zM2 17h1v1H2zM4 17h1v1H4zM30 17h1v1H30zM3 18h1v1H3zM2 19h3v1H2zM29 19h2v1H29zM3 20h3v1H3zM26 20h1v1H26zM28 20h2v1H28zM2 21h4v1H2zM27 21h2v1H27zM3 22h4v1H3zM25 22h3v1H25zM4 23h2v1H4zM7 23h1v1H7zM24 23h5v1H24zM5 24h2v1H5zM8 24h1v1H8zM23 24h1v1H23zM25 24h1v1H25zM4 25h2v1H4zM22 25h1v1H22zM24 25h1v1H24zM26 25h1v1H26zM5 26h2v1H5zM23 26h1v1H23zM6 27h2v1H6zM22 27h1v1H22zM8 28h1v1H8zM9 29h1v1H9zM12 30h1v1H12z"/><path fill="#a02fe0" d="M8 3h1v1H8zM10 3h5v1H10zM16 3h1v1H16zM7 4h2v1H7zM10 4h4v1H10zM6 5h2v1H6zM9 5h1v1H9zM11 5h1v1H11zM5 6h1v1H5zM8 6h1v1H8zM27 6h1v1H27zM3 8h1v1H3zM28 8h1v1H28zM2 9h1v1H2zM29 9h1v1H29zM29 10h1v1H29zM29 11h1v1H29zM29 12h1v1H29zM29 13h2v1H29zM27 15h1v1H27zM29 15h2v1H29zM27 16h3v1H27zM27 17h1v1H27zM29 17h1v1H29zM27 18h3v1H27zM27 19h2v1H27zM27 20h1v1H27zM26 21h1v1H26zM6 23h1v1H6zM7 24h1v1H7zM6 25h2v1H6zM9 25h1v1H9zM7 26h2v1H7zM10 26h1v1H10zM8 27h2v1H8zM9 28h2v1H9zM10 29h2v1H10zM13 30h4v1H13z"/><path fill="#e07cff" d="M9 4h1v1H9zM8 5h1v1H8zM10 5h1v1H10zM6 6h2v1H6zM4 7h2v1H4zM4 8h1v1H4zM28 9h1v1H28zM28 10h1v1H28zM28 11h1v1H28zM28 12h1v1H28zM28 13h1v1H28zM28 14h2v1H28zM28 15h1v1H28zM28 17h1v1H28zM8 25h1v1H8zM9 26h1v1H9zM10 27h2v1H10zM11 28h2v1H11zM12 29h3v1H12zM17 30h1v1H17z"/></svg><svg class="rl-ring rl-ring-in" viewBox="0 0 32 32" shape-rendering="crispEdges"><path fill="#2a0845" d="M15 6h2v1H15zM12 7h2v1H12zM15 7h1v1H15zM17 7h1v1H17zM19 7h1v1H19zM10 8h5v1H10zM18 8h1v1H18zM9 9h3v1H9zM9 10h2v1H9zM8 11h2v1H8zM8 12h1v1H8zM8 13h1v1H8zM8 14h1v1H8zM23 17h1v1H23zM23 18h1v1H23zM23 19h1v1H23zM22 20h2v1H22zM21 21h2v1H21zM20 22h3v1H20zM17 23h5v1H17zM12 24h1v1H12zM14 24h1v1H14zM16 24h4v1H16zM15 25h2v1H15z"/><path fill="#5b1896" d="M14 7h1v1H14zM16 7h1v1H16zM18 7h1v1H18zM17 8h1v1H17zM19 8h3v1H19zM20 9h3v1H20zM21 10h3v1H21zM24 12h1v1H24zM25 15h1v1H25zM6 16h1v1H6zM7 19h1v1H7zM8 20h1v1H8zM8 21h1v1H8zM9 22h3v1H9zM10 23h5v1H10zM13 24h1v1H13zM15 24h1v1H15z"/><path fill="#a02fe0" d="M8 10h1v1H8zM22 11h2v1H22zM23 12h1v1H23zM23 13h2v1H23zM23 14h2v1H23zM6 15h1v1H6zM25 16h1v1H25zM7 17h2v1H7zM7 18h2v1H7zM8 19h1v1H8zM9 20h1v1H9zM9 21h2v1H9z"/><path fill="#e07cff" d="M7 12h1v1H7zM7 13h1v1H7zM7 14h1v1H7zM7 15h1v1H7zM24 15h1v1H24zM7 16h1v1H7zM24 16h1v1H24zM24 17h1v1H24zM24 18h1v1H24zM24 19h1v1H24zM23 21h1v1H23z"/></svg></div>
       <div class="rl-bar"><i class="rl-fill"></i></div>
@@ -234,7 +247,7 @@ body:has(#devGate) #riftLoader{display:none}
 <main id="menu">
   <button id="deathSkull" type="button" aria-label="Enter Death Mode" aria-pressed="false"><span class="skull-art"><img src="assets/death-skull.png" width="80" height="98" alt="" draggable="false"></span></button>
   <div class="menu-card ui-scaled">
-    <h1 class="brand-title"><span class="title-bitmap" role="img" aria-label="RIFTBORN" data-wordmark="marquee"><picture class="title-part-pic"><source media="(min-width:1280px) and (min-height:700px)" srcset="assets/title-marquee-badge-40-x4.png"><source media="(min-width:700px) and (min-height:600px)" srcset="assets/title-marquee-badge-40-x3.png"><source media="(min-width:520px) and (max-height:599px)" srcset="assets/title-marquee-badge-40-x2.png"><img class="title-part title-part-mark" data-part="badge" src="assets/title-marquee-badge-64-x2.png" alt="" width="128" height="128" draggable="false"></picture><img class="title-part title-part-word" data-part="word" src="assets/title-marquee-word.png" alt="" width="146" height="29" draggable="false" style="--w:146;--h:29"></span></h1>
+    <h1 class="brand-title"><span class="title-bitmap" role="img" aria-label="RIFTBORN" data-wordmark="marquee"><picture class="title-part-pic"><source media="(min-width:1280px) and (min-height:857px)" srcset="assets/title-marquee-badge-64-x4.png"><source media="(min-width:701px) and (min-height:758px), (min-width:700px) and (max-width:700px) and (min-height:755px)" srcset="assets/title-marquee-badge-64-x3.png"><source media="(max-height:520px) and (orientation:landscape) and (pointer:coarse)" srcset="assets/title-marquee-badge-40-x2.png"><source media="(min-width:701px) and (min-height:500px) and (max-height:582px), (min-width:520px) and (max-width:700px) and (min-height:500px) and (max-height:579px), (min-width:701px) and (min-height:500px) and (max-height:612px) and (pointer:coarse), (min-width:520px) and (max-width:700px) and (min-height:500px) and (max-height:609px) and (pointer:coarse)" srcset="assets/title-marquee-badge-40-x2.png"><img class="title-part title-part-mark" data-part="badge" src="assets/title-marquee-badge-64-x2.png" alt="" width="128" height="128" draggable="false"></picture><img class="title-part title-part-word" data-part="word" src="assets/title-marquee-word.png" alt="" width="146" height="29" draggable="false" style="--w:146;--h:29"></span></h1>
     <div class="edition"></div>
     <p id="runSummary"></p>
     <details id="runReport" class="hidden"><summary>RUN REPORT</summary><div id="runDetails"></div></details>
@@ -290,11 +303,13 @@ body:has(#devGate) #riftLoader{display:none}
       <button id="tabAudio" type="button" role="tab" aria-selected="false" aria-controls="panelAudio" tabindex="-1">AUDIO</button>
       <button id="tabControls" type="button" role="tab" aria-selected="false" aria-controls="panelControls" tabindex="-1">CONTROLS</button>
       <button id="tabAccess" type="button" role="tab" aria-selected="false" aria-controls="panelAccess" tabindex="-1">ACCESS</button>
+      <button id="tabCursor" type="button" role="tab" aria-selected="false" aria-controls="panelCursor" tabindex="-1">CURSOR</button>
     </div>
     <div id="panelGraphics" role="tabpanel" aria-labelledby="tabGraphics"></div>
     <div id="panelAudio" role="tabpanel" aria-labelledby="tabAudio" hidden></div>
     <div id="panelControls" role="tabpanel" aria-labelledby="tabControls" hidden></div>
     <div id="panelAccess" role="tabpanel" aria-labelledby="tabAccess" hidden></div>
+    <div id="panelCursor" role="tabpanel" aria-labelledby="tabCursor" hidden></div>
   </div>
 </section>
 
@@ -332,7 +347,7 @@ body:has(#devGate) #riftLoader{display:none}
 <aside id="devTools" class="hidden" aria-label="Practice tools"></aside>
 
 <noscript><p class="noscript">Riftborn needs JavaScript and WebGL.</p></noscript>
-<script type="module" src="js/riftborn.8ec76aac8e.js"></script>
+<script type="module" src="js/riftborn.9be423be70.js"></script>
 <script>/* Boot errors before the game is ready: the loading screen stops and says why (src/ui/boot-loader.js does
 the same for a boot that throws). Listening in the capture phase also catches the bundle failing to
 download, a <script> load error that never bubbles; other resources (an image, a font) are ignored. */

@@ -131,4 +131,30 @@ Full notes in {#patch-notes} · Play now: https://riftborn.us`,
 
 Full notes in-game: **PATCH NOTES** on the main menu.`,
   },
+  // 2.3.2, owner-approved 2026-10-02 ("ship it"):
+  // News pings on the announcement, Patch pings on the patch notes.
+  {
+    version: '2.3.2',
+    ping: { announcement: true, patchNotes: true },
+    announcement: `**Riftborn 2.3.2 · Sound Check is live!**
+- A cleaner, punchier **sound mix**, louder on phone speakers
+- Pick your **cursor**: four pixel cursors, each with its own effect
+- **Full screen on iPhone**: add Riftborn to your Home Screen
+- A **stacked title**, and a choice of where your **weapon slots** sit
+
+Full notes in {#patch-notes} · Play now: https://riftborn.us`,
+    patchNotes: `**v2.3.2 · Sound Check** (2 Oct 2026)
+- **Sound mix:** louder and clearer, especially on phones, with no volume jump between the title and a run. Calmer world ambience and subtler interface sounds.
+- **Cursors:** a new CURSOR tab in Settings: Bevel Arrow, Rift Shard, Skull Tip, Gauntlet or your System cursor, each with its own effect (Full, Calm or Off).
+- **Full screen on iPhone:** Share › Add to Home Screen opens Riftborn with no browser bars. Android can install it too.
+- **Interface volume** slider and **Play on silent** (iPhone) in the Audio tab.
+- **Backspace goes back** like Esc, so Firefox and Safari players can back out without leaving fullscreen.
+- **Weapon slots:** keep the classic bottom row, or move them into a column under the radar in Settings › Graphics.
+- **Stacked title:** the skull badge now sits over the RIFTBORN wordmark.
+- **Pixelation** now goes down to 64 lines for an extra-chunky look.
+- **Phones held sideways:** a new compact layout with smaller pads and nothing overlapping.
+- **Fixes:** iPhone HUD overlaps, small-window and tablet HUD overlaps, a Rift Echo stutter, music dropping notes, a quiet first sound, and grey textures on slow connections.
+
+Full notes in-game: **PATCH NOTES** on the main menu.`,
+  },
 ];
