@@ -1,6 +1,6 @@
 {
   "version": "2.3.2",
-  "build": "1649532551",
+  "build": "e784f643b1",
   "files": {
     ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "assets/app-icon-192.png": "b6bf14082cb53bb3e872df136cfb6ff80f63a8cdbb3f01a6e85bdaf8f9da6dda",
@@ -66,20 +66,24 @@
     "assets/title-marquee-badge-40-x3.png": "8552c9178584a421bed52fd24de9fd9696c84a8e63a7a85fdf02d0ee189b58b7",
     "assets/title-marquee-badge-40-x4.png": "1130e069c823c3c9e7bf25463b816df7d900f86e1af5e2ae0378ebb6fa070dd0",
     "assets/title-marquee-badge-64-x2.png": "c4227af8fdbcfb747ca14f6aa740e229cc12babeaf81f70a78c0dbc54d743d34",
+    "assets/title-marquee-badge-64-x3.png": "bbe2bca047e36a16747cfb22ad31daaacb8cd17470cc7ec71802b643c1d7261f",
+    "assets/title-marquee-badge-64-x4.png": "b805d824aaec3fbc5a526d1415b64f483867c8adf67e943dbb23932501f3fa6e",
     "assets/title-marquee-eyes-40-x2.png": "4e7dabd9a7b90e5cf9e2423e992cc0ea0f632ff14d3dea07f25443e4b1f55695",
     "assets/title-marquee-eyes-40-x3.png": "7a27abf7ea3515c3276e74074a71e483ed7a3ebf59d2a92d6cffebfe970787fd",
     "assets/title-marquee-eyes-40-x4.png": "f659556a3afae8d6df6005fdc78f91ef4cc5d8d191655e5940b1e7bfe9d86af5",
     "assets/title-marquee-eyes-64-x2.png": "7a27abf7ea3515c3276e74074a71e483ed7a3ebf59d2a92d6cffebfe970787fd",
+    "assets/title-marquee-eyes-64-x3.png": "4062789eed20bc013ad6f4217ee935d96b4c1b73a4a1393fcbb48e483cdc474e",
+    "assets/title-marquee-eyes-64-x4.png": "43e5513973f70d15b42f44a3827e000f41c080a8c3e540b1ec2b2834df6b5f4a",
     "assets/title-marquee-word.png": "2b16966fbc6b710954b71a5968607e92c2eed0b256654baace7cc9244a8164b6",
     "assets/weapon-0.png": "da5ff48c92b0641d3c21311f7d76040a5653115c56f50cbad3de6ebdb7089cca",
     "assets/weapon-1.png": "2521d31193c31c37276654990d98c21a184997b6ba3c2cf1f0d1ff9c96a1738b",
     "assets/weapon-2.png": "de7c4d11d03777c571f7fcb835bc61ec1f804ddb671e7816f12637a4f6f58e5a",
     "assets/weapon-3.png": "6bd55a9ea48ba40c6a0d9bb167475618ae8f52e217d153b2ca1adeff322dc61e",
     "assets/weapon-4.png": "0d87cf314fd65ad19ac0122dd4279beaab7db3cb02ec71b6ced264597565ee77",
-    "css/riftborn.e6f1761db6.css": "e6f1761db6769cdcd625723e08e18d4f2feff4189773b8d5f576279eb90f9793",
-    "index.html": "ea1da089a77d682a2f1de1007960ad5c3cb1e25ad4bff9a9de37d33ee60bd7d5",
-    "js/riftborn.b8de36be30.js": "b8de36be30e975219aca8bfede3ced1f2ab11b57ed17793f03ee3596688a017b",
+    "css/riftborn.55c6e1f363.css": "55c6e1f3638159df9cef6b75a496bbb537f05bf385c3658875380754d2d5162e",
+    "index.html": "8cb5f96444e7ac72bf8e255c4870900f4cfe14f35f612998b99aea716628c379",
+    "js/riftborn.5b39bdc8d1.js": "5b39bdc8d158459f923a8de9daedd09489c53efc87be43ae8551fd743bccca03",
     "manifest.webmanifest": "a39887e35e2b7c81e8877ab4ad61794716288b478e4d246b8ec39ff37c3a5d6c",
-    "version.json": "ae1a112931177058483ba7dd6d9f2a26e3614f76613e63ac445ea3f32aea648c"
+    "version.json": "1a9e008209c0b63abbe4f48d698facb29950df9f834373183d352796d4ee0643"
   }
 }
