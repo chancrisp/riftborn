@@ -2,10 +2,10 @@
   "name": "v2-3-1-styles",
   "url": "https://v2-3-1-styles.riftborn-dev.pages.dev/",
   "version": "2.3.1",
-  "build": "004adb7b24",
-  "module": "js/riftborn.af7703746a.js",
-  "branch": "v2.3.3-hollow-fix",
-  "commit": "3918a84c388efeff60d92c24db42d4af92ca2b04",
+  "build": "4255ebbb29",
+  "module": "js/riftborn.cb2b142afb.js",
+  "branch": "v2.3.3-texpreview-fix",
+  "commit": "d7f0f5f0422cb9f31db66ddcf28ccb0e93dd3c3b",
   "dirty": false,
-  "staged": "2026-10-01T22:39:32.761Z"
+  "staged": "2026-10-02T00:47:50.217Z"
 }
