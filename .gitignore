@@ -6,3 +6,9 @@ _site/
 .wrangler/
 .wrangler.deployment.jsonc
 _cf/
+
+# Local AI/development files - NEVER publish
+.openai/
+CLAUDE.md
+DESIGN.md
+AGENTS.md
