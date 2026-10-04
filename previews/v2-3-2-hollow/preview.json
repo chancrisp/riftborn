@@ -1,0 +1,11 @@
+{
+  "name": "v2-3-2-hollow",
+  "url": "https://v2-3-2-hollow.riftborn-dev.pages.dev/",
+  "version": "2.3.2",
+  "build": "c031e025bf",
+  "module": "js/riftborn.c6079a8940.js",
+  "branch": "v2.4.0",
+  "commit": "9942c3e7bc898ada705a740f36e9629678de3655",
+  "dirty": false,
+  "staged": "2026-10-04T22:29:07.141Z"
+}
