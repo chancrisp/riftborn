@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import worker from '../cloudflare/worker.js';
+import { cleanContext } from '../server/feedback-api.js';
 
 const sqlite = new DatabaseSync(':memory:');
 for (const file of fs.readdirSync('drizzle').filter(f => f.endsWith('.sql')).sort()) sqlite.exec(fs.readFileSync('drizzle/' + file, 'utf8'));
@@ -384,3 +385,20 @@ console.log('PASS feedback hardening: admin routes limited per IP before the key
 console.log('PASS feedback inbox origin: feedback.riftborn.us lists, exports and triages with the key (same key check, same admin rate limit), never submits (403 before any work), preflights offer only the admin methods; the games are unchanged.');
 
 console.log('PASS feedback: validation, honeypot, rate limit, no IPs, Discord ping, admin auth, filters, paging, status, CSV, CORS, self-bootstrap.');
+
+// ---- 2.4: run positions up to 6 (Pumpkin Hill adds a KEEPERS / Death Mode stage) -----------
+{
+  const lastRun = stage => cleanContext({ lastRun: { outcome: 'victory', stage, ruleset: 'keepers', cause: 'Gourd' } }).lastRun;
+  for (const stage of [1, 5, 6]) assert.equal(lastRun(stage).stage, stage, `lastRun.stage ${stage} is kept`);
+  for (const stage of [0, 7, 6.5, '6']) assert.equal(lastRun(stage).stage, undefined, `lastRun.stage ${JSON.stringify(stage)} is dropped`);
+  assert.equal(lastRun(7).outcome, 'victory', 'A bad stage drops only that field');
+  assert.equal(lastRun(6).cause, 'Gourd', 'Causes are free text: new enemy names pass, retired ones still read');
+  assert.equal(cleanContext({ build: 'keepers-4' }).build, 'keepers-4');
+  assert.equal(cleanContext({ build: 'original-2' }).build, 'original-2');
+  const r24 = await post({ ...good, id: undefined, message: 'Pumpkin Hill victory, the Gourd felt fine.', context: { ...good.context, build: 'keepers-4', lastRun: { ...good.context.lastRun, outcome: 'victory', stage: 6 } } }, { ip: '203.0.113.240' });
+  assert.equal(r24.status, 201, 'Feedback from a 6-stage run is accepted');
+  const row = sqlite.prepare("SELECT context_json, build FROM feedback WHERE message LIKE 'Pumpkin Hill%'").get();
+  assert.equal(JSON.parse(row.context_json).lastRun.stage, 6, 'The stored context keeps stage 6');
+  assert.equal(row.build, 'keepers-4');
+}
+console.log('PASS feedback 2.4: lastRun.stage 1-6 kept, 7 dropped, new stamps and causes stored.');

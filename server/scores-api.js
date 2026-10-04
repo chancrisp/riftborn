@@ -96,6 +96,10 @@ function lateColumnLost(db, error) {
   lateColumnCache.set(db, { failedAt: Date.now(), ready: Promise.resolve([]) });
 }
 const RIFT_SCORE_MAX = 1e10;
+// The furthest run position a payload may report (stage = position in the run, not the world id).
+// 2.4 adds Pumpkin Hill: KEEPERS and Death Mode runs have 6 stages (the Void Crown is the 6th);
+// ORIGINAL keeps 5. Older clients never send more than 5, so their runs stay valid.
+const STAGE_MAX = 6;
 // Characters a guest name may not contain once accounts are on: controls, format characters (zero
 // width spaces and joiners, word joiners, bidi controls, tags), private-use, unassigned and lone
 // surrogate code points, line/paragraph separators, and letters that render as blank space.
@@ -224,7 +228,7 @@ export async function handleScores(request, env, accounts = null) {
       !integer(p.score, 100000000) || !integer(p.kills, 1000000) || !integer(p.seconds, 86400) || p.seconds < 1 || !integer(p.wave, 2881) || p.wave !== 1 + Math.floor(p.seconds / 30)) {
       return json({ error: 'Invalid run' }, 400, origin);
     }
-    if (p.stage !== undefined && (!integer(p.stage, 5) || p.stage < 1)) return json({ error: 'Invalid stage' }, 400, origin);
+    if (p.stage !== undefined && (!integer(p.stage, STAGE_MAX) || p.stage < 1)) return json({ error: 'Invalid stage' }, 400, origin);
     if (p.played_at !== undefined && (!Number.isSafeInteger(p.played_at) || p.played_at < 0 || p.played_at > Date.now() + 300000)) return json({ error: 'Invalid run date' }, 400, origin);
     if (p.death_mode !== undefined && typeof p.death_mode !== 'boolean') return json({ error: 'Invalid run mode' }, 400, origin);
     if (p.statue_count !== undefined && !integer(p.statue_count, 1000)) return json({ error: 'Invalid statue count' }, 400, origin);

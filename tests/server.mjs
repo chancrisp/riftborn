@@ -31,7 +31,8 @@ assert.equal((await (await get()).json()).scores.length,1,'Retries must not dupl
 assert.equal((await (await get()).json()).scores[0].death_mode,null,'Older clients without a mode stay compatible');
 assert.equal((await (await get()).json()).scores[0].stage,3,'Stage is the reached world, not the timed wave');
 assert.equal((await (await get()).json()).scores[0].played_at,run.played_at,'The run date survives delayed/repeated submission');
-assert.equal((await post({...run,stage:6})).status,400);
+assert.equal((await post({...run,stage:6})).status,200,'2.4: stage 6 (the Void Crown after Pumpkin Hill) is a valid run position');
+for(const stage of [7,0,-1,5.5,'6',null])assert.equal((await post({...run,stage})).status,400,'Rejects stage '+JSON.stringify(stage));
 assert.equal((await post({...run,played_at:Date.now()+3600000})).status,400);
 assert.equal((await post({...run,id:'22222222-2222-4222-8222-222222222222',score:900,death_mode:false})).status,200);
 assert.equal((await (await get()).json()).scores[0].score,900);
@@ -147,3 +148,30 @@ console.log('PASS game_version: migration, validation, lazy idempotent column, l
   assert.equal((await send(rsEnv,{...game,id:uid(300),...patch})).status,400,'Rejects rift_score patch '+JSON.stringify(patch));
 }
 console.log('PASS ruleset: KEEPERS/ORIGINAL filters, Rift Score ranking and validation, unchanged default board.');
+{
+ // 2.4 (Pumpkin Hill): KEEPERS and Death Mode runs have 6 stages; new stamps keepers-4 and
+ // original-2. Stamps are pattern-checked, never allow-listed, so new and retired ones both save.
+ const db=legacyDb('0005');const {env:v24}=standIn(db);
+ const uid=n=>`bbbbbbbb-bbbb-4bbb-8bbb-${String(n).padStart(12,'0')}`;
+ // A full 6-stage KEEPERS Death victory as payloadOf + keepersWorkerPayload build it (about 12 min).
+ const seconds=735;
+ const victory={id:uid(1),name:'Gourd Smasher',score:412345,kills:612,wave:1+Math.floor(seconds/30),seconds,stage:6,played_at:Date.UTC(2026,9,3,20),
+  death_mode:true,statue_count:4,statue_modifier:120,outcome:'victory',gameplay_version:'keepers-4',game_version:'2.4.0',rift_score:2345678901};
+ assert.ok(JSON.stringify(victory).length<2048,'A 2.4 payload stays under the body limit');
+ assert.equal((await send(v24,victory)).status,200,'A 6-stage KEEPERS victory (keepers-4) is accepted');
+ assert.equal((await send(v24,{...victory,id:uid(2),score:301000,stage:3,death_mode:false,outcome:'defeat',rift_score:900000})).status,200,'A KEEPERS defeat on Pumpkin Hill (stage 3)');
+ assert.equal((await send(v24,{...victory,id:uid(3),name:'Classic',score:250000,stage:5,death_mode:false,gameplay_version:'original-2',rift_score:undefined})).status,200,'An ORIGINAL victory (original-2, 5 stages)');
+ assert.equal((await send(v24,{...victory,id:uid(4),name:'Classic Death',score:260000,stage:6,gameplay_version:'original-2',rift_score:undefined})).status,200,'An ORIGINAL Death Mode run may reach stage 6');
+ // Records from 2.3 clients (keepers-3 / original-1, stage <= 5, game_version 2.3.2) still save.
+ assert.equal((await send(v24,{...victory,id:uid(5),name:'Old Keeper',score:200000,stage:5,gameplay_version:'keepers-3',game_version:'2.3.2',rift_score:5000000})).status,200);
+ assert.equal((await send(v24,{...victory,id:uid(6),name:'Old Classic',score:150000,stage:5,death_mode:false,gameplay_version:'original-1',game_version:'2.3.2',rift_score:undefined})).status,200);
+ for(const patch of [{stage:7},{stage:0},{stage:6.5},{stage:'6'},{gameplay_version:'keepers 4'},{gameplay_version:'<b>keepers-4</b>'},{rift_score:5,gameplay_version:'original-2'}])
+  assert.equal((await send(v24,{...victory,id:uid(9),...patch})).status,400,'Rejects 2.4 patch '+JSON.stringify(patch));
+ const board=async q=>(await (await at(v24,'/api/scores?'+q)).json());
+ assert.deepEqual((await board('mode=death&version=keepers-4&ruleset=keepers')).scores.map(r=>[r.name,r.stage,r.outcome,r.gameplay_version,r.rift_score]),
+  [['Gourd Smasher',6,'victory','keepers-4',2345678901]],'The keepers-4 board returns the stage-6 victory');
+ assert.deepEqual((await board('mode=death&version=all&ruleset=keepers')).scores.map(r=>r.gameplay_version),['keepers-4','keepers-3'],'All KEEPERS stamps rank together by Rift Score');
+ assert.deepEqual((await board('mode=all&version=all&ruleset=original')).scores.map(r=>[r.gameplay_version,r.stage]),[['original-2',6],['original-2',5],['original-1',5]],'original-2 is an ORIGINAL run');
+ assert.equal((await board('mode=all&version=original-2')).scores.length,2,'The version filter takes the new ORIGINAL stamp');
+}
+console.log('PASS 2.4: stage 6 accepted and 7 rejected, keepers-4 / original-2 stamps, 2.3 records still valid.');

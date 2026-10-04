@@ -105,7 +105,8 @@ function cleanLastRun(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const out = {
     outcome: ['victory', 'defeat', 'quit', 'ended'].includes(raw.outcome) ? raw.outcome : null,
-    stage: int(raw.stage, 1, 5),
+    // Run position (2.4: KEEPERS and Death Mode runs have 6 stages, ORIGINAL 5).
+    stage: int(raw.stage, 1, 6),
     score: int(raw.score, 0, 1000000000),
     kills: int(raw.kills, 0, 10000000),
     seconds: int(raw.seconds, 0, 86400),
