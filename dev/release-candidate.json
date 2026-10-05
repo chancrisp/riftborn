@@ -1,6 +1,6 @@
 {
   "version": "2.4.0",
-  "build": "8c6b0a505b",
+  "build": "80114de102",
   "files": {
     ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "assets/app-icon-192.png": "b6bf14082cb53bb3e872df136cfb6ff80f63a8cdbb3f01a6e85bdaf8f9da6dda",
@@ -69,8 +69,8 @@
     "assets/looks/atlas-hollow-w1.png": "daf6dc63142504b0ae8c48891fe3fa8f323849304dd19ecef61f27164728316b",
     "assets/looks/atlas-hollow-w2.png": "30967c119b703190d4ba37c322b769f2bfab531d49336b121f2541b165df0baa",
     "assets/looks/atlas-hollow-w3.png": "309b6e6cdf24646c5759b7ffbc87781e05d635d6db29b7c51a7e4b9ba4f2114d",
-    "assets/looks/atlas-hollow-w4.png": "6537e48b543d905e0256202164246a039b0f0f3f5c9aee6f8e929fde385df101",
-    "assets/looks/atlas-hollow-w5.png": "b207ba7924499936f562cf4e80d7e059a1439a2d9b648d8afef93a103888a207",
+    "assets/looks/atlas-hollow-w4.png": "927307af22c88c33ac20d34371d315e17ec32f4267020666e2d168c8ed61652e",
+    "assets/looks/atlas-hollow-w5.png": "7ede92e8c2d9e9464e71068d8abc2a5e0c506713480f82d422de4a4359b1d671",
     "assets/looks/atlas-hollow-w6.png": "199f9c9413f7c3a21c72b067b6a06e5854c8050eb0cb9e93e0dfe4a829ecda2e",
     "assets/looks/atlas-remastered.png": "7f164d946b3417f57b6d1ec6da4e2d52838b11e6e27608723250dfa5f5e90844",
     "assets/looks/atlas-vivid-w1.png": "6be5722e8ef84ec37c1eceab1048cc351b3194e9e4eb7e513863e378b190458d",
@@ -113,9 +113,9 @@
     "assets/weapon-3.png": "6bd55a9ea48ba40c6a0d9bb167475618ae8f52e217d153b2ca1adeff322dc61e",
     "assets/weapon-4.png": "0d87cf314fd65ad19ac0122dd4279beaab7db3cb02ec71b6ced264597565ee77",
     "css/riftborn.df177b3691.css": "df177b3691eb558f07194fb8db6c362ded7821d5d2eb81fb56bd179307b99704",
-    "index.html": "d4d6d72c8eb8aa591a0f126b1b2b83e6e5cc56b38157b3e37a2ec85474501d33",
-    "js/riftborn.fcf26e02f1.js": "fcf26e02f1562e9889acc1ee19ee1b9e813e76c246348b84c162cae6ea50a3e1",
+    "index.html": "af6497be9d7c2a230678f7cdf28cc169f8cda76eeb5204dd1defc444982b9955",
+    "js/riftborn.75ee0556d5.js": "75ee0556d50e0a60f3bd421fb7f0f6b317bd8608d748072a51eaba663b2bf0ab",
     "manifest.webmanifest": "09ec31a38e77b6310f6a9affe9699c4909d5648416cbb91f6bbbab98d0ddda71",
-    "version.json": "b416b96387dccc4f8309e75bd7cbfba40b1212867dc34ab564dee4882e09c183"
+    "version.json": "9ff1947bf12ca0f60a60eb7912edd50d9131d8fee66a83b064ae56d1769c5a2c"
   }
 }

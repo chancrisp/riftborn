@@ -2,10 +2,10 @@
   "name": "v2-4-0",
   "url": "https://v2-4-0.riftborn-dev.pages.dev/",
   "version": "2.4.0",
-  "build": "8c6b0a505b",
-  "module": "js/riftborn.fcf26e02f1.js",
+  "build": "80114de102",
+  "module": "js/riftborn.75ee0556d5.js",
   "branch": "v2.4.0",
-  "commit": "8786e39673ea520f4bb6ab25223375aa0a31baf7",
+  "commit": "6e7dc87b18b1a7811dc56d1f8e57f46eaa091266",
   "dirty": false,
-  "staged": "2026-10-05T11:28:05.017Z"
+  "staged": "2026-10-05T12:46:03.429Z"
 }
