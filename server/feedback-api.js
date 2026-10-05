@@ -14,7 +14,7 @@ export const CONTACT_MAX = 120;
 export const BODY_MAX = 8192;
 // Settings the game summarises into context.settings; anything else is dropped.
 export const SETTINGS_KEYS = ['nightmare', 'pixelation', 'lighting', 'fog', 'fpsCap', 'crt', 'radar', 'muted', 'aimAssist',
-  'autoFire', 'fireMode', 'palette', 'flashes', 'shake', 'gameSpeed', 'uiScale'];
+  'autoFire', 'fireMode', 'palette', 'flashes', 'shake', 'gameSpeed', 'uiScale', 'textures', 'outline', 'weaponSlots'];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const METHODS = 'GET, POST, PATCH, OPTIONS';

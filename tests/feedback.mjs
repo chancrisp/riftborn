@@ -40,7 +40,7 @@ const good = {
   context: {
     build: 'keepers-2', ruleset: 'keepers', source: 'dev', from: 'results', browser: 'Chrome 131', os: 'Windows', screen: '1920x1080@1',
     touch: false, device: 'mouse', avgFps: 58.456, secret: 'dropped',
-    settings: { pixelation: 'auto', fpsCap: 60, nightmare: false, hacker: 'dropped' },
+    settings: { pixelation: 'auto', fpsCap: 60, nightmare: false, textures: 'hollow', outline: true, weaponSlots: 'right', hacker: 'dropped' },
     lastRun: { outcome: 'defeat', stage: 3, score: 12000, kills: 140, seconds: 612, ruleset: 'keepers', death: false, practice: false, extra: 1 }
   },
   unknownTopLevel: 'dropped'
@@ -85,7 +85,7 @@ assert.equal(row.contact, 'ash#1234');
 const ctxStored = JSON.parse(row.context_json);
 assert.equal(ctxStored.secret, undefined, 'Unknown context keys are dropped');
 assert.equal(ctxStored.settings.hacker, undefined, 'Unknown settings are dropped');
-assert.deepEqual(ctxStored.settings, { pixelation: 'auto', fpsCap: 60, nightmare: false });
+assert.deepEqual(ctxStored.settings, { pixelation: 'auto', fpsCap: 60, nightmare: false, textures: 'hollow', outline: true, weaponSlots: 'right' });
 assert.equal(ctxStored.lastRun.extra, undefined);
 assert.equal(ctxStored.avgFps, 58.5);
 assert.ok(!JSON.stringify(rows()).includes('203.0.113.9'), 'No IP address is stored');
