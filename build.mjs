@@ -9,6 +9,6 @@ fs.mkdirSync('dist/server',{recursive:true});fs.mkdirSync('dist/.openai',{recurs
 const scoreApi=fs.readFileSync('server/scores-api.js','utf8').replace('export async function handleScores','async function handleScores');
 const worker=fs.readFileSync('server/worker.js','utf8').replace("import { handleScores } from './scores-api.js';", '');
 fs.writeFileSync('dist/server/index.js','const ASSETS='+JSON.stringify(assets)+';\n'+scoreApi+'\n'+worker);
-fs.copyFileSync('.openai/hosting.json','dist/.openai/hosting.json');
+if(fs.existsSync('.openai/hosting.json'))fs.copyFileSync('.openai/hosting.json','dist/.openai/hosting.json'); // the local-only .openai/ folder was removed from the repo (6631b6e)
 fs.cpSync('drizzle','dist/.openai/drizzle',{recursive:true});
 console.log('Built game Worker with '+Object.keys(assets).length+' public assets and D1 migrations.');
