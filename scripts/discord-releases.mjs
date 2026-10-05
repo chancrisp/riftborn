@@ -157,4 +157,32 @@ Full notes in {#patch-notes} · Play now: https://riftborn.us`,
 
 Full notes in-game: **PATCH NOTES** on the main menu.`,
   },
+  // 2.4.0, owner-approved 2026-10-05 (texts approved, "ping both", "ship it"):
+  // News pings on the announcement, Patch pings on the patch notes.
+  {
+    version: '2.4.0',
+    ping: { announcement: true, patchNotes: true },
+    announcement: `**Riftborn 2.4 · Pumpkin Hill is live!**
+- A sixth world, **Pumpkin Hill**, with a new keeper, **The Cairn**, and a new Skull Trial
+- A new wide monster, the **Gourd**, while the crawlers are gone
+- New music: a Pumpkin Hill song, a second battle song and a keeper boss theme
+- A **Textures** setting, and a spooky **Hollow Rift** title for October
+
+Full notes in {#patch-notes} · Play now: https://riftborn.us`,
+    patchNotes: `**v2.4 · Pumpkin Hill** (5 Oct 2026)
+- **Pumpkin Hill:** a sixth world, the third stop of the KEEPERS run (Death Mode included): rust-brown hills and olive rock, a grey-blue church, a ghost train and jack-o'-lantern spires. ORIGINAL keeps its five worlds.
+- **The Cairn:** Pumpkin Hill's keeper. Stay off its front, step beside its Ember Breath and shoot the grin. Break it and its shade joins the Rift Warden's finale. New mastery: Unsinged (Spire badge).
+- **Patch Harvest:** Pumpkin Hill's Skull Trial, with a new pumpkin skull statue. Smash eight lit pumpkins, and mind the rotten ones.
+- **The Gourd:** a new wide, tough monster. Walk round it.
+- **Crawlers removed:** the Skitter, Leaper and Broodmother are gone from every ruleset. Splitters now release two Restless.
+- **New music:** a Pumpkin Hill song, a second battle song for the Caldera, Citadel and Void Crown, and a boss theme for every keeper fight.
+- **Textures:** a new setting in Settings › Graphics: Classic (the default), Remastered, Gritty, Vivid or Hollow, with a preview. A Character outline switch joins it.
+- **Hollow Rift:** an October-only title: ash letters round a pumpkin skull with green flame eyes.
+- **Chapel of the Last Lantern:** a sixth landmark for the Journal's WORLDS map.
+- **Fresh KEEPERS leaderboard** for the new route. Older runs show when you switch off CURRENT RULES ONLY. ORIGINAL personal bests start fresh too.
+- **The Void Crown:** far more open in KEEPERS, with no narrow lanes, and the Crown Dais now glows teal to show where to stand.
+- **Fixes:** a thumb on the status panel of an upright phone now still moves the hero, phone power-ups and omen chips fit, and the tablet unlock popup clears the captions.
+
+Full notes in-game: **PATCH NOTES** on the main menu.`,
+  },
 ];

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Riftborn – a PS1-style browser shooter</title>
-<meta name="description" content="A PS1-style survival shooter you play in your browser. Blast through five fractured worlds, break the Keepers and take down the Rift Warden. Free, no download.">
+<meta name="description" content="A PS1-style survival shooter you play in your browser. Blast through six fractured worlds, break the Keepers and take down the Rift Warden. Free, no download.">
 <meta name="theme-color" content="#8F5BFF">
 <link rel="canonical" href="https://riftborn.us/">
 <!-- SOCIAL CARD (tests/social-card.test.mjs): how a shared link shows up in Discord, X/Twitter, Slack, Facebook
@@ -15,7 +15,7 @@ handoff pages (site repo scripts/pages-templates.mjs) carry the same tags: keep 
 <meta property="og:site_name" content="Riftborn">
 <meta property="og:url" content="https://riftborn.us/">
 <meta property="og:title" content="Riftborn – a PS1-style browser shooter">
-<meta property="og:description" content="A PS1-style survival shooter you play in your browser. Blast through five fractured worlds, break the Keepers and take down the Rift Warden. Free, no download.">
+<meta property="og:description" content="A PS1-style survival shooter you play in your browser. Blast through six fractured worlds, break the Keepers and take down the Rift Warden. Free, no download.">
 <meta property="og:image" content="https://riftborn.us/assets/riftborn-card.jpg?v=1">
 <meta property="og:image:type" content="image/jpeg">
 <meta property="og:image:width" content="1200">
@@ -23,7 +23,7 @@ handoff pages (site repo scripts/pages-templates.mjs) carry the same tags: keep 
 <meta property="og:image:alt" content="Riftborn logo, an octagon badge with a red skull and glowing purple eyes beside purple pixel-art RIFTBORN lettering, over a dark game screenshot: a lone survivor fires green bolts into a horde of red monsters around a skull shrine and lava pools. Tagline: PS1-style browser shooter. Footer: Free, no download, play @ riftborn.us.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Riftborn – a PS1-style browser shooter">
-<meta name="twitter:description" content="A PS1-style survival shooter you play in your browser. Blast through five fractured worlds, break the Keepers and take down the Rift Warden. Free, no download.">
+<meta name="twitter:description" content="A PS1-style survival shooter you play in your browser. Blast through six fractured worlds, break the Keepers and take down the Rift Warden. Free, no download.">
 <meta name="twitter:image" content="https://riftborn.us/assets/riftborn-card.jpg?v=1">
 <meta name="twitter:image:alt" content="Riftborn logo, an octagon badge with a red skull and glowing purple eyes beside purple pixel-art RIFTBORN lettering, over a dark game screenshot: a lone survivor fires green bolts into a horde of red monsters around a skull shrine and lava pools. Tagline: PS1-style browser shooter. Footer: Free, no download, play @ riftborn.us.">
 <script>/* MOVE CAPTURE (v2.2, src/meta/migration.js): the old address (chancrisp.github.io/riftborn/) hands
@@ -43,7 +43,7 @@ so a reload before it lands can't lose it, in this tab's sessionStorage. Runs be
 <script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
 the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
 makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
-window.RIFTBORN_BUILD = "ed1036a368";
+window.RIFTBORN_BUILD = "cdae6c14e6";
 (function () {
   var b = window.RIFTBORN_BUILD;
   if (b === "dev" || !window.fetch || !window.URL) return;
@@ -173,8 +173,8 @@ body:has(#devGate) #riftLoader{display:none}
 /* Reduced motion: a calm, still screen; the bar and skull step between stages, the eyes just switch on. */
 @media (prefers-reduced-motion:reduce){.rl-embers,.rl-heat,.rl-sweep,.rl-dots{display:none}#riftLoader .rl-ring,#riftLoader .rl-bob,#riftLoader .rl-rift-glow{animation:none}.rl-fill,.rl-rider,.rl-mark{transition:none}#riftLoader.rl-lit .rl-eyes{animation:none;opacity:1}#riftLoader.rl-lit .rl-rift-glow{animation:none;opacity:.9}#riftLoader{transition-duration:.25s}}
 </style>
-<link rel="modulepreload" href="js/riftborn.9be423be70.js">
-<link rel="stylesheet" href="css/riftborn.55c6e1f363.css">
+<link rel="modulepreload" href="js/riftborn.1962dde11a.js">
+<link rel="stylesheet" href="css/riftborn.df177b3691.css">
 </head>
 <body class="menu-open">
 <div id="riftLoader" role="dialog" aria-modal="true" aria-label="Loading Riftborn">
@@ -347,7 +347,7 @@ body:has(#devGate) #riftLoader{display:none}
 <aside id="devTools" class="hidden" aria-label="Practice tools"></aside>
 
 <noscript><p class="noscript">Riftborn needs JavaScript and WebGL.</p></noscript>
-<script type="module" src="js/riftborn.9be423be70.js"></script>
+<script type="module" src="js/riftborn.1962dde11a.js"></script>
 <script>/* Boot errors before the game is ready: the loading screen stops and says why (src/ui/boot-loader.js does
 the same for a boot that throws). Listening in the capture phase also catches the bundle failing to
 download, a <script> load error that never bubbles; other resources (an image, a font) are ignored. */
