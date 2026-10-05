@@ -14,7 +14,7 @@ export const CONTACT_MAX = 120;
 export const BODY_MAX = 8192;
 // Settings the game summarises into context.settings; anything else is dropped.
 export const SETTINGS_KEYS = ['nightmare', 'pixelation', 'lighting', 'fog', 'fpsCap', 'crt', 'radar', 'muted', 'aimAssist',
-  'autoFire', 'fireMode', 'palette', 'flashes', 'shake', 'gameSpeed', 'uiScale'];
+  'autoFire', 'fireMode', 'palette', 'flashes', 'shake', 'gameSpeed', 'uiScale', 'textures', 'outline', 'weaponSlots'];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const METHODS = 'GET, POST, PATCH, OPTIONS';
@@ -105,7 +105,8 @@ function cleanLastRun(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const out = {
     outcome: ['victory', 'defeat', 'quit', 'ended'].includes(raw.outcome) ? raw.outcome : null,
-    stage: int(raw.stage, 1, 5),
+    // Run position (2.4: KEEPERS and Death Mode runs have 6 stages, ORIGINAL 5).
+    stage: int(raw.stage, 1, 6),
     score: int(raw.score, 0, 1000000000),
     kills: int(raw.kills, 0, 10000000),
     seconds: int(raw.seconds, 0, 86400),
