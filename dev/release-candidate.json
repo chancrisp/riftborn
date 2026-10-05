@@ -1,6 +1,6 @@
 {
   "version": "2.4.0",
-  "build": "ece9d3a3c2",
+  "build": "3bc039a3b5",
   "files": {
     ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "assets/app-icon-192.png": "b6bf14082cb53bb3e872df136cfb6ff80f63a8cdbb3f01a6e85bdaf8f9da6dda",
@@ -113,9 +113,9 @@
     "assets/weapon-3.png": "6bd55a9ea48ba40c6a0d9bb167475618ae8f52e217d153b2ca1adeff322dc61e",
     "assets/weapon-4.png": "0d87cf314fd65ad19ac0122dd4279beaab7db3cb02ec71b6ced264597565ee77",
     "css/riftborn.df177b3691.css": "df177b3691eb558f07194fb8db6c362ded7821d5d2eb81fb56bd179307b99704",
-    "index.html": "1d43aa5578c65ffa158d1fb95990698e3c4d465be2b7ddf41033e4d8bd3f90fd",
-    "js/riftborn.dc565c53c2.js": "dc565c53c2506d7df8ee31eb6530995e90c5fdd074592fa0a1be305f34413153",
+    "index.html": "485365a0fb1bff7accaffe8c0a934e220978236ef2cf4f68953f8730ea6cea07",
+    "js/riftborn.673807fccd.js": "673807fccdd191c35c1f6811a07f44dfbf99712783762cec5b724ac3b4b9bf88",
     "manifest.webmanifest": "09ec31a38e77b6310f6a9affe9699c4909d5648416cbb91f6bbbab98d0ddda71",
-    "version.json": "5d63a88f590081b1889038bfa4a2898e5ea6680956ed2b8c5444761771352f9e"
+    "version.json": "a939d892bd25e5dd90a68f9d95799027218e8e09c3f22e7e3ca90abb563aba8c"
   }
 }
