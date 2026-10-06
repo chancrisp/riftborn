@@ -2,10 +2,10 @@
   "name": "v2-4-0-cards",
   "url": "https://v2-4-0-cards.riftborn-dev.pages.dev/",
   "version": "2.4.0",
-  "build": "cc78dbbfc3",
-  "module": "js/riftborn.6aa953b97c.js",
+  "build": "2027f97890",
+  "module": "js/riftborn.29860a6324.js",
   "branch": "v2.5.0",
-  "commit": "6e4c1a190c7bbbbe14d19949a4605ec540835cc9",
+  "commit": "2f8769fdb9a2ddfe3b0bf5600e797524f4f53dff",
   "dirty": false,
-  "staged": "2026-10-05T21:12:47.309Z"
+  "staged": "2026-10-06T02:00:13.449Z"
 }
