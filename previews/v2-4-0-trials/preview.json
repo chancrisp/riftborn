@@ -1,0 +1,11 @@
+{
+  "name": "v2-4-0-trials",
+  "url": "https://v2-4-0-trials.riftborn-dev.pages.dev/",
+  "version": "2.4.0",
+  "build": "a62ceadb98",
+  "module": "js/riftborn.80e8259927.js",
+  "branch": "v2.5.0",
+  "commit": "6443318436145f1eeb51c0df2ec32016d379aac9",
+  "dirty": false,
+  "staged": "2026-10-06T04:21:35.376Z"
+}
