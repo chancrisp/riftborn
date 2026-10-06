@@ -2,10 +2,10 @@
   "name": "v2-4-0-terrain",
   "url": "https://v2-4-0-terrain.riftborn-dev.pages.dev/",
   "version": "2.4.0",
-  "build": "c6b9701dfb",
-  "module": "js/riftborn.0ae082a054.js",
+  "build": "a5066d1b42",
+  "module": "js/riftborn.869347aa39.js",
   "branch": "v2.5.0-terrain",
-  "commit": "358a381a7d68c2413be1f98d3ac19618707e9a21",
+  "commit": "2f8fb56a81256c59dbb7b01dd14a26ad110b6c0f",
   "dirty": false,
-  "staged": "2026-10-06T19:37:26.414Z"
+  "staged": "2026-10-06T20:17:29.239Z"
 }
