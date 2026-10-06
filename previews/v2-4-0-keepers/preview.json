@@ -2,10 +2,10 @@
   "name": "v2-4-0-keepers",
   "url": "https://v2-4-0-keepers.riftborn-dev.pages.dev/",
   "version": "2.4.0",
-  "build": "c48633cd60",
-  "module": "js/riftborn.ac96beb9d4.js",
+  "build": "8dc29f2408",
+  "module": "js/riftborn.95f1d06b0f.js",
   "branch": "v2.5.0",
-  "commit": "67c9a64944f9ce4ee9f64ce4c78d03047cbfda07",
+  "commit": "a2f5f44c317cf7406da10109cbf5af7604b8188f",
   "dirty": false,
-  "staged": "2026-10-06T12:39:09.021Z"
+  "staged": "2026-10-06T14:26:10.289Z"
 }
