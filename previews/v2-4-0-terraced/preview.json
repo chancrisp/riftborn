@@ -2,10 +2,10 @@
   "name": "v2-4-0-terraced",
   "url": "https://v2-4-0-terraced.riftborn-dev.pages.dev/",
   "version": "2.4.0",
-  "build": "b4edddc727",
-  "module": "js/riftborn.acd54aa2dc.js",
+  "build": "5079a07d5d",
+  "module": "js/riftborn.c71aa8e39b.js",
   "branch": "v2.5.0-terrain",
-  "commit": "df86ffd64ebab601451b65fda903eda11aacb21e",
+  "commit": "1267ce795a553abcbdbb77d7f5e6991aa3fa6366",
   "dirty": false,
-  "staged": "2026-10-07T18:16:53.142Z"
+  "staged": "2026-10-07T23:07:18.151Z"
 }

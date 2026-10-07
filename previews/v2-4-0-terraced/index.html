@@ -44,7 +44,7 @@ so a reload before it lands can't lose it, in this tab's sessionStorage. Runs be
 <script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
 the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
 makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
-window.RIFTBORN_BUILD = "b4edddc727";
+window.RIFTBORN_BUILD = "5079a07d5d";
 (function () {
   var b = window.RIFTBORN_BUILD;
   if (b === "dev" || !window.fetch || !window.URL) return;
@@ -174,7 +174,7 @@ body:has(#devGate) #riftLoader{display:none}
 /* Reduced motion: a calm, still screen; the bar and skull step between stages, the eyes just switch on. */
 @media (prefers-reduced-motion:reduce){.rl-embers,.rl-heat,.rl-sweep,.rl-dots{display:none}#riftLoader .rl-ring,#riftLoader .rl-bob,#riftLoader .rl-rift-glow{animation:none}.rl-fill,.rl-rider,.rl-mark{transition:none}#riftLoader.rl-lit .rl-eyes{animation:none;opacity:1}#riftLoader.rl-lit .rl-rift-glow{animation:none;opacity:.9}#riftLoader{transition-duration:.25s}}
 </style>
-<link rel="stylesheet" href="css/riftborn.79272dcfa7.css">
+<link rel="stylesheet" href="css/riftborn.31a91f798b.css">
 </head>
 <body class="menu-open">
 <div id="riftLoader" role="dialog" aria-modal="true" aria-label="Loading Riftborn">
@@ -284,14 +284,15 @@ body:has(#devGate) #riftLoader{display:none}
 </section>
 
 <section id="pauseMenu" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
-  <div class="pause-card ui-scaled">
-    <h2 id="pauseTitle">RUN PAUSED</h2>
-    <p id="pauseStats" class="muted"></p>
-    <p id="buildSummary"></p>
-    <button id="resume" type="button" class="primary">RESUME RUN</button>
-    <div class="menu-grid pause-grid"><button id="pauseSettings" type="button" class="secondary">SETTINGS</button><button id="pauseLeaderboard" type="button" class="secondary">LEADERBOARD</button><button id="pauseProfile" type="button" class="secondary">JOURNAL</button></div>
-    <button id="abandonTrial" type="button" class="secondary hidden">ABANDON TRIAL · KEEP CURSE</button>
-    <div class="exit-group"><button id="endRun" type="button" class="secondary exit-run">END RUN &amp; SAVE SCORE</button><button id="quitRun" type="button" class="secondary exit-run">QUIT TO MENU</button></div>
+  <div class="pause-card pp ui-scaled">
+    <div id="pauseBanner" class="pp-banner"><h2 id="pauseTitle" class="pp-paused" aria-label="RUN PAUSED"><span class="pp-ic" data-icon="paused" aria-hidden="true"></span>PAUSED</h2></div>
+    <div class="pp-col pp-col-a"><div id="pauseStats" class="pp-stats"></div><div id="pauseWell" class="pp-well"></div><div id="pauseFoot" class="pp-foot"></div></div>
+    <div class="pp-col pp-col-b"><div id="pauseCaption" class="pp-cap"></div>
+    <div class="pp-actions">
+      <button id="resume" type="button" class="primary pp-resume" aria-label="RESUME RUN"><span class="pp-ic" data-icon="resume" aria-hidden="true"></span><span class="pp-lbl">RESUME</span></button>
+      <div class="pp-menu" data-nav-grid role="group" aria-label="Menu"><div class="pp-btns"><button id="pauseSettings" type="button" class="secondary pp-btn" aria-label="SETTINGS"><span class="pp-ic" data-icon="settings" aria-hidden="true"></span><span class="pp-lbl">SETTINGS</span></button><button id="pauseLeaderboard" type="button" class="secondary pp-btn" aria-label="LEADERBOARD"><span class="pp-ic" data-icon="leaderboard" aria-hidden="true"></span><span class="pp-lbl"><span class="pp-lg">LEADERBOARD</span><span class="pp-sm">BOARD</span></span></button><button id="pauseProfile" type="button" class="secondary pp-btn" aria-label="JOURNAL"><span class="pp-ic" data-icon="journal" aria-hidden="true"></span><span class="pp-lbl">JOURNAL</span></button><button id="pauseLegend" type="button" class="secondary pp-btn" aria-label="LEGEND" aria-haspopup="dialog"><span class="pp-ic" data-icon="legend" aria-hidden="true"></span><span class="pp-lbl">LEGEND</span></button></div>
+      <div class="pp-btns pp-exits"><button id="endRun" type="button" class="secondary pp-btn pp-exit" aria-label="END RUN &amp; SAVE SCORE"><span class="pp-ic" data-icon="end" aria-hidden="true"></span><span class="pp-lbl">END RUN</span></button><button id="quitRun" type="button" class="secondary pp-btn pp-exit" aria-label="QUIT TO MENU"><span class="pp-ic" data-icon="quit" aria-hidden="true"></span><span class="pp-lbl">QUIT</span></button><button id="abandonTrial" type="button" class="secondary pp-btn pp-exit hidden" aria-label="ABANDON TRIAL · KEEP CURSE"><span class="pp-ic" data-icon="abandon" aria-hidden="true"></span><span class="pp-lbl">ABANDON</span></button></div></div>
+    </div></div>
   </div>
 </section>
 
@@ -303,13 +304,11 @@ body:has(#devGate) #riftLoader{display:none}
       <button id="tabAudio" type="button" role="tab" aria-selected="false" aria-controls="panelAudio" tabindex="-1">AUDIO</button>
       <button id="tabControls" type="button" role="tab" aria-selected="false" aria-controls="panelControls" tabindex="-1">CONTROLS</button>
       <button id="tabAccess" type="button" role="tab" aria-selected="false" aria-controls="panelAccess" tabindex="-1">ACCESS</button>
-      <button id="tabCursor" type="button" role="tab" aria-selected="false" aria-controls="panelCursor" tabindex="-1">CURSOR</button>
     </div>
     <div id="panelGraphics" role="tabpanel" aria-labelledby="tabGraphics"></div>
     <div id="panelAudio" role="tabpanel" aria-labelledby="tabAudio" hidden></div>
     <div id="panelControls" role="tabpanel" aria-labelledby="tabControls" hidden></div>
     <div id="panelAccess" role="tabpanel" aria-labelledby="tabAccess" hidden></div>
-    <div id="panelCursor" role="tabpanel" aria-labelledby="tabCursor" hidden></div>
   </div>
 </section>
 
@@ -441,7 +440,7 @@ checks this table before every deploy. */
 (function () {
   var HASH = "6057f115a0d917397c72f5ca48b752fd27cf76370e923af446247ab2f525b87c";
   var KEY = "riftborn-dev-gate";
-  var GAME = "js/riftborn.acd54aa2dc.js";
+  var GAME = "js/riftborn.c71aa8e39b.js";
   var gate = document.getElementById("devGate");
   var form = document.getElementById("devGateForm");
   var input = document.getElementById("devGatePass");
