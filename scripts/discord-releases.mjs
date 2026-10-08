@@ -185,4 +185,34 @@ Full notes in {#patch-notes} · Play now: https://riftborn.us`,
 
 Full notes in-game: **PATCH NOTES** on the main menu.`,
   },
+  // 2.5.0, owner-approved 2026-10-08 (texts approved, "ping both", "go live"):
+  // News pings on the announcement, Patch pings on the patch notes (the owner's call, as for 2.3 and 2.4).
+  {
+    version: '2.5.0',
+    ping: { announcement: true, patchNotes: true },
+    announcement: `**Riftborn 2.5 · Shifting Worlds is live!**
+- Five worlds **shift their layout** between runs, and you can now **drop off ledges**
+- Upgrades roll **Common, Rare or Epic**, and Skull Trials come in three versions
+- A deck of twenty **omens** on the statues, and **far tougher keepers**
+- A redrawn HUD, pause card, results screen and leaderboard, plus a **crosshair** you can style
+- **ORIGINAL** is retired, and the KEEPERS leaderboard starts fresh
+
+Full notes in {#patch-notes} · Play now: https://riftborn.us`,
+    patchNotes: `**v2.5 · Shifting Worlds** (8 Oct 2026)
+- **New layouts:** the Meadows, Shattered Quarry, Ember Caldera, Aurora Citadel and Void Crown build a fresh layout each run, moving the rift portal, the paths and the skull statues. If one cannot be built, the world uses its classic map. Pumpkin Hill keeps its landscape and portal.
+- **Ledge drops:** step or dash off a ledge and drop to the ground below, with no fall damage. You cannot climb back up a cliff.
+- **Upgrade rarities:** cards roll Common, Rare or Epic (75%, 20% and 5% to start). Rare is about 1.5x as strong, Epic 2x, and every Epic adds a bonus.
+- **Skull Trials:** the Meadows, Quarry, Pumpkin Hill, Caldera and Citadel hold 2 or 3 each, in one of three versions. Every trial you start adds luck that improves your odds.
+- **Omen deck:** ten new omens, twenty in all. Each run deals 10 to 20 omen statues and none repeats.
+- **Tougher keepers:** far more health, faster moves and shorter pauses. Iron Maw now leaps instead of charging.
+- **Rift Warden:** redrawn as a hooded jailer, with a new Rift Lance beam and an Unbound phase at 35% health.
+- **Landmark hint:** SOMETHING OLD STIRS NEARBY shows within 20 m of an undiscovered landmark.
+- **Redrawn:** the HUD, stage banners, pause card (with a new LEGEND button), results screen, Journal, Patch Notes and Settings.
+- **Leaderboard:** a ladder with headshots and route pips. Pick a row to open its run card.
+- **Settings:** HUD opacity, a CROSSHAIR group, search and reset, and graphics presets: LOW, BALANCED, PIXEL-AUTHENTIC or five of your own.
+- **Changes:** ORIGINAL is retired (old scores stay on its tab) and the radar is removed.
+- **Fresh KEEPERS leaderboard** and personal bests. Older runs show when you switch off CURRENT RULES ONLY.
+
+Full notes in-game: **PATCH NOTES** on the main menu.`,
+  },
 ];
