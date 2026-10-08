@@ -1,6 +1,6 @@
 {
-  "version": "2.4.0",
-  "build": "cdae6c14e6",
+  "version": "2.5.0",
+  "build": "a76554ffdc",
   "files": {
     ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "assets/app-icon-192.png": "b6bf14082cb53bb3e872df136cfb6ff80f63a8cdbb3f01a6e85bdaf8f9da6dda",
@@ -79,7 +79,7 @@
     "assets/looks/atlas-vivid-w4.png": "5824e9a1f5d2dcdd0ea0704abb7d9c1d13d35f2986792e06c5ac7fe4cfe3425d",
     "assets/looks/atlas-vivid-w5.png": "ae18bc3720a5f3e40937d90c107f7ba18f9a085d6121fa378773e7e52882db2a",
     "assets/looks/atlas-vivid-w6.png": "9fa5036c2927d5db4530106b9bf30dd56b245cd444fc86971b6bb0ef9bec1cb8",
-    "assets/ps1-atlas.png": "065604d7c84a1f2ad12a80ca57320a831e44ae4b2de90c7d09b8df000575eb17",
+    "assets/ps1-atlas.png": "03c3eaec5aa3530540e1d2037bace34017277aad68d15c6e265b0ccb10a571c2",
     "assets/riftborn-card.jpg": "93014d34a2df1cb356da494b41cdaf9c62d840961b80121ed070bfc77d8c2973",
     "assets/statue-pumpkin-skull-out.png": "b191ccfc666a999dd82c34dad79ae337c2cb5718afd6ed0bb733445a756af533",
     "assets/statue-pumpkin-skull.png": "76fcd2ad76758915ca523ef4ef6ff1c630fd63f00c3136564a3760263be8c4d7",
@@ -112,10 +112,25 @@
     "assets/weapon-2.png": "de7c4d11d03777c571f7fcb835bc61ec1f804ddb671e7816f12637a4f6f58e5a",
     "assets/weapon-3.png": "6bd55a9ea48ba40c6a0d9bb167475618ae8f52e217d153b2ca1adeff322dc61e",
     "assets/weapon-4.png": "0d87cf314fd65ad19ac0122dd4279beaab7db3cb02ec71b6ced264597565ee77",
-    "css/riftborn.df177b3691.css": "df177b3691eb558f07194fb8db6c362ded7821d5d2eb81fb56bd179307b99704",
-    "index.html": "2d765f028519219c0f2fe6d878d86d51c9abb94dcd9f4d9c280ffee804f491b4",
-    "js/riftborn.1962dde11a.js": "1962dde11aa518a629bba607f7cbbfb252a93b8a6a4c74ec3773439d3af4f913",
+    "assets/weapon-hud-d-0.png": "f51a8ce5a017e317a9079fb26c77cc5eaaf7758d91ca083fd0924dc728ec6b21",
+    "assets/weapon-hud-d-1.png": "7290300fa1494f4a6437122e3f7c38b16259ed2150aa30ef178d122f5e3463e9",
+    "assets/weapon-hud-d-2.png": "4055bdacaa57a967c99b7f0e6660032055e5c63fedd1419d6e715073a6d752a1",
+    "assets/weapon-hud-d-3.png": "9f19067aa555814c2b12775062876367b0f386a6751783a030a78a67ea1e400c",
+    "assets/weapon-hud-d-4.png": "1934028d6ed005f32adc5d56493b455b5192b75db06ceb34b7f8d6c4693e8b7f",
+    "assets/weapon-hud-l-0.png": "3bd84d593d7ef4d8a60c6a4cd5e7c422529e3d9514c60bdaae172db29ced805e",
+    "assets/weapon-hud-l-1.png": "57bc5e17757f5eeca88ea4f1349187b8c03296c2802587f2f92a3532d344ed20",
+    "assets/weapon-hud-l-2.png": "25734ea0c7fcb7137d11f61081de51546ddacbe40b223c128678b09ea0b69a6b",
+    "assets/weapon-hud-l-3.png": "ec4216473f6c0d1194f91b9c390faae22cbe05b11a51761223e21614722a5864",
+    "assets/weapon-hud-l-4.png": "e42c929e54b0dc5003a2eadac1360b64c8ad0696336a58f943c0cd2b24c9e23d",
+    "assets/weapon-hud-p-0.png": "899deffb1c07639f9fb9c85027087fa5a9835d03945bebee78285cc282859fe4",
+    "assets/weapon-hud-p-1.png": "a8b94c038e6a230249c212d7c1d10d9b258bc2214a9133fa95a6098e2a3054e7",
+    "assets/weapon-hud-p-2.png": "002b8d16c824cfcd3dc1218e902d1eb8208a29a8cf4ea781f2541df90f1c4ec1",
+    "assets/weapon-hud-p-3.png": "a3637488d796f57b0c46de0dfda043af10ea5cd66225a7fd1ad7f11d438e1d91",
+    "assets/weapon-hud-p-4.png": "0ef94ab2bcfdad45bbb9b9208215ab6e127fb048ad73d02ca5947d33615b4fd4",
+    "css/riftborn.f0150aa3ee.css": "f0150aa3ee3b74a733f917717deb670a902844dcdbba3e155e6421101c51ff1d",
+    "index.html": "9299820fa27a58b73912c19b7fdde766a2f45fce5bc3b3c35c9b3882bebd7129",
+    "js/riftborn.a5d094b52a.js": "a5d094b52ae30900e756ad16888c8a2a4c9beab34db929c7b1936e845da7562c",
     "manifest.webmanifest": "09ec31a38e77b6310f6a9affe9699c4909d5648416cbb91f6bbbab98d0ddda71",
-    "version.json": "a6460ba0cb2ad3071ac42088760d327ade95375165d4d0284ae7d47697a07509"
+    "version.json": "e00557ac229291f84bc1704e4dee04146650568e6654ce20c22c6d93d076beb3"
   }
 }
