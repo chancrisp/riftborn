@@ -1,6 +1,6 @@
 {
   "version": "2.5.1",
-  "build": "39cdf078e6",
+  "build": "2770ed7827",
   "files": {
     ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "assets/app-icon-192.png": "b6bf14082cb53bb3e872df136cfb6ff80f63a8cdbb3f01a6e85bdaf8f9da6dda",
@@ -127,10 +127,10 @@
     "assets/weapon-hud-p-2.png": "002b8d16c824cfcd3dc1218e902d1eb8208a29a8cf4ea781f2541df90f1c4ec1",
     "assets/weapon-hud-p-3.png": "a3637488d796f57b0c46de0dfda043af10ea5cd66225a7fd1ad7f11d438e1d91",
     "assets/weapon-hud-p-4.png": "0ef94ab2bcfdad45bbb9b9208215ab6e127fb048ad73d02ca5947d33615b4fd4",
-    "css/riftborn.f0150aa3ee.css": "f0150aa3ee3b74a733f917717deb670a902844dcdbba3e155e6421101c51ff1d",
-    "index.html": "044a899b5cd99bbd3a9b39365818e1d8621e5887a9bc729b486bfcef6175cbae",
-    "js/riftborn.ccd1883952.js": "ccd1883952504bcbe92e2aefc9dc50c4af2629adee4cc8146c26531989c774c0",
+    "css/riftborn.6c55383751.css": "6c55383751a7e28fa1e32c2f69c105cb9000ccb0e43448f2b2f8c221d01f8b8d",
+    "index.html": "462e0c4a65e6b876c52e47bef33608b8ed0d8e508e5bf9351f6d927a32f8f531",
+    "js/riftborn.958d231011.js": "958d2310117db00609acc874474af9484c945168464fb6f189bef39ff256f138",
     "manifest.webmanifest": "09ec31a38e77b6310f6a9affe9699c4909d5648416cbb91f6bbbab98d0ddda71",
-    "version.json": "aebecb8c9e06f527c0919cf8a943b3bebdb473af212b80fd7de61910a70a6f62"
+    "version.json": "45f01d74ff60a61f8e4cce2359e5f0e9d5f131311eeb6a4b0a11596d8cc6b7a4"
   }
 }
