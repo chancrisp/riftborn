@@ -139,7 +139,7 @@ console.log('PASS inbox: meta CSP (no inline code, inline scripts hashed, https 
   assert.ok(privacy.includes('stops working after 10 minutes'), 'The sign-in check value is described as the game handles it');
   // "a scrambled, one-way version" of the IP: every limiter key goes through a keyed hash.
   assert.ok(privacy.includes('scrambled, one-way version'));
-  for (const file of ['server/feedback-api.js', 'server/scores-api.js']) {
+  for (const file of ['server/feedback-api.js', 'server/scores-api.js', 'server/admin-auth.js']) {
     const text = fs.readFileSync(file, 'utf8');
     for (const match of text.matchAll(/\.limit\(\{ key[^}]*\}\)/g)) assert.ok(!/key: ip\b/.test(match[0]), `${file}: limiter keyed by hash, not the raw address: ${match[0]}`);
   }

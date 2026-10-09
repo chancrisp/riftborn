@@ -177,7 +177,7 @@ assert.deepEqual(uploadModule.ACCOUNT_SECRETS.map(([, binding, envName]) => [bin
 assert.ok(uploadModule.ACCOUNT_SECRETS.every(([, , envName]) => !envName.startsWith('GITHUB_')));
 const workflow = fs.readFileSync('.github/workflows/cloudflare-worker.yml', 'utf8');
 for (const [, , envName] of uploadModule.ACCOUNT_SECRETS) assert.ok(workflow.includes(`${envName}: \${{ secrets.${envName} }}`), 'The workflow passes ' + envName);
-for (const path of ['server/accounts-api.js', 'server/username-rules.js']) assert.ok(workflow.includes(`- '${path}'`), 'The workflow redeploys on ' + path);
+for (const path of ['server/accounts-api.js', 'server/username-rules.js', 'server/admin-auth.js']) assert.ok(workflow.includes(`- '${path}'`), 'The workflow redeploys on ' + path);
 // Key rotation: the previous key is an optional secret with the same length rule; ACCOUNTS_LIVE=1
 // refuses a deploy that would drop AUTH_SIGNING_KEY.
 const rotated = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, authSigningKey: 'n'.repeat(43), authSigningKeyPrevious: ' ' + 'o'.repeat(43) + ' ' }).get('metadata').text());

@@ -8,6 +8,7 @@ on:
       - 'cloudflare/**'
       - 'server/scores-api.js'
       - 'server/feedback-api.js'
+      - 'server/admin-auth.js'
       - 'server/accounts-api.js'
       - 'server/username-rules.js'
       - 'site.hosts.mjs'
