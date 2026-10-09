@@ -48,13 +48,19 @@ export const MIGRATION = Object.freeze({
     'riftborn-reborn-dev-mode-v1',
     'riftborn-reborn-dev-loadout-v1',
     'riftborn-reborn-dev-carry-v1',
+    'riftborn-reborn-touch-debug-v1',
+    'riftborn-reborn-fullscreen-resume-v1',
     // Device flags that are not progress: the welcome popup's answer, the patch notes seen, and the
-    // Journal's pre-upgrade backup. (The same list as the game's src/meta/migration.js
+    // Journal's pre-upgrade backup, and the player-metrics keys (the stats day, notice and outbox stay on the device).
+    // (The same list as the game's src/meta/migration.js
     // MIGRATION_EXCLUDED; tests/migration-handoff.mjs compares the two.)
     'riftborn-reborn-welcome-v1',
     'riftborn-reborn-whats-new-seen-v1',
     'riftborn-reborn-whats-new-visit-v1',
-    'riftborn-reborn-profile-v1-bak'
+    'riftborn-reborn-profile-v1-bak',
+    'riftborn-reborn-stats-day-v1',
+    'riftborn-reborn-stats-notice-v1',
+    'riftborn-reborn-stats-outbox-v1'
   ]),
   // The classic edition's saves, moved as well.
   extra: Object.freeze(['riftborn-profile-v1', 'neon-crypt-preferences-v1']),

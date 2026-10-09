@@ -9,6 +9,7 @@ import path from 'node:path';
 import * as auth from '../server/admin-auth.js';
 import * as feedback from '../server/feedback-api.js';
 import worker from '../cloudflare/worker.js';
+import { MIGRATION } from '../site.config.mjs';
 import { ensureAccountTables } from '../server/accounts-api.js';
 import { createD1, openDatabase } from '../server/d1-sqlite.mjs';
 import { DIM_PATTERN, STATS_BODY_MAX, STATS_METRICS, STATS_ORIGIN, STATS_RANGES, handleStats, readStats, reportRows, validateReport } from '../server/stats-api.js';
@@ -447,6 +448,21 @@ assert.equal(await handleStats(new Request('https://api.test/api/scores', { meth
   assert.equal(failed.status, 503);
   assert.ok(!(await failed.text()).includes('SELECT'), 'no SQL text in the answer');
   assert.ok(q.logs.every(line => !line.includes(KEY)), 'the key is never logged');
+}
+
+// ---- Task 1.11: the game's device-only keys, mirrored in MIGRATION.exclude -----------------------------------------
+{
+  // The game's MIGRATION_EXCLUDED (riftborn/src/meta/migration.js) as merged with its Task 2.1: 17 entries, in its order.
+  const GAME = ['session-v1', 'login-verifier-v1', 'account-sync-v1', 'account-reminded', 'dev-accounts', 'dev-mode-v1', 'dev-loadout-v1', 'dev-carry-v1',
+    'touch-debug-v1', 'fullscreen-resume-v1', 'welcome-v1', 'whats-new-seen-v1', 'whats-new-visit-v1', 'profile-v1-bak', 'stats-day-v1', 'stats-notice-v1', 'stats-outbox-v1']
+    .map(name => 'riftborn-reborn-' + name);
+  assert.deepEqual([...MIGRATION.exclude], GAME, 'entry for entry, in the game order');
+  assert.equal(new Set(MIGRATION.exclude).size, MIGRATION.exclude.length, 'no duplicates');
+  const at = MIGRATION.exclude.indexOf('riftborn-reborn-dev-carry-v1');
+  assert.deepEqual(MIGRATION.exclude.slice(at + 1, at + 3), ['riftborn-reborn-touch-debug-v1', 'riftborn-reborn-fullscreen-resume-v1'], 'they follow the dev carry key directly');
+  for (const key of ['touch-debug-v1', 'fullscreen-resume-v1', 'stats-day-v1', 'stats-notice-v1', 'stats-outbox-v1']) {
+    assert.ok(MIGRATION.exclude.includes(MIGRATION.prefix + key), key + ' stays on the device and never follows an account');
+  }
 }
 
 console.log('PASS stats: the inbox admin helpers live in server/admin-auth.js and feedback-api.js still exports ADMIN_LIMIT.');
