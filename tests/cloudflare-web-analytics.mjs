@@ -9,6 +9,7 @@
 //     fail the run, optional ones warn).
 // Local only; nothing is fetched. Run with the other Cloudflare tests: tests/cloudflare-pages-domains.mjs imports this file.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { PAGES_PROJECTS } from '../site.config.mjs';
 import {
@@ -283,4 +284,16 @@ console.log('PASS web analytics inspect plan: every call and permission is named
 console.log('PASS web analytics inspect: zone and Workers plan, the Web Analytics sites, the Pages toggle, what is really served, the injection verdict, whether Workers Logs can hold IPs, what the token can change, and exact token permissions (required fail, optional warn).');
 
 // STAGE0-WORKFLOW-PINS begin
+// The one-off workflow (.github/workflows/cloudflare-web-analytics.yml): main only, read-only, the token in one step.
+{
+  const wf = fs.readFileSync(new URL('../.github/workflows/cloudflare-web-analytics.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const code = wf.split('\n').filter(line => !/^\s*#/.test(line)).join('\n') + '\n';
+  assert.match(code, /\non:\n  push:\n    branches: \[main\]\n    paths:\n      - '\.github\/workflows\/cloudflare-web-analytics\.yml'\n(?!\s+- )/, 'push on main, this file only');
+  assert.doesNotMatch(code, /workflow_dispatch|workflow_run|schedule|pull_request/, 'no other trigger');
+  for (const part of ['environment: cloudflare-production', "if: github.ref == 'refs/heads/main'", 'contents: read', 'actions/checkout@v7', 'actions/setup-node@v7', 'persist-credentials: false']) assert.ok(code.includes(part), 'the workflow has: ' + part);
+  assert.ok(code.includes('run: node scripts/cloudflare-web-analytics.mjs inspect\n'), 'it runs inspect');
+  assert.doesNotMatch(code, /apply|--confirm/, 'read-only: no apply or confirm');
+  for (const step of code.split('\n      - ').slice(1)) assert.equal(step.includes('secrets.CLOUDFLARE_API_TOKEN'), step.includes('cloudflare-web-analytics.mjs inspect'), 'the token reaches only the inspect step');
+}
+console.log('PASS web analytics workflow: push on main for this file only, production environment, read-only permissions, no apply, and the token reaches only the inspect step.');
 // STAGE0-WORKFLOW-PINS end
