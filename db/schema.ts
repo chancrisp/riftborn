@@ -1,4 +1,4 @@
-import {sqliteTable,text,integer,index} from 'drizzle-orm/sqlite-core';
+import {sqliteTable,text,integer,index,primaryKey} from 'drizzle-orm/sqlite-core';
 export const scores=sqliteTable('scores',{
  id:text('id').primaryKey(),name:text('name').notNull(),score:integer('score').notNull(),kills:integer('kills').notNull(),wave:integer('wave').notNull(),seconds:integer('seconds').notNull(),createdAt:integer('created_at').notNull(),stage:integer('stage'),playedAt:integer('played_at'),deathMode:integer('death_mode',{mode:'boolean'}),statueCount:integer('statue_count'),statueModifier:integer('statue_modifier'),outcome:text('outcome'),gameplayVersion:text('gameplay_version'),
  // Release the run was played on ("2.1.0") and a KEEPERS run's Rift Score. Production gets these
@@ -9,3 +9,6 @@ export const scores=sqliteTable('scores',{
 export const feedback=sqliteTable('feedback',{
  id:text('id').primaryKey(),createdAt:integer('created_at').notNull(),category:text('category').notNull(),rating:integer('rating'),message:text('message').notNull(),contact:text('contact'),contextJson:text('context_json'),source:text('source').notNull(),build:text('build'),status:text('status').notNull().default('new')
 },table=>[index('idx_feedback_created').on(table.createdAt,table.id),index('idx_feedback_status_created').on(table.status,table.createdAt)]);
+// Anonymous daily counters for the player metrics (server/stats-api.js, server/stats-counters.js): one row per day, metric and
+// dimension, never a player. Production gets the table lazily; the migration keeps previews and tests the same.
+export const dailyStats=sqliteTable('daily_stats',{day:text('day').notNull(),metric:text('metric').notNull(),dim:text('dim').notNull(),n:integer('n').notNull().default(0)},table=>[primaryKey({columns:[table.day,table.metric,table.dim]})]);

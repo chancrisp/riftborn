@@ -3,8 +3,11 @@
 // and the admin read behind the inbox's admin key. Local only: an in-memory SQLite database stands in for D1.
 // The last line of this file is the PASS line; later tasks add their blocks above it.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import * as auth from '../server/admin-auth.js';
 import * as feedback from '../server/feedback-api.js';
+import { createD1, openDatabase } from '../server/d1-sqlite.mjs';
+import { COUNTER_METRICS, DIM_CAPS, STATS_DAILY_WRITE_CEILING, WRITES_METRIC, ensureStatsTable, utcDay } from '../server/stats-counters.js';
 
 // ---- Task 1.1: the inbox admin helpers moved into server/admin-auth.js without a change in behaviour -------------
 for (const name of ['corsHeaders', 'json', 'originAllowed', 'adminOnlyOrigin', 'sameSecret', 'limitAdmin', 'authorize']) {
@@ -19,5 +22,36 @@ assert.equal(await auth.sameSecret('abc', 'abd'), false);
 assert.equal(auth.adminOnlyOrigin('https://feedback.riftborn.us', { FEEDBACK_ADMIN_ORIGINS: 'https://feedback.riftborn.us' }), true);
 assert.equal(auth.adminOnlyOrigin(null, { FEEDBACK_ADMIN_ORIGINS: 'https://feedback.riftborn.us' }), false);
 assert.equal(auth.originAllowed(null, {}), true);
+
+// ---- Task 1.2: the daily_stats table, lazy in production and mirrored in Drizzle ---------------------------------
+{
+  const A = createD1(openDatabase(':memory:', 'drizzle', fs)); // migrations applied, as the preview database
+  const B = createD1(openDatabase(':memory:')); // a bare database: only the lazy bootstrap can create the table
+  assert.equal((await B.prepare("SELECT name FROM sqlite_master WHERE name = 'daily_stats'").first()), null);
+  await ensureStatsTable(B);
+  const info = db => db.sqlite.prepare("PRAGMA table_info('daily_stats')").all().map(c => [c.name, c.type, c.notnull, c.dflt_value, c.pk]);
+  assert.deepEqual(info(A), info(B), 'the migration and the lazy bootstrap build the same table');
+  assert.deepEqual(info(A).map(c => c[0]), ['day', 'metric', 'dim', 'n']);
+  assert.deepEqual(info(A).map(c => c[4]), [1, 2, 3, 0], 'primary key (day, metric, dim)');
+  assert.equal(info(A).find(c => c[0] === 'n')[3], '0');
+  for (const db of [A, B]) assert.match(db.sqlite.prepare("SELECT sql FROM sqlite_master WHERE name = 'daily_stats'").get().sql, /WITHOUT ROWID/, 'one row per upsert, not a row plus an index entry');
+  await ensureStatsTable(A); // already there: a no-op
+  assert.doesNotThrow(() => A.sqlite.exec(fs.readFileSync('drizzle/0006_daily_stats.sql', 'utf8')), 'the migration is re-runnable');
+  const journal = JSON.parse(fs.readFileSync('drizzle/meta/_journal.json', 'utf8')).entries.at(-1);
+  assert.deepEqual([journal.idx, journal.tag], [6, '0006_daily_stats']);
+  assert.ok(JSON.parse(fs.readFileSync('drizzle/meta/0006_snapshot.json', 'utf8')).tables.daily_stats, 'the snapshot knows the table');
+  assert.equal(utcDay(Date.parse('2026-10-20T23:59:59.999Z')), '2026-10-20');
+  assert.equal(utcDay(Date.parse('2026-10-20T23:59:59.999Z') + 1), '2026-10-21');
+  assert.equal(STATS_DAILY_WRITE_CEILING, 30000);
+  assert.equal(WRITES_METRIC, '_writes');
+  assert.deepEqual(DIM_CAPS, { character: 32, weapon: 16, version: 8 });
+  assert.deepEqual(COUNTER_METRICS, ['players', 'runs', 'wins', 'stage_reached', 'character', 'weapon', 'device', 'version', 'length', 'signups']);
+  // Stage 5's privacy pin parses the table out of the source text: one literal with no quote inside, repeated nowhere else.
+  const source = fs.readFileSync('server/stats-counters.js', 'utf8');
+  const match = /CREATE TABLE IF NOT EXISTS daily_stats\s*\(([^`'"]*)\)(?:\s*WITHOUT ROWID)?\s*[`'"]/.exec(source);
+  assert.ok(match, 'the DDL is one literal in server/stats-counters.js');
+  for (const part of ['day', 'metric', 'dim', 'n', 'PRIMARY KEY (day, metric, dim)']) assert.ok(match[1].includes(part), 'the DDL names ' + part);
+  assert.equal(source.split('CREATE TABLE IF NOT EXISTS daily_stats').length - 1, 1, 'the DDL appears exactly once');
+}
 
 console.log('PASS stats: the inbox admin helpers live in server/admin-auth.js and feedback-api.js still exports ADMIN_LIMIT.');
