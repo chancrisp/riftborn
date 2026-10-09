@@ -20,6 +20,7 @@
 import { checkUsername, usernameKey } from './username-rules.js';
 import { GUEST_NAME_INVISIBLE, lateColumns } from './scores-api.js';
 import { AUTH_PUBLIC_BASE, AUTH_RETURN_ORIGINS, AUTH_RETURN_PATHS } from '../site.hosts.mjs';
+import { signupBatch } from './stats-counters.js';
 
 export const PROVIDERS = Object.freeze(['google', 'discord', 'github']);
 // Local-harness providers (see fakeEnabled): two, so linking a second platform can be tested.
@@ -1134,14 +1135,14 @@ async function createAccount(request, env, db, keys, now) {
   const id = crypto.randomUUID();
   const session = await newSession(db, keys, id, now);
   try {
-    await db.batch([
+    await signupBatch(db, [
       db.prepare('INSERT INTO accounts (id, username, username_skeleton, created_at, username_changed_at, profile_json, profile_rev, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, 0, ?)')
         .bind(id, check.name, nameSkeleton(check.name), now, now),
       db.prepare('INSERT INTO identities (provider, provider_user_id, account_id, created_at, key_id) VALUES (?, ?, ?, ?, ?)')
         .bind(provider, identity, id, now, await keyId(keys.current)),
       session.statement,
       db.prepare('DELETE FROM auth_pending WHERE key = ?').bind(pending.key)
-    ]);
+    ], now);
   } catch (error) {
     const raced = await findOwner();
     if (raced) return signInExisting(db, keys, raced.account_id, pending.key, now);

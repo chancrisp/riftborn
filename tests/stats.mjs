@@ -465,4 +465,117 @@ assert.equal(await handleStats(new Request('https://api.test/api/scores', { meth
   }
 }
 
+// ---- Task 1.9: the sign-ups counter inside createAccount's batch (a go-live commit: nothing counts before the privacy page says so) ----
+{
+  const GAME = 'http://localhost:8700';
+  const BASE = 'http://127.0.0.1:8787';
+  const RETURN = GAME + '/?accounts=local';
+  const SIGN = 'test-signing-key-0123456789-abcdefghijklmnop';
+  const INBOX = 'https://feedback.riftborn.us';
+  const ADMIN = /if \(!env\.([A-Z0-9_]+)\) return json\(\{ error: 'Feedback admin key not configured' \}/.exec(fs.readFileSync('server/admin-auth.js', 'utf8'))?.[1];
+  const ADMIN_VALUE = 'test-admin-key-0123456789';
+  const mkEnv = DB => ({ DB, ENVIRONMENT: 'development', ALLOWED_ORIGINS: GAME, AUTH_RETURN_ORIGINS: GAME, AUTH_RETURN_PATHS: '/,/riftborn/', FAKE_OAUTH: '1', AUTH_SIGNING_KEY: SIGN,
+    FEEDBACK_ADMIN_ORIGINS: INBOX, [ADMIN]: ADMIN_VALUE, ACCOUNTS_RATE_LIMITER: { async limit() { return { success: true }; } } });
+  let ipCount = 0;
+  const freshIp = () => { ipCount++; return `10.${(ipCount >> 16) & 255}.${(ipCount >> 8) & 255}.${ipCount & 255}`; };
+  const browser = new Map();
+  async function call(path, { method = 'GET', body, token, ip = freshIp(), origin = GAME, headers = {}, e, jar = null } = {}) {
+    const h = { 'CF-Connecting-IP': ip, ...headers };
+    if (jar && jar.size) h.Cookie = [...jar].map(([name, value]) => `${name}=${value}`).join('; ');
+    if (origin) h.Origin = origin;
+    if (token) h.Authorization = `Bearer ${token}`;
+    if (body !== undefined && !h['Content-Type']) h['Content-Type'] = 'application/json';
+    const response = await worker.fetch(new Request(BASE + path, { method, headers: h, body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body) }), e, { waitUntil() {} });
+    const setCookie = response.headers.get('Set-Cookie');
+    if (jar && setCookie) {
+      const [pair] = setCookie.split(';');
+      const [name, value] = pair.split('=');
+      if (/Max-Age=0/i.test(setCookie)) jar.delete(name); else jar.set(name, value);
+    }
+    let data = null;
+    const type = response.headers.get('Content-Type') || '';
+    if (type.startsWith('application/json')) data = await response.json();
+    else if (type.startsWith('text/html')) data = await response.text();
+    return { status: response.status, headers: response.headers, data };
+  }
+  const nav = (path, opts = {}) => call(path, { origin: null, jar: browser, ...opts });
+  const hashParam = (location, key) => new URLSearchParams(new URL(location).hash.slice(1)).get(key);
+  async function newChallenge() {
+    const verifier = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+    const challenge = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))).toString('base64url');
+    return { verifier, challenge };
+  }
+  async function fakeLogin(userId, e) {
+    const { verifier, challenge } = await newChallenge();
+    const page = await nav('/auth/fake/start?' + new URLSearchParams({ return: RETURN, challenge }), { e });
+    assert.equal(page.status, 200);
+    const state = /name="state" value="([A-Za-z0-9_-]{43})"/.exec(page.data)?.[1];
+    assert.ok(state, 'the fake page carries a state');
+    const back = await nav(`/auth/fake/callback?state=${state}&code=${encodeURIComponent(userId)}`, { e });
+    assert.equal(back.status, 302);
+    const code = hashParam(back.headers.get('Location'), 'rb_login');
+    const session = await call('/auth/session', { method: 'POST', body: { code, verifier }, e });
+    assert.equal(session.status, 200, JSON.stringify(session.data));
+    return session.data;
+  }
+  const create = async (userId, username, e) => {
+    const login = await fakeLogin(userId, e);
+    assert.equal(login.needsUsername, true);
+    return call('/api/account', { method: 'POST', body: { signupToken: login.signupToken, username }, e });
+  };
+  const signupsOn = sqlite => sqlite.prepare("SELECT n FROM daily_stats WHERE metric = 'signups' AND dim = 'all' AND day = ?").get(utcDay(Date.now()))?.n ?? null;
+  const accountsIn = sqlite => sqlite.prepare('SELECT COUNT(*) AS c FROM accounts').get().c;
+
+  // (1) each new account counts once; the admin read shows it
+  {
+    const sqlite = openDatabase(':memory:', 'drizzle', fs);
+    const e = mkEnv(createD1(sqlite));
+    assert.equal((await create('11111111-aaaa-4aaa-8aaa-000000000001', 'AlphaOne', e)).status, 200);
+    assert.deepEqual([signupsOn(sqlite), accountsIn(sqlite)], [1, 1]);
+    assert.equal((await create('11111111-aaaa-4aaa-8aaa-000000000002', 'BetaTwo', e)).status, 200);
+    assert.equal(signupsOn(sqlite), 2);
+    const read = await call('/api/admin/stats?range=7', { origin: INBOX, headers: { Authorization: 'Bearer ' + ADMIN_VALUE }, e });
+    assert.equal(read.status, 200, JSON.stringify(read.data));
+    assert.equal(read.data.accountsTotal, 2);
+    assert.equal(read.data.days.reduce((sum, d) => sum + d.signups, 0), 2);
+    // (2) signing in again with an existing identity does not count
+    const again = await fakeLogin('11111111-aaaa-4aaa-8aaa-000000000001', e);
+    assert.ok(again.token || again.account, 'an existing identity signs in');
+    assert.equal(signupsOn(sqlite), 2, 'a sign-in is not a sign-up');
+    // (6) a taken username is refused and counts nothing
+    const taken = await create('11111111-aaaa-4aaa-8aaa-000000000003', 'AlphaOne', e);
+    assert.equal(taken.status, 409);
+    assert.equal(signupsOn(sqlite), 2, 'a refused sign-up counts nothing');
+  }
+  // (3) a bare database: the first sign-up creates the table lazily and counts 1
+  {
+    const sqlite = openDatabase(':memory:');
+    const e = mkEnv(createD1(sqlite));
+    assert.equal((await create('11111111-aaaa-4aaa-8aaa-000000000004', 'GammaThree', e)).status, 200);
+    assert.equal(signupsOn(sqlite), 1);
+  }
+  // (4) the stats table cannot be prepared at all: sign-up still works and writes no counter
+  {
+    const sqlite = openDatabase(':memory:', 'drizzle', fs);
+    const real = createD1(sqlite);
+    const DB = { ...real, prepare(sql) { if (/daily_stats/.test(sql)) throw new Error('D1 hiccup'); return real.prepare(sql); } };
+    const e = mkEnv(DB);
+    assert.equal((await create('11111111-aaaa-4aaa-8aaa-000000000005', 'DeltaFour', e)).status, 200);
+    assert.equal(accountsIn(sqlite), 1);
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS c FROM sessions').get().c >= 1, true, 'the session exists');
+    assert.equal(signupsOn(sqlite), null, 'no counter row');
+  }
+  // (5) the batch itself fails on the stats table: sign-up retried without it, still 200
+  {
+    const sqlite = openDatabase(':memory:', 'drizzle', fs);
+    const real = createD1(sqlite);
+    const DB = { ...real,
+      prepare(sql) { const statement = real.prepare(sql); statement.__sql = sql; const bind = statement.bind.bind(statement); statement.bind = (...values) => { const bound = bind(...values); bound.__sql = sql; return bound; }; return statement; },
+      batch(statements) { if (statements.some(s => /daily_stats/.test(s.__sql || ''))) return Promise.reject(new Error('D1_ERROR: no such table: daily_stats')); return real.batch(statements); } };
+    const e = mkEnv(DB);
+    assert.equal((await create('11111111-aaaa-4aaa-8aaa-000000000006', 'EpsilonFive', e)).status, 200);
+    assert.equal(accountsIn(sqlite), 1);
+  }
+}
+
 console.log('PASS stats: the inbox admin helpers live in server/admin-auth.js and feedback-api.js still exports ADMIN_LIMIT.');
