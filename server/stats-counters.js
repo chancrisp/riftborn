@@ -33,3 +33,28 @@ export function ensureStatsTable(db) {
   }
   return promise;
 }
+
+const WRITES_LEFT = `COALESCE((SELECT n FROM daily_stats WHERE day = ? AND metric = '${WRITES_METRIC}' AND dim = 'all'), 0) < ?`;
+
+/**
+ * The statements that count one report, to run as ONE db.batch (one transaction, so the guards are race-free):
+ * rows is [[metric, dim], ...] (at least one); each row is one upsert that only writes while today's _writes row is
+ * below the ceiling and, for the free-text dimensions in DIM_CAPS, while fewer than the cap distinct values exist
+ * (a value already counted today always increments). The _writes upsert comes LAST, by the number of rows, so every
+ * guard in the batch sees the same value: a report that starts under the ceiling is counted whole (it may overshoot
+ * by its own rows), and a later report writes nothing, not even _writes. _writes counts rows attempted (an upper bound).
+ */
+export function reportStatements(db, day, rows, ceiling = STATS_DAILY_WRITE_CEILING) {
+  const statements = rows.map(([metric, dim]) => {
+    const capped = Object.hasOwn(DIM_CAPS, metric);
+    const sql = `INSERT INTO daily_stats (day, metric, dim, n) SELECT ?, ?, ?, 1 WHERE ${WRITES_LEFT}` +
+      (capped ? ' AND (EXISTS (SELECT 1 FROM daily_stats WHERE day = ? AND metric = ? AND dim = ?) OR (SELECT COUNT(*) FROM daily_stats WHERE day = ? AND metric = ?) < ?)' : '') +
+      ' ON CONFLICT (day, metric, dim) DO UPDATE SET n = n + 1';
+    const binds = [day, metric, dim, day, ceiling];
+    if (capped) binds.push(day, metric, dim, day, metric, DIM_CAPS[metric]);
+    return db.prepare(sql).bind(...binds);
+  });
+  statements.push(db.prepare(`INSERT INTO daily_stats (day, metric, dim, n) SELECT ?, '${WRITES_METRIC}', 'all', ? WHERE ${WRITES_LEFT} ON CONFLICT (day, metric, dim) DO UPDATE SET n = n + excluded.n`)
+    .bind(day, rows.length, day, ceiling));
+  return statements;
+}

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import * as auth from '../server/admin-auth.js';
 import * as feedback from '../server/feedback-api.js';
 import { createD1, openDatabase } from '../server/d1-sqlite.mjs';
-import { COUNTER_METRICS, DIM_CAPS, STATS_DAILY_WRITE_CEILING, WRITES_METRIC, ensureStatsTable, utcDay } from '../server/stats-counters.js';
+import { COUNTER_METRICS, DIM_CAPS, STATS_DAILY_WRITE_CEILING, WRITES_METRIC, ensureStatsTable, reportStatements, utcDay } from '../server/stats-counters.js';
 
 // ---- Task 1.1: the inbox admin helpers moved into server/admin-auth.js without a change in behaviour -------------
 for (const name of ['corsHeaders', 'json', 'originAllowed', 'adminOnlyOrigin', 'sameSecret', 'limitAdmin', 'authorize']) {
@@ -52,6 +52,42 @@ assert.equal(auth.originAllowed(null, {}), true);
   assert.ok(match, 'the DDL is one literal in server/stats-counters.js');
   for (const part of ['day', 'metric', 'dim', 'n', 'PRIMARY KEY (day, metric, dim)']) assert.ok(match[1].includes(part), 'the DDL names ' + part);
   assert.equal(source.split('CREATE TABLE IF NOT EXISTS daily_stats').length - 1, 1, 'the DDL appears exactly once');
+}
+
+// ---- Task 1.3: guarded counter upserts: dim caps and the daily write ceiling -------------------------------------
+{
+  const sqlite = openDatabase(':memory:', 'drizzle', fs), db = createD1(sqlite), DAY = '2026-10-20', C = STATS_DAILY_WRITE_CEILING;
+  const get = (m, d, day = DAY) => sqlite.prepare('SELECT n FROM daily_stats WHERE day=? AND metric=? AND dim=?').get(day, m, d)?.n;
+  const rows = [['runs', 'all'], ['character', 'rift-knight']];
+  sqlite.prepare("INSERT INTO daily_stats VALUES (?, '_writes', 'all', ?)").run(DAY, C - 1);
+  await db.batch(reportStatements(db, DAY, rows));
+  assert.equal(get('runs', 'all'), 1, 'one below the ceiling: counted');
+  assert.equal(get('_writes', 'all'), C + 1, 'a counted report may overshoot by its own rows');
+  await db.batch(reportStatements(db, DAY, rows));
+  assert.equal(get('runs', 'all'), 1, 'at or over the ceiling: dropped');
+  assert.equal(get('_writes', 'all'), C + 1, 'a dropped report writes nothing, not even _writes');
+  await db.batch(reportStatements(db, '2026-10-21', rows));
+  assert.equal(get('runs', 'all', '2026-10-21'), 1, 'the next UTC day counts again');
+}
+{
+  const sqlite = openDatabase(':memory:', 'drizzle', fs), db = createD1(sqlite), DAY = '2026-10-22';
+  const get = (m, d) => sqlite.prepare('SELECT n FROM daily_stats WHERE day=? AND metric=? AND dim=?').get(DAY, m, d)?.n;
+  const distinct = m => sqlite.prepare('SELECT COUNT(*) AS c FROM daily_stats WHERE day=? AND metric=?').get(DAY, m).c;
+  let runs = 0;
+  for (const [metric, cap] of Object.entries(DIM_CAPS)) {
+    for (let i = 0; i < cap; i++) await db.batch(reportStatements(db, DAY, [[metric, 'dim-' + i]]));
+    assert.equal(distinct(metric), cap, metric + ' filled to its cap');
+    await db.batch(reportStatements(db, DAY, [['runs', 'all'], [metric, 'dim-new']]));
+    runs++;
+    assert.equal(distinct(metric), cap, `a new ${metric} beyond ${cap} adds no row`);
+    assert.equal(get(metric, 'dim-new'), undefined);
+    assert.equal(get('runs', 'all'), runs, 'the run itself still counts');
+    await db.batch(reportStatements(db, DAY, [[metric, 'dim-0']]));
+    assert.equal(get(metric, 'dim-0'), 2, 'an existing dim always increments');
+  }
+  // A fresh day: a report of k rows leaves _writes = k.
+  await db.batch(reportStatements(db, '2026-11-01', [['runs', 'all'], ['players', 'all'], ['device', 'desktop']]));
+  assert.equal(sqlite.prepare("SELECT n FROM daily_stats WHERE day='2026-11-01' AND metric='_writes'").get().n, 3);
 }
 
 console.log('PASS stats: the inbox admin helpers live in server/admin-auth.js and feedback-api.js still exports ADMIN_LIMIT.');
