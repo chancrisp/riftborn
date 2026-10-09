@@ -3,6 +3,8 @@
 // are added below by the later tasks of the dashboard stage. The last line of this file is the PASS line.
 import assert from 'node:assert/strict';
 import { BAR_BOX, LENGTH_LABELS, LENGTH_ORDER, TREND_BOX, addDays, barGeometry, barRows, compareFigures, fillDays, funnelSteps, headlinePeriods, niceMax, periodTotals, reachedCounts, trendGeometry } from '../metrics/chart.js';
+import { DEFINITIONS, ageText, buildView, ceilingStatus, compareVersions, formatChange, formatNumber, parseStats, toCsv } from '../metrics/chart.js';
+import { statsResponse } from './fixtures/stats-admin-response.mjs';
 
 // ---- Task 4.1: period math and headline figures -----------------------------------------------------------------------
 {
@@ -95,4 +97,67 @@ import { BAR_BOX, LENGTH_LABELS, LENGTH_ORDER, TREND_BOX, addDays, barGeometry, 
   assert.equal(barGeometry([]).bars.length, 0);
 }
 
-console.log('PASS stats page: period math, headline figures and chart geometry.');
+// ---- Task 4.3: parser, view model, definitions, safe CSV ---------------------------------------------------------------------
+{
+  assert.equal(toCsv([['section', 'name', 'count'], ['character', '=cmd', 5], ['character', '-1+2', 3], ['character', 'a,b"c', 1]]),
+    'section,name,count\r\ncharacter,\'=cmd,5\r\ncharacter,\'-1+2,3\r\ncharacter,"a,b""c",1\r\n');
+  assert.equal(toCsv([['@x', '\tt', 'plain', -5]]), "'@x,'\tt,plain,-5\r\n", 'a negative number is a number, not a formula');
+  assert.throws(() => parseStats({ days: [], breakdowns: {}, ceiling: { day: '2026-10-08' } }), /Unexpected answer/);
+  assert.throws(() => parseStats(null), /Unexpected answer/);
+  const good = statsResponse();
+  assert.throws(() => parseStats({ ...good, days: 'no' }), /Unexpected answer/);
+  assert.throws(() => parseStats({ ...good, ceiling: { day: 'yesterday', used: 1, limit: 2 } }), /Unexpected answer/);
+  const { character, ...missing } = good.breakdowns;
+  assert.throws(() => parseStats({ ...good, breakdowns: missing }), /Unexpected answer/);
+  assert.ok(DEFINITIONS.every(d => !/analytics/i.test(d.title + d.text)) && new Set(DEFINITIONS.map(d => d.id)).size === DEFINITIONS.length);
+  assert.deepEqual(DEFINITIONS.map(d => d.id), ['players', 'runs', 'winRate', 'signups', 'accounts', 'stage', 'length', 'character', 'weapon', 'device', 'version', 'lowerBound', 'visits']);
+  const stage = DEFINITIONS.find(d => d.id === 'stage').text;
+  assert.ok(/win/i.test(stage) && /stage 6/i.test(stage) && /finished the route/i.test(stage), 'a win counts as stage 6, "finished the route"');
+  assert.ok(DEFINITIONS.every(d => !/European Union|\bEU\b|\bUK\b/.test(d.text)), 'no country rule is named');
+  assert.match(DEFINITIONS.find(d => d.id === 'visits').text, /Cloudflare/);
+
+  const dirty = statsResponse();
+  dirty.breakdowns.character.push({ dim: 'bad dim!', n: 3 }, { dim: 'negative', n: -1 }, { dim: 'nan', n: NaN });
+  const parsed = parseStats(dirty);
+  assert.deepEqual(parsed.breakdowns.character.map(r => r.dim), ['rift-knight', 'abbot', 'warden'], 'rows with a bad dim or a bad count are dropped');
+  assert.ok(parsed.days.every((d, i, all) => i === 0 || all[i - 1].day < d.day), 'days ascending');
+  assert.deepEqual(parseStats(statsResponse()).ceiling, { day: '2026-10-08', used: 1234, limit: 30000 });
+
+  const main = parseStats(statsResponse({ range: 30 })), compare = parseStats(statsResponse({ range: 90 }));
+  const view = buildView({ main, compare, range: 30, nowMs: Date.parse('2026-10-08T12:00:00Z') });
+  assert.equal(view.comparison, 'ok');
+  assert.deepEqual(view.figures.map(f => f.id), ['players', 'runs', 'winRate', 'signups', 'accounts']);
+  assert.equal(view.figures.at(-1).value, main.accountsTotal);
+  assert.equal(view.figures.at(-1).change, null);
+  assert.equal(view.trend.todayRow.day, main.ceiling.day);
+  assert.ok(view.trend.complete.every(d => d.day < main.ceiling.day) && view.trend.complete.length === 30, 'the complete days exclude today');
+  assert.equal(view.funnel.length, 6);
+  assert.equal(view.funnel[0].share, 1);
+  assert.deepEqual(view.breakdowns.version.map(r => r.dim), ['2.10.0', '2.9.0'], 'versions newest first');
+  assert.deepEqual(view.breakdowns.length.map(r => r.dim), ['u2', '2-5', '5-10', '10-20', '20-40', 'o40']);
+  assert.deepEqual(view.health.ceiling, { used: 1234, limit: 30000, state: 'ok' });
+  assert.equal(view.today, '2026-10-08');
+  assert.equal(view.range, '30');
+  const alone = buildView({ main: parseStats(statsResponse({ range: 7 })), compare: null, range: 7, nowMs: Date.parse('2026-10-08T12:00:00Z') });
+  assert.equal(alone.comparison, 'none');
+  assert.ok(alone.figures.every(f => f.change === null), 'with nothing to compare, no change is shown');
+  for (const table of view.tables) assert.ok(table.rows.length > 0 && table.rows.every(row => row.length === table.head.length), table.id + ': rows are as wide as the head');
+  assert.deepEqual(view.csv[0], ['section', 'name', 'count']);
+  assert.ok(view.csv.every(row => row.length === 3) && view.csv.some(row => row[0] === 'character' && row[1] === 'rift-knight' && row[2] === 150));
+  assert.deepEqual(new Set(view.csv.map(row => row[0])), new Set(['section', 'players', 'runs', 'wins', 'signups', 'stage_reached', 'character', 'weapon', 'device', 'version', 'length']));
+
+  assert.equal(ceilingStatus({ used: 24000, limit: 30000 }).state, 'high');
+  assert.equal(ceilingStatus({ used: 30000, limit: 30000 }).state, 'full');
+  assert.equal(ceilingStatus({ used: 0, limit: 30000 }).state, 'ok');
+  assert.equal(ceilingStatus({ used: 5, limit: 0 }).ratio, 0, 'no limit: no NaN');
+  assert.deepEqual(ageText('2026-10-08T01:00:00Z', Date.parse('2026-10-08T03:00:00Z')), { text: '2 hours ago', stale: false });
+  assert.deepEqual(ageText(null, 0), { text: 'No reports received yet', stale: true });
+  assert.equal(ageText('2026-10-06', Date.parse('2026-10-08T12:00:00Z')).stale, true, 'a day, stale after 36 hours');
+  assert.equal(ageText('2026-10-08T11:59:30Z', Date.parse('2026-10-08T12:00:00Z')).text, 'just now');
+  assert.ok(compareVersions('2.10.0', '2.9.0') > 0 && compareVersions('2.9.0', '2.9.0') === 0);
+  assert.deepEqual(['2.10.0', '2.9.0', '2.9.1'].sort(compareVersions), ['2.9.0', '2.9.1', '2.10.0']);
+  assert.deepEqual([formatChange({ kind: 'percent', value: 0.12 }), formatChange({ kind: 'percent', value: -0.04 }), formatChange({ kind: 'points', value: 1.5 }), formatChange({ kind: 'percent', value: 0 }), formatChange(null)], ['+12%', '-4%', '+1.5 pts', '0%', '—']);
+  assert.deepEqual([formatNumber(1234), formatNumber(12.34), formatNumber(0.5, 2), formatNumber(null), formatNumber(NaN)], ['1,234', '12.3', '0.50', '—', '—']);
+}
+
+console.log('PASS stats page: period math, headline figures, chart geometry, parser, view model and safe CSV.');

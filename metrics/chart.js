@@ -175,3 +175,150 @@ export function funnelSteps(reached) {
   if (at >= 0) steps[at].biggestDrop = true;
   return steps;
 }
+
+// ---- the answer of the Worker, and the view the page draws ----------------------------------------------------------------
+
+const DIM = /^[a-z0-9._-]{1,24}$/i;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const BREAKDOWN_KEYS = ['stage_reached', 'character', 'weapon', 'device', 'version', 'length'];
+const UNEXPECTED = 'Unexpected answer from the Worker';
+
+/**
+ * Checks and cleans the answer of GET /api/admin/stats. Throws 'Unexpected answer from the Worker' when days is not an
+ * array, a breakdown is missing, or ceiling.day is not YYYY-MM-DD; drops breakdown rows whose dim is not a plain id or whose
+ * count is not a finite number of 0 or more; sorts the days ascending.
+ */
+export function parseStats(json) {
+  if (!json || typeof json !== 'object' || !Array.isArray(json.days) || !json.breakdowns || typeof json.breakdowns !== 'object') throw new Error(UNEXPECTED);
+  if (!json.ceiling || typeof json.ceiling.day !== 'string' || !DAY.test(json.ceiling.day)) throw new Error(UNEXPECTED);
+  const breakdowns = {};
+  for (const key of BREAKDOWN_KEYS) {
+    if (!Array.isArray(json.breakdowns[key])) throw new Error(UNEXPECTED);
+    breakdowns[key] = json.breakdowns[key].filter(row => row && typeof row.dim === 'string' && DIM.test(row.dim) && Number.isFinite(row.n) && row.n >= 0).map(row => ({ dim: row.dim, n: row.n }));
+  }
+  const days = json.days.filter(row => row && typeof row.day === 'string' && DAY.test(row.day)).map(cleanDay).sort((a, b) => (a.day < b.day ? -1 : 1));
+  return {
+    range: String(json.range ?? '30'),
+    days,
+    breakdowns,
+    accountsTotal: num(json.accountsTotal),
+    lastReceived: typeof json.lastReceived === 'string' ? json.lastReceived : null,
+    ceiling: { day: json.ceiling.day, used: num(json.ceiling.used), limit: num(json.ceiling.limit) }
+  };
+}
+
+/** What each number on the page means, in plain words (shown under "What do these mean?"). */
+export const DEFINITIONS = Object.freeze([
+  { id: 'players', title: 'Players', text: 'Devices that finished a real run on a day, counted once per device per UTC day. The headline shows the average per day. Players who never finish a run, and anyone who opted out, are not counted.' },
+  { id: 'runs', title: 'Runs', text: 'Finished real runs: a win, a death or END RUN. Practice, the tutorial, the demo and developer runs are never counted.' },
+  { id: 'winRate', title: 'Win rate', text: 'Wins divided by runs in the same period.' },
+  { id: 'signups', title: 'Sign-ups', text: 'Accounts created in the period.' },
+  { id: 'accounts', title: 'Accounts', text: 'The total number of accounts today. It is not part of the daily counters.' },
+  { id: 'stage', title: 'Stage reached', text: 'The furthest stage a run reached. A win counts as stage 6, "finished the route", whichever route was played. The funnel adds every run that reached a stage or went further.' },
+  { id: 'length', title: 'Run length', text: 'How long a run lasted, in six buckets from under 2 minutes to over 40.' },
+  { id: 'character', title: 'Character', text: 'The character worn when the run started.' },
+  { id: 'weapon', title: 'Weapon', text: 'The weapon that did the most damage in the run.' },
+  { id: 'device', title: 'Device', text: 'Desktop, phone or tablet, guessed from the screen and the pointer.' },
+  { id: 'version', title: 'Game version', text: 'The version of the game the run was played on, newest first.' },
+  { id: 'lowerBound', title: 'A lower bound', text: 'These counts are a lower bound: players who opt out, block the request, or never finish a run are not counted, and past the daily write ceiling counting stops until the next UTC day.' },
+  { id: 'visits', title: 'Visits', text: "Page visits are counted by Cloudflare, not by this page. Open Cloudflare's own dashboard for them." }
+]);
+
+export const FIGURE_LABELS = Object.freeze({ players: 'Players per day', runs: 'Runs per day', winRate: 'Win rate', signups: 'Sign-ups', accounts: 'Accounts' });
+
+/** Numeric dotted-version comparison, ascending (2.9.0 before 2.10.0); sort with (a, b) => compareVersions(b, a) for newest first. */
+export function compareVersions(a, b) {
+  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const diff = (x[i] || 0) - (y[i] || 0);
+    if (diff) return diff;
+  }
+  return 0;
+}
+
+/** How long ago the last report arrived, in words, and whether that is stale (over 36 hours, or never). last: an ISO time or a UTC day. */
+export function ageText(last, nowMs) {
+  if (!last) return { text: 'No reports received yet', stale: true };
+  const then = Date.parse(last);
+  if (!Number.isFinite(then)) return { text: 'Unknown', stale: true };
+  const ms = Math.max(0, nowMs - then);
+  const minutes = Math.floor(ms / 60000), hours = Math.floor(ms / 3600000), days = Math.floor(ms / 86400000);
+  const text = minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} minute${minutes === 1 ? '' : 's'} ago` : hours < 48 ? `${hours} hour${hours === 1 ? '' : 's'} ago` : `${days} days ago`;
+  return { text, stale: ms > 36 * 3600000 };
+}
+
+/** How full today's write ceiling is: high from 80 percent, full at 100. */
+export function ceilingStatus({ used, limit }) {
+  const ratio = limit > 0 ? used / limit : 0;
+  return { ratio, state: ratio >= 1 ? 'full' : ratio >= 0.8 ? 'high' : 'ok' };
+}
+
+/** A number for the page: thousands separators, whole numbers without decimals, others to one (or `decimals`); '—' when missing. */
+export function formatNumber(n, decimals) {
+  if (n === null || n === undefined || !Number.isFinite(n)) return '—';
+  const places = decimals ?? (Number.isInteger(n) ? 0 : 1);
+  return n.toLocaleString('en-US', { minimumFractionDigits: places, maximumFractionDigits: places });
+}
+
+/** A change figure as text: +12%, -4%, +1.5 pts, 0%, or '—' when there is none. */
+export function formatChange(change) {
+  if (!change || !Number.isFinite(change.value)) return '—';
+  if (change.kind === 'points') {
+    const rounded = Math.round(change.value * 10) / 10;
+    return rounded === 0 ? '0 pts' : `${rounded > 0 ? '+' : ''}${rounded} pts`;
+  }
+  const rounded = Math.round(change.value * 100);
+  return rounded === 0 ? '0%' : `${rounded > 0 ? '+' : ''}${rounded}%`;
+}
+
+/** CSV with CRLF line ends; fields with a comma, quote or line break are quoted; a text starting with = + - @ tab or CR gets a ' first (spreadsheet formulas). */
+export function toCsv(rows) {
+  const field = value => {
+    let text = typeof value === 'number' ? String(value) : String(value ?? '');
+    if (typeof value === 'string' && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  return rows.map(row => row.map(field).join(',') + '\r\n').join('');
+}
+
+const share = value => `${Math.round(value * 1000) / 10}%`;
+
+/**
+ * Everything the page draws, from the answer for the chosen window (main) and, for the comparison against the window before it,
+ * an answer covering at least twice as many days (compare, or null). nowMs is the clock the page reads once.
+ */
+export function buildView({ main, compare = null, range, nowMs }) {
+  const today = main.ceiling.day;
+  const window = String(range) === 'all' ? 'all' : Number(range);
+  const headline = headlinePeriods((compare || main).days, today, window);
+  const periods = compare ? headline : { ...headline, previous: null, history: 'none' };
+  const figures = [...compareFigures(periods.current, periods.previous), { id: 'accounts', value: main.accountsTotal, change: null }];
+  const mainPeriods = headlinePeriods(main.days, today, window);
+  const trend = { complete: mainPeriods.current, todayRow: mainPeriods.todayRow };
+  const funnel = funnelSteps(reachedCounts(main.breakdowns.stage_reached));
+  const versionOrder = [...main.breakdowns.version].map(row => row.dim).sort((a, b) => compareVersions(b, a));
+  const breakdowns = {
+    character: barRows(main.breakdowns.character, { top: 8 }),
+    weapon: barRows(main.breakdowns.weapon, { top: 8 }),
+    device: barRows(main.breakdowns.device, { kind: 'device' }),
+    version: barRows(main.breakdowns.version, { order: versionOrder }),
+    length: barRows(main.breakdowns.length, { order: LENGTH_ORDER, kind: 'length' })
+  };
+  const age = ageText(main.lastReceived, nowMs);
+  const ceiling = { used: main.ceiling.used, limit: main.ceiling.limit, state: ceilingStatus(main.ceiling).state };
+  const dayRows = [...trend.complete, trend.todayRow];
+  const barTable = (id, title, first, rows) => ({ id, title, head: [first, 'Runs', 'Share'], rows: rows.map(row => [row.label, row.n, share(row.share)]) });
+  const tables = [
+    { id: 'days', title: 'Per day', head: ['Day', 'Players', 'Runs', 'Wins', 'Sign-ups'], rows: dayRows.map(row => [row.day, row.players, row.runs, row.wins, row.signups]) },
+    { id: 'stage', title: 'Stage reached', head: ['Stage', 'Runs that got there', 'Share of stage 1'], rows: funnel.map(step => [`Stage ${step.stage}`, step.reached, share(step.share)]) },
+    barTable('character', 'Character', 'Character', breakdowns.character),
+    barTable('weapon', 'Weapon', 'Weapon', breakdowns.weapon),
+    barTable('device', 'Device', 'Device', breakdowns.device),
+    barTable('version', 'Game version', 'Version', breakdowns.version),
+    barTable('length', 'Run length', 'Length', breakdowns.length)
+  ];
+  const csv = [['section', 'name', 'count']];
+  for (const key of ['players', 'runs', 'wins', 'signups']) for (const row of dayRows) csv.push([key, row.day, row[key]]);
+  for (const key of BREAKDOWN_KEYS) for (const row of main.breakdowns[key]) csv.push([key, row.dim, row.n]);
+  return { range: main.range, today, figures, comparison: periods.history, trend, funnel, breakdowns, health: { last: age.text, stale: age.stale, ceiling }, tables, csv };
+}
