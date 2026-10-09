@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { CF_MAX_LINE, CF_MAX_RULES, htmlUrlPath, inlineScripts, matchHeaders, parseHeaders, parseRedirects, matchRedirect, scriptHash } from '../scripts/pages-headers.mjs';
+import { CF_MAX_LINE, CF_MAX_RULES, WEB_ANALYTICS_HOSTS, buildHeaders, contentSecurityPolicy, htmlUrlPath, inlineScripts, matchHeaders, parseHeaders, parseRedirects, matchRedirect, scriptHash } from '../scripts/pages-headers.mjs';
 import { HOSTS, LAUNCHED, ciLaunchRefusals, resolveSiteConfig } from '../site.config.mjs';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'riftborn-pages-'));
@@ -238,6 +238,30 @@ const post = build('post', { RIFTBORN_FORCE_LAUNCHED: '1' });
 }
 console.log('PASS launched: riftborn.us = game + classic + privacy with strict CSP (all inline scripts hashed, tamper detected), github.io = handoff pages + old feedback inbox copy with a "moved" banner.');
 console.log('PASS feedback inbox: feedback.riftborn.us = inbox + font + 404 + robots under its own strict headers (CSP connect-src api.riftborn.us only, frame-ancestors none, noindex, no referrer, no-cache, nosniff, features off, no analytics); riftborn.us/feedback[/...] 302s there, nothing in riftborn.us collides.');
+
+// ---- the optional visit-counter hosts in the policy builder (player metrics) ----------------------------------------
+{
+  assert.deepEqual(WEB_ANALYTICS_HOSTS, { scriptHosts: ['https://static.cloudflareinsights.com'], connectHosts: ['https://cloudflareinsights.com'] });
+  const base = { hashes: ["'sha256-a'"], connect: ['https://api.riftborn.us'] };
+  const directive = (csp, name) => csp.split('; ').find(d => d.startsWith(name + ' ')).split(' ').slice(1);
+  const withHosts = contentSecurityPolicy({ ...base, ...WEB_ANALYTICS_HOSTS });
+  assert.deepEqual(directive(withHosts, 'script-src'), ["'self'", "'sha256-a'", 'https://static.cloudflareinsights.com'], 'hashes first, then the script host');
+  assert.deepEqual(directive(withHosts, 'connect-src'), ["'self'", 'https://api.riftborn.us', 'https://cloudflareinsights.com']);
+  assert.ok(!contentSecurityPolicy(base).includes('cloudflareinsights'), 'no option, no change');
+  assert.equal(contentSecurityPolicy(base), contentSecurityPolicy({ ...base, scriptHosts: [], connectHosts: [] }));
+  for (const bad of ['https://static.cloudflareinsights.com/beacon.min.js', '*', "'unsafe-inline'", 'http://x.example', 'https://*.example']) {
+    assert.throws(() => contentSecurityPolicy({ ...base, scriptHosts: [bad] }), /scriptHosts/, bad);
+    assert.throws(() => contentSecurityPolicy({ ...base, connectHosts: [bad] }), /connectHosts/, bad);
+  }
+  const dir = path.join(tmp, 'analytics-hosts');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, 'index.html'), '<!doctype html><title>x</title><p>plain</p>');
+  const built = buildHeaders(dir, { connect: ['https://api.riftborn.us'], ...WEB_ANALYTICS_HOSTS });
+  assert.ok(built.csp.includes('https://static.cloudflareinsights.com') && built.csp.includes('https://cloudflareinsights.com'), 'buildHeaders passes both through');
+  assert.ok(Math.max(...built.text.split('\n').map(line => line.length)) < CF_MAX_LINE);
+  assert.ok(!buildHeaders(dir, { connect: ['https://api.riftborn.us'] }).csp.includes('cloudflareinsights'));
+}
+console.log('PASS visit-counter CSP option: two optional host lists in the policy builder, host sources only, nothing changes without them.');
 
 // ---- the deploy workflow ---------------------------------------------------------------------------
 {
