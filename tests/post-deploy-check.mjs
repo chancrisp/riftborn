@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   DEPLOY_WORKFLOW, EXTRA_PAGES, METRICS_FILES, METRICS_PATH, FEEDBACK_DOMAIN_GRACE_UNTIL, FEEDBACK_REDIRECTS, GET_TRIES, INBOX_KEY_STORE, PLAYWRIGHT_DIR, PRELOAD_SESSION, PRELOAD_STORAGE, SOCIAL_TAGS,
-  TOLERATED, checkFeedbackRedirects, checkInbox, checkMetrics, checkLiveFiles, checkVersion, committedPage, discordPayload, dryRun, escData, expectedVersions, get, githubContext,
+  TOLERATED, visitCounterRequests, checkFeedbackRedirects, checkInbox, checkMetrics, checkLiveFiles, checkVersion, committedPage, discordPayload, dryRun, escData, expectedVersions, get, githubContext,
   inboxHeaderProblems, isDiscordWebhook, isWriteRequest, linkedFiles, metaTags, missingCommittedFiles, newerDeploy, notAttached, pageExpectations, report, retryable,
   sameBuild, scrub, sendAlert, servedAsPage, socialImages, socialProblems, splitTolerated, supersededReason, versionProblem
 } from '../scripts/post-deploy-check.mjs';
@@ -334,8 +334,20 @@ console.log('PASS superseded: when main moved on and its deploy is running or al
 
 // --- muted, no popups, no writes -----------------------------------------------------------------
 {
-  assert.deepEqual(JSON.parse(PRELOAD_STORAGE['riftborn-reborn-preferences-v1']), { muted: true, master: 0 });
+  assert.deepEqual(JSON.parse(PRELOAD_STORAGE['riftborn-reborn-preferences-v1']), { muted: true, master: 0, shareStats: false });
   assert.equal(PRELOAD_STORAGE['riftborn-reborn-welcome-v1'], '1');
+  assert.equal(PRELOAD_STORAGE['riftborn-reborn-stats-notice-v1'], 'true', 'the stats notice counts as seen, so the page starts with the stats switch off and settled');
+  {
+    const reqs = [['GET', 'https://riftborn.us/'], ['GET', 'https://static.cloudflareinsights.com/beacon.min.js'], ['POST', 'https://cloudflareinsights.com/cdn-cgi/rum?'],
+      ['POST', 'https://riftborn.us/cdn-cgi/rum'], ['GET', 'https://evil.example/cloudflareinsights.com.js']].map(([method, url]) => ({ method, url, authorization: false }));
+    assert.deepEqual(visitCounterRequests(reqs), ['GET https://static.cloudflareinsights.com/beacon.min.js', 'POST https://cloudflareinsights.com/cdn-cgi/rum?', 'POST https://riftborn.us/cdn-cgi/rum']);
+  }
+  // The game checkout's storage keys (only where ../riftborn exists, i.e. after the merge into the site checkout).
+  const gameStorage = new URL('../../riftborn/src/core/storage.js', import.meta.url);
+  if (fs.existsSync(gameStorage)) assert.ok(fs.readFileSync(gameStorage, 'utf8').includes('statsNotice: "riftborn-reborn-stats-notice-v1"'), 'the preloaded notice key is the game\'s own');
+  assert.ok(read('scripts/post-deploy-check.mjs').includes("const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])"), 'the nothing-sent rule has no allowlist');
+  assert.ok(read('scripts/post-deploy-check.mjs').includes('ok: !events.blocked.length'), 'the nothing-sent check is unchanged');
+  assert.ok(read('scripts/post-deploy-check.mjs').includes('visitCounterRequests(events.requests)'), 'browseLive watches for the visit counter');
   assert.equal(PRELOAD_SESSION['riftborn-reborn-whats-new-visit-v1'], '1');
   for (const method of ['GET', 'HEAD', 'OPTIONS', 'get']) assert.equal(isWriteRequest(method), false, method);
   for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'post']) assert.equal(isWriteRequest(method), true, method);
