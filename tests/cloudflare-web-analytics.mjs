@@ -1,11 +1,11 @@
 // The read-only Cloudflare Web Analytics state check (scripts/cloudflare-web-analytics.mjs, the one-off
 // workflow .github/workflows/cloudflare-web-analytics.yml) against a fake Cloudflare API. Proves:
-//   - it only reads: GET calls plus one POST that asks for the NAMES of logged fields; the token goes to
-//     api.cloudflare.com only, never to riftborn.us and friends;
+//   - it only reads: every call is a GET; the token goes to api.cloudflare.com only, never to riftborn.us
+//     and friends;
 //   - nothing secret reaches its output (it is the public annotations of a public repository): no token,
 //     account id, zone id, site tag, site token, Pages tag, snippet or token id;
 //   - what it finds: zone plan, Workers plan, which mechanism injects the beacon, the token's reach, whether
-//     Workers Logs can hold client IPs; and that a missing token permission is named exactly (required ones
+//     the Worker's log settings (the logged field names are not looked up); and that a missing token permission is named exactly (required ones
 //     fail the run, optional ones warn).
 // Local only; nothing is fetched. Run with the other Cloudflare tests: tests/cloudflare-pages-domains.mjs imports this file.
 import assert from 'node:assert/strict';
@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { PAGES_PROJECTS } from '../site.config.mjs';
 import {
-  INSPECT_PROJECTS, IP_KEY, PERMISSIONS, SERVED_URLS, WATCHED_HOSTS, WORKER_SCRIPT, applyAnnotations, applyRefusals, applyWebAnalytics, injectionVerdict, inspect, inspectPlan, inspectRefusals, renderAnnotations, verifyNoInjection
+  INSPECT_PROJECTS, PERMISSIONS, SERVED_URLS, WATCHED_HOSTS, WORKER_SCRIPT, applyAnnotations, applyRefusals, applyWebAnalytics, injectionVerdict, inspect, inspectPlan, inspectRefusals, renderAnnotations, verifyNoInjection
 } from '../scripts/cloudflare-web-analytics.mjs';
 
 const ACCOUNT = '0123456789abcdef0123456789abcdef', TOKEN = 'cf-test-token-never-printed', API = 'https://api.cloudflare.com';
@@ -22,15 +22,14 @@ const env = { CLOUDFLARE_API_TOKEN: TOKEN, CLOUDFLARE_ACCOUNT_ID: ACCOUNT };
 const ACCT = `/client/v4/accounts/${ACCOUNT}`;
 const quiet = () => {};
 
-const DEFAULT_KEYS = ['$workers.event.request.url', '$workers.event.request.headers.cf-connecting-ip'];
 const DEFAULT_GROUPS = ['Account Settings Write', 'Account Settings Read', 'Zone Read'];
 
 /**
  * A fake Cloudflare API (and the public hosts). Records every call as { origin, url, path, method, authorization, body }.
- * deny: call kinds answered 403 / 10000 (a token without that permission): zone, rum, pages, worker, verify, policies, subs, keys.
+ * deny: call kinds answered 403 / 10000 (a token without that permission): zone, rum, pages, worker, verify, policies, subs.
  * marks: unique values put into every id, tag, token and snippet the fake returns.
  */
-function fakeCloudflare({ plan = { legacy_id: 'free', name: 'Free Website', is_subscribed: false }, zones, rum, pages = {}, worker, keys = DEFAULT_KEYS, subs = ['Workers Paid'], groups = DEFAULT_GROUPS, served = {}, deny = [], marks = [] } = {}) {
+function fakeCloudflare({ plan = { legacy_id: 'free', name: 'Free Website', is_subscribed: false }, zones, rum, pages = {}, worker, subs = ['Workers Paid'], groups = DEFAULT_GROUPS, served = {}, deny = [], marks = [] } = {}) {
   const [siteTag = 'st', siteToken = 'stk', pagesTag = 'pt', zoneId = 'zone-1', tokenId = 'tok-1', snippet = 'sn'] = marks;
   const calls = [];
   const reply = (code, body) => new Response(JSON.stringify(body), { status: code, headers: { 'Content-Type': 'application/json' } });
@@ -60,7 +59,7 @@ function fakeCloudflare({ plan = { legacy_id: 'free', name: 'Free Website', is_s
             : p === `${ACCT}/tokens/verify` ? 'verify'
               : p.startsWith(`${ACCT}/tokens/`) ? 'policies'
                 : p === `${ACCT}/subscriptions` ? 'subs'
-                  : p === `${ACCT}/workers/observability/telemetry/keys` ? 'keys' : 'unknown';
+                  : 'unknown';
     if (deny.includes(kind)) return fail(403, 10000, 'Authentication error');
     switch (kind) {
       case 'zone': return ok(zoneList.filter(z => u.searchParams.get('name') === z.name));
@@ -75,9 +74,6 @@ function fakeCloudflare({ plan = { legacy_id: 'free', name: 'Free Website', is_s
       case 'verify': return ok({ id: tokenId, status: 'active' });
       case 'policies': return ok({ id: tokenId, status: 'active', policies: [{ effect: 'allow', permission_groups: groups.map((name, i) => ({ id: 'g' + i, name })) }] });
       case 'subs': return ok(subs.map(name => ({ id: 'sub-1', rate_plan: { public_name: name } })));
-      case 'keys':
-        if (keys === 'bad') return fail(400, 1001, 'bad request');
-        return ok(keys.map(key => ({ key, type: 'string' })));
       default: return fail(404, 7003, 'No route for that URI');
     }
   };
@@ -97,7 +93,7 @@ const run = async (options = {}, extra = {}) => {
   for (const call of fake.calls) {
     const api = call.origin === API;
     assert.equal(Boolean(call.authorization), api, 'token only on the Cloudflare API: ' + call.url);
-    assert.ok(call.method === 'GET' || (api && call.method === 'POST' && call.path.endsWith('/workers/observability/telemetry/keys')), 'read-only: ' + call.method + ' ' + call.url);
+    assert.equal(call.method, 'GET', 'read-only: ' + call.method + ' ' + call.url);
   }
   assert.deepEqual(fake.calls.filter(c => c.origin !== API).map(c => c.url), SERVED_URLS);
 }
@@ -118,13 +114,13 @@ console.log('PASS web analytics inspect privacy: read-only calls, the token only
   assert.deepEqual(INSPECT_PROJECTS, Object.values(PAGES_PROJECTS));
   assert.deepEqual(SERVED_URLS, ['https://riftborn.us/', 'https://riftborn.us/privacy/', 'https://dev.riftborn.us/', 'https://feedback.riftborn.us/']);
   assert.equal(Object.isFrozen(PERMISSIONS), true);
-  assert.deepEqual(Object.keys(PERMISSIONS), ['zone', 'webAnalyticsRead', 'webAnalyticsWrite', 'pages', 'workers', 'billing', 'tokens', 'observability']);
+  assert.deepEqual(Object.keys(PERMISSIONS), ['zone', 'webAnalyticsRead', 'webAnalyticsWrite', 'pages', 'workers', 'billing', 'tokens']);
   assert.equal(PERMISSIONS.zone, 'Zone > Zone > Read (zone riftborn.us)');
   assert.equal(PERMISSIONS.webAnalyticsWrite, 'Account > Account Settings > Edit');
   const plan = inspectPlan().join('\n');
   for (const part of [
     'GET  /zones?name=riftborn.us', 'GET  /accounts/<account>/rum/site_info/list', `GET  /accounts/<account>/workers/scripts/${WORKER_SCRIPT}/settings`,
-    'GET  /accounts/<account>/tokens/verify', 'GET  /accounts/<account>/subscriptions', 'POST /accounts/<account>/workers/observability/telemetry/keys',
+    'GET  /accounts/<account>/tokens/verify', 'GET  /accounts/<account>/subscriptions',
     ...INSPECT_PROJECTS.map(project => `GET  /accounts/<account>/pages/projects/${project}`), ...SERVED_URLS, ...Object.values(PERMISSIONS)
   ]) assert.ok(plan.includes(part), 'The plan names: ' + part);
   // The dry run needs no token or account and fetches nothing; other subcommands do not exist yet.
@@ -220,22 +216,14 @@ console.log('PASS web analytics inspect plan: every call and permission is named
   assert.deepEqual(r.report.injection.servedWithBeacon, ['https://riftborn.us/']);
   assert.equal(r.problems.length, 0);
 }
-// ---- Workers Logs: can they hold client IPs? ------------------------------------------------------------------------
+// ---- Workers Logs: settings only; the logged field names are not looked up -------------------------------------------------
 {
-  const yes = await run({});
-  assert.deepEqual(yes.report.workerLogs, {
-    observability: true, invocationLogs: true, persist: true, headSamplingRate: 1, logpush: false, tailConsumers: [], ipFieldNames: ['$workers.event.request.headers.cf-connecting-ip'], ipQuestion: 'yes'
+  const r = await run({});
+  assert.deepEqual(r.report.workerLogs, {
+    observability: true, invocationLogs: true, persist: true, headSamplingRate: 1, logpush: false, tailConsumers: [], ipFieldNames: null, ipQuestion: 'unknown'
   });
-  const no = await run({ keys: ['$workers.event.request.url', 'description', 'recipient'] });
-  assert.deepEqual([no.report.workerLogs.ipQuestion, no.report.workerLogs.ipFieldNames], ['no', []]);
-  for (const [options, label] of [[{ deny: ['keys'] }, 'denied'], [{ keys: 'bad' }, 'HTTP 400'], [{ keys: [] }, 'empty']]) {
-    const unknown = await run(options);
-    assert.equal(unknown.report.workerLogs.ipQuestion, 'unknown', label);
-    assert.equal(unknown.report.workerLogs.ipFieldNames, null, label);
-    assert.deepEqual(unknown.problems.map(p => [p.permission, p.required]), [[PERMISSIONS.observability, false]], label);
-  }
-  for (const text of ['description', 'recipient', '$workers.event.request.url', 'ipsum']) assert.equal(IP_KEY.test(text), false, text);
-  for (const text of ['cf-connecting-ip', 'client_ip', '$workers.event.request.headers.x-forwarded-for', 'remote_addr', 'ip']) assert.equal(IP_KEY.test(text), true, text);
+  assert.equal(r.problems.length, 0);
+  assert.ok(!inspectPlan().some(line => /^POST/.test(line)), 'every planned call is a GET');
 }
 // ---- the token: can it change Web Analytics? -------------------------------------------------------------------------
 {
@@ -267,7 +255,7 @@ console.log('PASS web analytics inspect plan: every call and permission is named
     assert.equal(lines.filter(l => l.startsWith('::warning')).length, 0, kind);
     assert.equal(lines.filter(l => l.startsWith('::notice')).length, 6, 'five sections and a result line: ' + kind);
   }
-  for (const [kind, permission] of [['subs', PERMISSIONS.billing], ['policies', PERMISSIONS.tokens], ['keys', PERMISSIONS.observability]]) {
+  for (const [kind, permission] of [['subs', PERMISSIONS.billing], ['policies', PERMISSIONS.tokens]]) {
     const r = await run({ deny: [kind] });
     assert.deepEqual(r.problems.map(p => [p.required, p.permission]), [[false, permission]], kind);
     const lines = renderAnnotations(r.report, r.problems);
@@ -282,7 +270,7 @@ console.log('PASS web analytics inspect plan: every call and permission is named
   assert.match(all.report.at, /^\d{4}-\d\d-\d\dT/);
   assert.equal((await run({}, { now: () => new Date('2026-10-09T12:00:00Z') })).report.at, '2026-10-09T12:00:00.000Z');
 }
-console.log('PASS web analytics inspect: zone and Workers plan, the Web Analytics sites, the Pages toggle, what is really served, the injection verdict, whether Workers Logs can hold IPs, what the token can change, and exact token permissions (required fail, optional warn).');
+console.log('PASS web analytics inspect: zone and Workers plan, the Web Analytics sites, the Pages toggle, what is really served, the injection verdict, the Worker log settings, what the token can change, and exact token permissions (required fail, optional warn).');
 
 // ---- apply (injection off, site token) and verify -----------------------------------------------------------------------
 {

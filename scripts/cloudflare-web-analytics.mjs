@@ -5,8 +5,9 @@
 //     auto_install), the Pages projects' "Metrics" toggle, both, or neither (what the public pages really serve
 //     is checked too: a beacon served with no switch found is "unexplained");
 //   - whether the deploy token may read and CHANGE Web Analytics (Stage 3 needs "Account Settings Write");
-//   - whether Workers Logs of the leaderboard Worker can hold client IP addresses (field NAMES only).
-// Nothing is written: every call is a GET, except one POST that asks Cloudflare for the NAMES of logged fields.
+//   - the Worker's observability settings (the names of the fields it logs are NOT looked up: whether Workers Logs hold
+//     client IP addresses stays 'unknown' here and has to be answered from the Worker's code or the dashboard).
+// Nothing is written: every inspect and verify call is a GET.
 // The token is sent to api.cloudflare.com only (the public pages are fetched without it). The output goes to a
 // public repository's workflow annotations, so it holds derived facts only: never the token, the account id, a
 // zone id, a site tag or token, a Pages tag, a snippet or a token id.
@@ -15,7 +16,7 @@
 //   Account > Account Settings > Read           the Web Analytics sites (Stage 3 `apply` will need Edit)
 //   Account > Cloudflare Pages > Read           each project's Metrics toggle
 //   Account > Workers Scripts > Read            the Worker's observability settings
-//   optional: Account > Billing > Read; Account > Account API Tokens > Read; Account > Workers Observability > Edit
+//   optional: Account > Billing > Read; Account > Account API Tokens > Read
 //
 //   node scripts/cloudflare-web-analytics.mjs inspect --dry-run   the plan; nothing is fetched, no token needed
 //   node scripts/cloudflare-web-analytics.mjs inspect             with CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
@@ -39,15 +40,11 @@ export const PERMISSIONS = Object.freeze({
   pages: 'Account > Cloudflare Pages > Read',
   workers: 'Account > Workers Scripts > Read',
   billing: 'Account > Billing > Read',
-  tokens: 'Account > Account API Tokens > Read',
-  observability: 'Account > Workers Observability > Edit'
+  tokens: 'Account > Account API Tokens > Read'
 });
 const REQUIRED_PERMISSIONS = [PERMISSIONS.zone, PERMISSIONS.webAnalyticsRead, PERMISSIONS.pages, PERMISSIONS.workers];
 /** The permission group name a token lists when it may change Web Analytics. */
 const WRITE_GROUP = 'Account Settings Write';
-const KEYS_QUERY = Object.freeze({ keyNeedle: { value: 'ip|addr|forward|connecting|client', isRegex: true, matchCase: false }, limit: 1000 });
-/** A logged field NAME that looks like it holds a client address. */
-export const IP_KEY = /(^|[.$_-])(ip|ip[._-]?address|client[._-]?ip|connecting[._-]?ip|forwarded[._-]?for|remote[._-]?addr)($|[._-])/i;
 /** The hosts and Pages names whose Web Analytics sites apply may touch (every other site in the account is left alone). */
 export const WATCHED_HOSTS = Object.freeze([
   new URL(HOSTS.live).hostname, new URL(HOSTS.dev).hostname, new URL(HOSTS.feedback).hostname,
@@ -65,7 +62,6 @@ export function inspectPlan() {
     'GET  /accounts/<account>/tokens/verify   (optional: the token is active)',
     'GET  /accounts/<account>/tokens/<token id>   (optional: its permission groups; the id is never printed)',
     'GET  /accounts/<account>/subscriptions   (optional: is there a Workers paid plan?)',
-    'POST /accounts/<account>/workers/observability/telemetry/keys   (optional: asks for the NAMES of logged fields that look like an IP address; no log content)',
     ...SERVED_URLS.map(url => `GET  ${url}   (no token: does the page serve the Cloudflare beacon?)`),
     `Token permissions: ${Object.values(PERMISSIONS).join('; ')}.`
   ];
@@ -99,8 +95,6 @@ export function injectionVerdict({ zoneAutoInstall, pagesMetricsOn, servedWithBe
 const describe = answer => answer.status === 0 ? `no answer: ${answer.errors[0]?.[1] || 'unknown error'}` : `HTTP ${answer.status}${answer.errors.length ? ': ' + answer.errors.map(([code, message]) => `${code} ${message}`).join('; ') : ''}`;
 const sortedKeys = value => value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).sort() : [];
 const names = list => [...new Set(list.filter(name => typeof name === 'string' && name))].sort();
-// The field names a telemetry keys answer holds: strings, or objects naming the key (the shape is a documented gap).
-const keyNames = result => names((Array.isArray(result) ? result : result?.keys || []).map(item => typeof item === 'string' ? item : item?.key ?? item?.name ?? item?.keyName));
 
 /**
  * Reads everything above. -> { report, problems }. problems: [{ what, permission, required }] (permission '' when the failure is
@@ -194,7 +188,7 @@ export async function inspect({ env = process.env, fetchImpl = fetch, log = () =
     problem(true, PERMISSIONS.workers, `Could not read the settings of the Worker ${WORKER_SCRIPT}`, workerAnswer);
   }
 
-  // 5. Optional reads: the token, the subscriptions, the names of logged fields.
+  // 5. Optional reads: the token, the subscriptions.
   const token_ = { status: 'unknown', reads: {}, canChangeWebAnalytics: 'unknown', policyGroups: null };
   const verify = await call('GET', `${acct}/tokens/verify`);
   if (verify.success) {
@@ -220,19 +214,6 @@ export async function inspect({ env = process.env, fetchImpl = fetch, log = () =
     if (subscriptions.some(name => /workers/i.test(name))) workersPlan = 'paid';
   } else {
     problem(false, PERMISSIONS.billing, 'Could not read the subscriptions', subs);
-  }
-
-  const keys = await call('POST', `${acct}/workers/observability/telemetry/keys`, KEYS_QUERY);
-  if (keys.success) {
-    const found = keyNames(keys.result);
-    if (found.length === 0) {
-      problem(false, PERMISSIONS.observability, 'The logged-field lookup returned no field names (nothing logged yet, or an unexpected answer shape)', { status: 200, errors: [] });
-    } else {
-      workerLogs.ipFieldNames = found.filter(name => IP_KEY.test(name));
-      workerLogs.ipQuestion = workerLogs.ipFieldNames.length > 0 ? 'yes' : 'no';
-    }
-  } else {
-    problem(false, PERMISSIONS.observability, 'Could not read the names of logged fields', keys);
   }
 
   // 6. What the public pages really serve (no token).
@@ -373,7 +354,7 @@ export function renderAnnotations(report, problems) {
     ['zone', { zone: report.zone, workersPlan: report.workersPlan, subscriptions: report.subscriptions }],
     ['injection', { injection: report.injection, rum: report.rum, pages: report.pages, served: report.served }],
     ['token', report.token],
-    ['worker logs', report.workerLogs],
+    ['worker logs (settings only; logged field names are not looked up, so ipQuestion stays unknown)', report.workerLogs],
     ['shapes', report.shapes]
   ];
   const lines = sections.map(([name, value]) => `::notice title=Web Analytics inspect - ${name}::${escData(compact(value))}`);
