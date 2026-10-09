@@ -215,4 +215,22 @@ Full notes in {#patch-notes} · Play now: https://riftborn.us`,
 
 Full notes in-game: **PATCH NOTES** on the main menu.`,
   },
+  // 2.5.1, owner-approved 2026-10-08 (texts approved after the release went live, "ping both"):
+  // News pings on the announcement, Patch pings on the patch notes.
+  {
+    version: '2.5.1',
+    ping: { announcement: true, patchNotes: true },
+    announcement: `**Riftborn 2.5.1 · Small Fixes is live!**
+- **Pumpkin Hill:** the ghost train yard floor no longer flickers
+- The browser's **right-click menu** stays out of the game
+- Menu text no longer **highlights on phones and tablets**
+
+Full notes in {#patch-notes} · Play now: https://riftborn.us`,
+    patchNotes: `**v2.5.1 · Small Fixes** (8 Oct 2026)
+- **Pumpkin Hill:** the floor of the ghost train yard no longer flickers between two textures as you move.
+- **Right-click menu:** the browser's own menu no longer pops up over the game or its card screens. Text fields, such as the Settings search, keep theirs so copy and paste still work.
+- **Phones and tablets:** menu text no longer gets highlighted when you double-tap, press and hold, or drag across it. Text fields, such as the Settings search, still select as normal.
+
+Full notes in-game: **PATCH NOTES** on the main menu.`,
+  },
 ];
