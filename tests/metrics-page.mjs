@@ -2,7 +2,7 @@
 // Period math and the headline figures (metrics/chart.js); chart geometry, the response parser, the page shell and the markup
 // are added below by the later tasks of the dashboard stage. The last line of this file is the PASS line.
 import assert from 'node:assert/strict';
-import { addDays, compareFigures, fillDays, headlinePeriods, periodTotals } from '../metrics/chart.js';
+import { BAR_BOX, LENGTH_LABELS, LENGTH_ORDER, TREND_BOX, addDays, barGeometry, barRows, compareFigures, fillDays, funnelSteps, headlinePeriods, niceMax, periodTotals, reachedCounts, trendGeometry } from '../metrics/chart.js';
 
 // ---- Task 4.1: period math and headline figures -----------------------------------------------------------------------
 {
@@ -46,4 +46,53 @@ import { addDays, compareFigures, fillDays, headlinePeriods, periodTotals } from
   assert.equal(compareFigures(flat, periods.current)[2].change, null, 'no win rate, no change in points');
 }
 
-console.log('PASS stats page: period math and headline figures.');
+// ---- Task 4.2: chart geometry ---------------------------------------------------------------------------------------------
+{
+  assert.deepEqual(TREND_BOX, { width: 640, height: 220, margin: { top: 12, right: 12, bottom: 28, left: 44 } });
+  assert.deepEqual([0, 3, 7, 10, 120, 501, 1.5, -4].map(niceMax), [1, 5, 10, 10, 200, 1000, 2, 1]);
+  const three = ['2026-10-05', '2026-10-06', '2026-10-07'].map((day, i) => ({ day, players: [0, 5, 10][i], runs: 0, wins: 0, signups: 0 }));
+  const trend = trendGeometry(three, 'players');
+  assert.equal(trend.max, 10);
+  assert.deepEqual(trend.points.map(p => [p.x, p.y, p.day, p.value]), [[44, 192, '2026-10-05', 0], [336, 102, '2026-10-06', 5], [628, 12, '2026-10-07', 10]]);
+  assert.equal(trend.line, 'M44 192L336 102L628 12');
+  assert.equal(trendGeometry(three, 'players', undefined, { partialLast: true }).partialLine, 'M336 102L628 12');
+  assert.equal(trendGeometry(three, 'players', undefined, { partialLast: true }).line, 'M44 192L336 102');
+  assert.deepEqual(trend.yTicks.map(tick => [tick.y, tick.label]), [[192, '0'], [102, '5'], [12, '10']], 'ticks at 0, half and the maximum');
+  assert.deepEqual(trend.xTicks.map(tick => [tick.x, tick.label]), [[44, '10-05'], [336, '10-06'], [628, '10-07']]);
+  const empty = trendGeometry([], 'runs');
+  assert.deepEqual([empty.points, empty.line, empty.partialLine], [[], '', '']);
+  assert.equal(trendGeometry([three[1]], 'players').points[0].x, 336, 'one day sits at the horizontal centre');
+  const many = Array.from({ length: 90 }, (_, i) => ({ day: addDays('2026-07-23', i), players: i, runs: 0, wins: 0, signups: 0 }));
+  const ticks = trendGeometry(many, 'players').xTicks;
+  assert.ok(ticks.length <= 6 && ticks[0].label === '07-23' && ticks.at(-1).label === '10-20', 'at most 6 ticks, first and last always');
+  assert.equal(trendGeometry([{ day: '2026-10-05', players: 1.04, runs: 0, wins: 0, signups: 0 }, { day: '2026-10-06', players: 2, runs: 0, wins: 0, signups: 0 }], 'players').line.includes('.0'), false, 'no trailing .0');
+
+  assert.deepEqual(reachedCounts([{ dim: '1', n: 5 }, { dim: '3', n: 2 }, { dim: '9', n: 7 }]), [7, 2, 2, 0, 0, 0], 'a run that ended at stage k also reached every stage before it; dims outside 1..6 are ignored');
+  const funnel = funnelSteps([100, 60, 30, 27, 9, 3]);
+  assert.equal(funnel.length, 6);
+  assert.deepEqual([funnel[0].share, funnel[0].lostShare, funnel[1].share], [1, null, 0.6]);
+  assert.deepEqual(funnel.map(s => s.biggestDrop), [false, false, false, false, true, false], 'the tie between stage 5 and 6 goes to the earlier stage');
+  assert.equal(funnelSteps([0, 0, 0, 0, 0, 0]).some(s => s.biggestDrop || Number.isNaN(s.share)), false, 'no runs: no drop, no NaN');
+
+  assert.deepEqual(LENGTH_ORDER, ['u2', '2-5', '5-10', '10-20', '20-40', 'o40']);
+  assert.deepEqual([LENGTH_LABELS.u2, LENGTH_LABELS['2-5'], LENGTH_LABELS.o40], ['Under 2 min', '2-5 min', 'Over 40 min']);
+  const chars = [{ dim: 'rift-knight', n: 5 }, { dim: 'abbot', n: 5 }, { dim: 'a', n: 1 }, { dim: 'b', n: 2 }, { dim: 'c', n: 3 }];
+  const top = barRows(chars, { top: 3 });
+  assert.deepEqual(top.map(r => [r.dim, r.n]), [['abbot', 5], ['rift-knight', 5], ['c', 3], ['other', 3]], 'sorted by count then name; the remainder merges into other');
+  assert.deepEqual([top[0].label, top[1].label, top.at(-1).label], ['abbot', 'rift knight', 'Other']);
+  assert.equal(top[0].share, 5 / 16, 'shares are on the total of all rows');
+  assert.deepEqual(barRows([{ dim: '3', n: 2 }], { kind: 'stage' })[0].label, 'Stage 3');
+  assert.deepEqual(barRows([{ dim: 'desktop', n: 2 }], { kind: 'device' })[0].label, 'Desktop');
+  const lengths = barRows([{ dim: '5-10', n: 4 }], { order: LENGTH_ORDER, kind: 'length' });
+  assert.deepEqual(lengths.map(r => r.dim), LENGTH_ORDER, 'all six buckets, in order, zero rows kept');
+  assert.equal(lengths[2].label, '5-10 min');
+  const geometry = barGeometry([{ dim: 'a', n: 10 }, { dim: 'b', n: 0 }, { dim: 'c', n: 5 }].map(r => ({ ...r, label: r.dim, share: 0 })));
+  assert.deepEqual(BAR_BOX, { width: 640, rowHeight: 28, labelWidth: 150, valueWidth: 90 });
+  assert.equal(geometry.bars[0].width, 640 - 150 - 90, 'the longest bar fills the room');
+  assert.equal(geometry.bars[1].width, 0, 'a zero count is width 0, never NaN');
+  assert.equal(geometry.bars[2].width, (640 - 150 - 90) / 2);
+  assert.equal(geometry.height, 3 * 28);
+  assert.equal(barGeometry([]).bars.length, 0);
+}
+
+console.log('PASS stats page: period math, headline figures and chart geometry.');
