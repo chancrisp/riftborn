@@ -191,6 +191,32 @@ button.ghost {
   font-size: 12px;
 }
 
+/* A link that looks like the ghost button (the stats page and the inbox link to each other). */
+a.ghost {
+  display: inline-block;
+  min-height: 32px;
+  padding: 4px 10px;
+  box-sizing: border-box;
+  line-height: 20px;
+  font-size: 12px;
+  color: var(--white);
+  text-decoration: none;
+  text-shadow: 2px 2px #111;
+  background: var(--button);
+  border: 2px solid;
+  border-color: var(--edge-light) var(--edge-dark) var(--edge-dark) var(--edge-light);
+  box-shadow: 2px 2px #000;
+}
+
+a.ghost:hover,
+a.ghost:focus-visible {
+  color: #ede0a3;
+  background: var(--button-hover);
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+
 .error {
   min-height: 1.5em;
   margin: 10px 0 0;

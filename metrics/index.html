@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Owner-only stats page, built into feedback.riftborn.us/metrics/. GitHub Pages cannot send headers,
+     so the policy is here too (the strict _headers policy of scripts/pages-headers.mjs applies as
+     well; the browser enforces both). No inline script or style: the module and stylesheets are
+     same-origin files. The admin key only ever goes to the Worker host. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src data:; connect-src https://api.riftborn.us; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#10141e">
+<title>Riftborn · Stats</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23161c42'/%3E%3Cpath d='m18 2-12 17h9l-2 11 13-18h-9z' fill='%238effd1'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="../inbox.css">
+<link rel="stylesheet" href="metrics.css">
+</head>
+<body>
+<header class="top">
+  <h1>RIFT<span>BORN</span> <small>STATS</small></h1>
+  <div class="top-actions">
+    <a class="ghost" href="../">INBOX</a>
+    <button id="lock" type="button" class="ghost" hidden>LOCK</button>
+  </div>
+</header>
+
+<main>
+  <section id="login" class="panel login" hidden>
+    <h2>ADMIN KEY</h2>
+    <p class="hint">Enter the same admin key you use for the feedback inbox (24+ random characters). It is kept for this tab only (closing the tab forgets it).</p>
+    <form id="loginForm" autocomplete="off">
+      <input id="keyInput" type="password" autocomplete="current-password" spellcheck="false" autocapitalize="off" aria-label="Admin key" required>
+      <button type="submit" class="primary">UNLOCK</button>
+    </form>
+    <p id="loginError" class="error" role="alert"></p>
+  </section>
+
+  <section id="stats" hidden>
+    <p id="status" class="status" role="status"></p>
+  </section>
+</main>
+<script type="module" src="metrics.js"></script>
+</body>
+</html>

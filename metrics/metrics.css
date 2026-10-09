@@ -1,0 +1,4 @@
+/* The stats page shares inbox.css (one level up); this file only adds what the dashboard needs. */
+main {
+  width: min(1040px, 100%);
+}

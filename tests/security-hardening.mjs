@@ -126,6 +126,43 @@ console.log('PASS Pages HSTS: includeSubDomains, no preload.');
     if (local.other) assert.equal(win.localStorage.getItem('other'), 'kept', 'Nothing else is touched');
   }
 }
+{ // the stats page: as strict as the inbox
+  const html = fs.readFileSync('metrics/index.html', 'utf8');
+  const meta = /<meta http-equiv="Content-Security-Policy" content="([^"]+)">/.exec(html);
+  assert.ok(meta && html.indexOf(meta[0]) < html.search(/<(link|script|style)\b/i), 'CSP meta comes before every script, style and link');
+  const policy = Object.fromEntries(meta[1].split(';').map(p => p.trim().split(/\s+/)).map(([n, ...v]) => [n, v]));
+  assert.deepEqual([policy['default-src'], policy['script-src'], policy['style-src'], policy['connect-src']], [["'none'"], ["'self'"], ["'self'"], [HOSTS.api]]);
+  assert.ok(!inlineScripts(html).length && !/style\s*=|<style/i.test(html.replace(meta[0], '')), 'no inline script or style');
+  assert.match(html, /<meta name="robots" content="noindex,nofollow">/);
+  assert.match(html, /<meta name="referrer" content="no-referrer">/);
+  for (const file of ['index.html', 'metrics.js', 'chart.js', 'metrics.css']) {
+    const text = fs.readFileSync('metrics/' + file, 'utf8');
+    assert.ok(!/analytics|cloudflareinsights/i.test(text), file + ': a banned word');
+    assert.ok(!/@import|https?:\/\/(?!api\.riftborn\.us|feedback\.riftborn\.us|dash\.cloudflare\.com|www\.w3\.org\/2000\/svg)/.test(text), file + ': a third-party address');
+    if (file.endsWith('.js')) assert.ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function|setAttribute\(\s*['"]style|\.style\b|cssText/.test(text), file + ': HTML or style from script');
+  }
+  assert.ok(!/fetch\(|Storage|document\./.test(fs.readFileSync('metrics/chart.js', 'utf8')), 'chart.js stays pure');
+  // The key rules of the inbox, repeated for the stats page: the same key name, sessionStorage only, localStorage only ever deleted.
+  const script = fs.readFileSync('metrics/metrics.js', 'utf8');
+  assert.equal(/const API = '([^']+)'/.exec(script)[1], HOSTS.api, 'The stats page uses api.riftborn.us');
+  assert.ok(!script.includes(HOSTS.workersDev), 'No workers.dev address in the stats page');
+  const inboxKey = /const STORE_KEY = '([^']+)'/.exec(fs.readFileSync('feedback/inbox.js', 'utf8'))[1];
+  const storeKey = /const STORE_KEY = '([^']+)'/.exec(script)[1];
+  assert.equal(storeKey, inboxKey, 'the key survives same-tab navigation between the inbox and the stats page');
+  const keyWrites = [...script.matchAll(/write\('(\w+)', STORE_KEY, ([^)]*)\)/g)].map(m => [m[1], m[2]]);
+  assert.deepEqual(keyWrites.filter(([kind]) => kind === 'localStorage'), [['localStorage', "''"]], 'localStorage: the key is only ever deleted');
+  assert.ok(!/read\('localStorage', STORE_KEY\)/.test(script), 'localStorage is never read for the key');
+  assert.ok(keyWrites.some(([kind, value]) => kind === 'sessionStorage' && value === 'key'), 'The key lives in sessionStorage');
+  const start = script.slice(script.indexOf('const storage = kind =>'), script.indexOf('let loading'));
+  const fake = (entries = {}) => ({ data: { ...entries }, getItem(k) { return k in this.data ? this.data[k] : null; }, setItem(k, v) { this.data[k] = String(v); }, removeItem(k) { delete this.data[k]; } });
+  for (const [local, session, expected] of [[{ [storeKey]: 'old-remembered' }, {}, ''], [{ [storeKey]: 'old-remembered', other: 'kept' }, { [storeKey]: 'this-tab' }, 'this-tab']]) {
+    const win = { localStorage: fake(local), sessionStorage: fake(session) };
+    const key = new Function('window', 'STORE_KEY', `${start}; return key;`)(win, storeKey);
+    assert.equal(key, expected, 'The stats page takes the key from this tab only');
+    assert.equal(win.localStorage.getItem(storeKey), null, 'An old remembered key is deleted at startup');
+    if (local.other) assert.equal(win.localStorage.getItem('other'), 'kept', 'Nothing else is touched');
+  }
+}
 console.log('PASS inbox: meta CSP (no inline code, inline scripts hashed, https API only), textContent rendering, key kept for this tab only (an old remembered copy is deleted).');
 
 // ---- the privacy page matches the code ------------------------------------------------------------------

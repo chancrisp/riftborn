@@ -72,7 +72,7 @@ const cspOf = dir => matchHeaders(parseHeaders(fs.readFileSync(path.join(dir, '_
 
 // The feedback inbox output (_cf/feedback, https://feedback.riftborn.us): exactly its files, and on
 // every path the strict set the lead asked for, as Cloudflare would attach it. -> problems
-const INBOX_FILES = ['404.html', '_headers', 'assets/crypt-pixel.ttf', 'inbox.css', 'inbox.js', 'index.html', 'robots.txt'];
+const INBOX_FILES = ['404.html', '_headers', 'assets/crypt-pixel.ttf', 'inbox.css', 'inbox.js', 'index.html', 'metrics/chart.js', 'metrics/index.html', 'metrics/metrics.css', 'metrics/metrics.js', 'robots.txt'];
 const INBOX_REQUIRED = {
   'x-robots-tag': 'noindex, nofollow',
   'referrer-policy': 'no-referrer',
@@ -87,7 +87,7 @@ function auditInbox(dir) {
   const files = walk(dir);
   if (files.join() !== INBOX_FILES.join()) problems.push(`files: ${files.join(', ')}`);
   const rules = parseHeaders(fs.readFileSync(path.join(dir, '_headers'), 'utf8'));
-  for (const urlPath of ['/', '/index.html', '/inbox.js', '/inbox.css', '/404.html', '/nothing-here', '/assets/crypt-pixel.ttf']) {
+  for (const urlPath of ['/', '/index.html', '/inbox.js', '/inbox.css', '/404.html', '/nothing-here', '/assets/crypt-pixel.ttf', '/metrics/', '/metrics/metrics.js', '/metrics/metrics.css', '/metrics/chart.js']) {
     const headers = matchHeaders(rules, urlPath);
     const csp = headers.get('content-security-policy');
     if (!csp || csp.joined) { problems.push(`${urlPath}: ${csp ? 'CSP set twice' : 'no CSP'}`); continue; }
@@ -114,6 +114,7 @@ function auditInbox(dir) {
     if (/googletagmanager|google-analytics|cloudflareinsights|plausible|analytics/i.test(text)) problems.push(`${file}: analytics`);
   }
   if (!/const API = 'https:\/\/api\.riftborn\.us';/.test(fs.readFileSync(path.join(dir, 'inbox.js'), 'utf8'))) problems.push('inbox.js: API is not https://api.riftborn.us');
+  if (!/const API = 'https:\/\/api\.riftborn\.us';/.test(fs.readFileSync(path.join(dir, 'metrics', 'metrics.js'), 'utf8'))) problems.push('metrics/metrics.js: API is not https://api.riftborn.us');
   if (fs.readFileSync(path.join(dir, 'robots.txt'), 'utf8') !== 'User-agent: *\nDisallow: /\n') problems.push('robots.txt');
   return problems;
 }
@@ -216,8 +217,9 @@ const post = build('post', { RIFTBORN_FORCE_LAUNCHED: '1' });
     fs.writeFileSync(headers, fs.readFileSync(headers, 'utf8').replace('connect-src https://api.riftborn.us', `connect-src 'self' https://api.riftborn.us ${HOSTS.workersDev}`).replace('Referrer-Policy: no-referrer', 'Referrer-Policy: origin'));
     fs.appendFileSync(path.join(loose, 'index.html'), '<script>fetch("https://evil.example")</script>');
     fs.writeFileSync(path.join(loose, 'extra.html'), '<p style="color:red">x</p>');
+    fs.appendFileSync(path.join(loose, 'metrics', 'metrics.js'), '\n// analytics\n');
     const caught = auditInbox(loose).join('\n');
-    for (const problem of [/^files: /m, /\/: CSP connect-src is 'self' https:\/\/api\.riftborn\.us/, /\/: referrer-policy is origin/, /index\.html: inline script/, /extra\.html: inline style/]) assert.match(caught, problem);
+    for (const problem of [/^files: /m, /\/: CSP connect-src is 'self' https:\/\/api\.riftborn\.us/, /\/: referrer-policy is origin/, /index\.html: inline script/, /extra\.html: inline style/, /metrics\/metrics\.js: analytics/]) assert.match(caught, problem);
   }
   // github.io: handoff pages only, and the old copy of the feedback inbox (until GitHub Pages is shut down).
   const site = path.join(post, '_site');
