@@ -12,6 +12,21 @@ import path from 'node:path';
 export const CF_MAX_RULES = 100;
 export const CF_MAX_LINE = 2000;
 
+// Cloudflare's visit counter (Web Analytics), loaded by the game on the live page only (player metrics): host sources, not paths,
+// because the beacon URL carries a version suffix a path-exact source would not match. Kept here, not in site.hosts.mjs (a change
+// there redeploys the Worker). Nothing passes them to buildHeaders unless the live pass-through commit does.
+export const WEB_ANALYTICS_HOSTS = Object.freeze({
+  scriptHosts: Object.freeze(['https://static.cloudflareinsights.com']),
+  connectHosts: Object.freeze(['https://cloudflareinsights.com'])
+});
+const HOST_SOURCE = /^https:\/\/[a-z0-9.-]+$/i;
+function checkHosts(name, hosts) {
+  for (const host of hosts) {
+    if (typeof host !== 'string' || !HOST_SOURCE.test(host)) throw new Error(`invalid ${name} entry: ${JSON.stringify(host)}`);
+  }
+  return hosts;
+}
+
 const SCRIPT = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
 
 /** The text of every inline <script> (no src attribute), newlines normalised as the HTML parser does. */
@@ -33,15 +48,17 @@ export const PERMISSIONS_POLICY = [
 ].map(feature => `${feature}=()`).join(', ');
 
 /** The Content-Security-Policy for one output, given the hashes of its inline scripts. */
-export function contentSecurityPolicy({ hashes, connect }) {
+export function contentSecurityPolicy({ hashes, connect, scriptHosts = [], connectHosts = [] }) {
+  checkHosts('scriptHosts', scriptHosts);
+  checkHosts('connectHosts', connectHosts);
   return [
     "default-src 'self'",
-    ['script-src', "'self'", ...hashes].join(' '),
+    ['script-src', "'self'", ...hashes, ...scriptHosts].join(' '),
     // The game sets style attributes and the dev gate / classic edition carry <style> blocks.
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
-    ['connect-src', "'self'", ...connect].join(' '),
+    ['connect-src', "'self'", ...connect, ...connectHosts].join(' '),
     "media-src 'self' blob: data:",
     "worker-src 'self' blob:",
     "manifest-src 'self'",
@@ -103,11 +120,11 @@ export function htmlUrlPath(file) {
  * Builds the _headers text for a Cloudflare Pages output directory.
  * -> { text, csp, hashes, htmlFiles }
  */
-export function buildHeaders(dir, { connect, noindex = false }) {
+export function buildHeaders(dir, { connect, noindex = false, scriptHosts = [], connectHosts = [] }) {
   const files = walk(dir);
   const htmlFiles = files.filter(file => file.endsWith('.html'));
   const hashes = [...new Set(htmlFiles.flatMap(file => inlineScripts(fs.readFileSync(path.join(dir, file), 'utf8')).map(scriptHash)))].sort();
-  const csp = contentSecurityPolicy({ hashes, connect });
+  const csp = contentSecurityPolicy({ hashes, connect, scriptHosts, connectHosts });
   // HSTS includeSubDomains: riftborn.us (the page every player loads first) also pins dev. and api.
   // to https. Every riftborn.us host must serve https (all are Cloudflare-proxied today); a new
   // subdomain that cannot do https would be unreachable. No preload (a deliberate, owner-only step).

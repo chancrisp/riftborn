@@ -19,9 +19,12 @@
 //
 //   node scripts/cloudflare-web-analytics.mjs inspect --dry-run   the plan; nothing is fetched, no token needed
 //   node scripts/cloudflare-web-analytics.mjs inspect             with CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
+//   node scripts/cloudflare-web-analytics.mjs apply [--confirm]    switch Cloudflare's automatic injection OFF for our sites and
+//                                                                  print the site token; writes only with --confirm (exit 2 without)
+//   node scripts/cloudflare-web-analytics.mjs verify               fetch our hosts and fail when any still serves the beacon (no token)
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { PAGES_PROJECTS, PRODUCTION_BRANCH } from '../site.config.mjs';
+import { HOSTS, PAGES_PROJECTS, PRODUCTION_BRANCH } from '../site.config.mjs';
 import { API_BASE, ZONE, cloudflareApi, deniedAnswer } from './cloudflare-pages-domains.mjs';
 
 export const WORKER_SCRIPT = 'riftborn-leaderboard';
@@ -45,6 +48,11 @@ const WRITE_GROUP = 'Account Settings Write';
 const KEYS_QUERY = Object.freeze({ keyNeedle: { value: 'ip|addr|forward|connecting|client', isRegex: true, matchCase: false }, limit: 1000 });
 /** A logged field NAME that looks like it holds a client address. */
 export const IP_KEY = /(^|[.$_-])(ip|ip[._-]?address|client[._-]?ip|connecting[._-]?ip|forwarded[._-]?for|remote[._-]?addr)($|[._-])/i;
+/** The hosts and Pages names whose Web Analytics sites apply may touch (every other site in the account is left alone). */
+export const WATCHED_HOSTS = Object.freeze([
+  new URL(HOSTS.live).hostname, new URL(HOSTS.dev).hostname, new URL(HOSTS.feedback).hostname,
+  ...Object.values(PAGES_PROJECTS).map(project => `${project}.pages.dev`)
+]);
 const BEACON = /static\.cloudflareinsights\.com\/beacon\.min\.js|data-cf-beacon/;
 
 /** The calls a run makes, in order, for --dry-run (no network, no token). -> lines */
@@ -260,6 +268,98 @@ export async function inspect({ env = process.env, fetchImpl = fetch, log = () =
   return { report, problems };
 }
 
+// ---- apply: injection off, site token ----------------------------------------------------------------------------------
+
+const isOurs = site => WATCHED_HOSTS.includes(site.ruleset?.zone_name) || (site.rules || []).some(rule => WATCHED_HOSTS.includes(rule.host));
+const siteName = site => site.ruleset?.zone_name || (site.rules || []).find(rule => WATCHED_HOSTS.includes(rule.host))?.host || 'unnamed site';
+const isZoneSite = site => site.ruleset?.zone_name === ZONE;
+
+/** Why this environment must not switch injection off ([] when it may): in CI only main, and credentials must be set. */
+export function applyRefusals(env = process.env) {
+  const refusals = [];
+  if ((env.CI || env.GITHUB_ACTIONS) && env.GITHUB_REF !== `refs/heads/${PRODUCTION_BRANCH}`) {
+    refusals.push(`Refusing to change Web Analytics from ${env.GITHUB_REF || 'an unknown ref'}: only refs/heads/${PRODUCTION_BRANCH} does.`);
+  }
+  if (!env.CLOUDFLARE_API_TOKEN) refusals.push(`Set the CLOUDFLARE_API_TOKEN secret (it needs ${[PERMISSIONS.zone, PERMISSIONS.webAnalyticsRead, PERMISSIONS.webAnalyticsWrite].join(', ')}).`);
+  if (!/^[0-9a-f]{32}$/i.test(env.CLOUDFLARE_ACCOUNT_ID || '')) refusals.push('Set the CLOUDFLARE_ACCOUNT_ID repository variable.');
+  return refusals;
+}
+
+function needPermission(answer, what, permission) {
+  if (answer.success) return;
+  const why = deniedAnswer(answer) ? `; add "${permission}" to the token, then re-run the workflow` : '';
+  throw new Error(`Could not ${what} (${describe(answer)})${why}.`);
+}
+
+/**
+ * Switches Cloudflare's automatic Web Analytics injection OFF for our sites only (the riftborn.us zone site and the Pages
+ * names), creating the zone site with injection off when there is none, and returns the zone site's token (public by
+ * design: it is printed once as WEB_ANALYTICS_TOKEN=<value>; the API token and account id are never printed).
+ * Without confirm nothing is written: ok is false and remaining names what would change. The Pages Metrics toggle has no
+ * documented API; any watched site still injecting after the writes is named in remaining and the run is not ok.
+ * -> { ok, token, changed: string[], remaining: string[] }
+ */
+export async function applyWebAnalytics({ env = process.env, fetchImpl = fetch, log = () => {}, confirm = false } = {}) {
+  const accountId = env.CLOUDFLARE_ACCOUNT_ID;
+  const call = cloudflareApi({ token: env.CLOUDFLARE_API_TOKEN, accountId, fetchImpl, log });
+  const acct = `/accounts/${accountId}`;
+  const read = async () => {
+    const answer = await call('GET', `${acct}/rum/site_info/list?per_page=100`);
+    needPermission(answer, 'read the Web Analytics sites', PERMISSIONS.webAnalyticsRead);
+    return Array.isArray(answer.result) ? answer.result : [];
+  };
+  let sites = await read();
+  const ours = sites.filter(isOurs);
+  const pending = ours.filter(site => site.auto_install === true);
+  const changed = [];
+  if (confirm) {
+    for (const site of pending) {
+      const body = site.ruleset?.zone_tag ? { auto_install: false, zone_tag: site.ruleset.zone_tag } : { auto_install: false };
+      needPermission(await call('PUT', `${acct}/rum/site_info/${encodeURIComponent(site.site_tag)}`, body), `switch injection off for ${siteName(site)}`, PERMISSIONS.webAnalyticsWrite);
+      changed.push(siteName(site));
+    }
+    if (!ours.some(isZoneSite)) {
+      const zone = await call('GET', `/zones?name=${ZONE}`);
+      needPermission(zone, `find the zone ${ZONE}`, PERMISSIONS.zone);
+      const zoneTag = zone.result?.[0]?.id;
+      if (!zoneTag) throw new Error(`The zone ${ZONE} was not found with this token.`);
+      const created = await call('POST', `${acct}/rum/site_info`, { zone_tag: zoneTag, auto_install: false });
+      needPermission(created, `create the ${ZONE} Web Analytics site`, PERMISSIONS.webAnalyticsWrite);
+      changed.push(`${ZONE} (created)`);
+    }
+    sites = await read();
+  }
+  const zoneSite = sites.filter(isOurs).find(isZoneSite);
+  const token = zoneSite?.site_token || null;
+  const remaining = sites.filter(isOurs).filter(site => site.auto_install === true).map(siteName);
+  if (confirm && token) log(`WEB_ANALYTICS_TOKEN=${token}`);
+  return { ok: confirm && remaining.length === 0 && Boolean(token), token, changed, remaining };
+}
+
+/** Public GitHub workflow-command lines for an apply result: the token (public by design), what changed, what still injects. */
+export function applyAnnotations(result) {
+  const lines = [];
+  lines.push(`::notice title=Web Analytics apply - token::${escData(result.token ? `WEB_ANALYTICS_TOKEN=${result.token}` : 'no site token yet (nothing confirmed)')}`);
+  lines.push(`::notice title=Web Analytics apply - changed::${escData(result.changed.length ? result.changed.join(', ') : 'nothing changed')}`);
+  lines.push(`::notice title=Web Analytics apply - remaining::${escData(result.remaining.length ? result.remaining.join(', ') : 'none still inject')}`);
+  if (!result.ok) lines.push(`::error title=Web Analytics apply::${escData(result.remaining.length ? 'a watched site still has automatic injection on; switch it off in the Cloudflare dashboard' : 'not confirmed, or no site token')}`);
+  return lines;
+}
+
+/** For each host: does its served page hold the Cloudflare beacon? injected is true, false, or null when the page could not be read. */
+export async function verifyNoInjection({ hosts = WATCHED_HOSTS.slice(0, 3), fetchImpl = fetch } = {}) {
+  const results = [];
+  for (const host of hosts) {
+    try {
+      const response = await fetchImpl(`https://${host}/?t=${Date.now()}`, { cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(30000) });
+      results.push({ host, injected: response.status >= 200 && response.status < 300 ? /cloudflareinsights|data-cf-beacon/i.test(await response.text()) : null });
+    } catch {
+      results.push({ host, injected: null });
+    }
+  }
+  return results;
+}
+
 const escData = s => String(s).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
 // Compact JSON for one annotation: long arrays cut with "and N more", the whole under 3000 characters.
 const compact = value => {
@@ -289,8 +389,40 @@ export function renderAnnotations(report, problems) {
 
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
+  const github = Boolean(process.env.GITHUB_ACTIONS);
+  const emit = lines => { for (const line of lines) console.log(line); };
+  if (command === 'verify') {
+    const results = await verifyNoInjection({});
+    for (const { host, injected } of results) console.log(`${host}: ${injected === false ? 'clean' : injected === true ? 'BEACON INJECTED' : 'could not be read'}`);
+    if (github) emit(results.map(({ host, injected }) => `::${injected === false ? 'notice' : 'error'} title=Web Analytics verify - ${host}::${escData(injected === false ? 'no beacon served' : injected === true ? 'the beacon is still injected' : 'could not be read (unknown, not clean)')}`));
+    if (results.some(result => result.injected !== false)) process.exitCode = 1;
+    return;
+  }
+  if (command === 'apply') {
+    const confirm = rest.includes('--confirm');
+    if (!confirm) {
+      const refusals = applyRefusals(process.env);
+      if (refusals.length) { for (const refusal of refusals) console.error(refusal); } else {
+        const result = await applyWebAnalytics({ confirm: false, log: line => console.log(line) });
+        console.log(`Would switch off: ${result.remaining.join(', ') || 'nothing (already off)'}`);
+      }
+      console.error('apply writes only with --confirm (nothing was changed).');
+      process.exitCode = 2;
+      return;
+    }
+    const refusals = applyRefusals(process.env);
+    if (refusals.length) {
+      for (const refusal of refusals) console.error(github ? `::error title=Web Analytics apply::${escData(refusal)}` : refusal);
+      process.exitCode = 1;
+      return;
+    }
+    const result = await applyWebAnalytics({ confirm: true, log: line => console.log(line) });
+    if (github) emit(applyAnnotations(result));
+    if (!result.ok) process.exitCode = 1;
+    return;
+  }
   if (command !== 'inspect') {
-    console.error('Web Analytics tool: only `inspect` exists yet (it only reads Cloudflare): node scripts/cloudflare-web-analytics.mjs inspect [--dry-run]');
+    console.error('usage: node scripts/cloudflare-web-analytics.mjs inspect [--dry-run] | apply [--confirm] | verify');
     process.exitCode = 1;
     return;
   }
@@ -301,7 +433,7 @@ async function main() {
   }
   const refusals = inspectRefusals(process.env);
   if (refusals.length) {
-    for (const refusal of refusals) console.error(process.env.GITHUB_ACTIONS ? `::error title=Web Analytics inspect::${escData(refusal)}` : refusal);
+    for (const refusal of refusals) console.error(github ? `::error title=Web Analytics inspect::${escData(refusal)}` : refusal);
     process.exitCode = 1;
     return;
   }

@@ -79,6 +79,37 @@ To roll back the website, restore the previous Pages artifact or revert the Git 
 - **Worker.** The feedback admin routes (`GET /api/feedback`, `GET /api/feedback.csv`, `PATCH /api/feedback/:id`; there is no delete route) answer browsers from `FEEDBACK_ADMIN_ORIGINS` in `site.hosts.mjs` (feedback.riftborn.us and chancrisp.github.io), delivered to the Worker as a plain-text binding by `scripts/cloudflare-worker-upload.mjs` and listed in `cloudflare/wrangler.jsonc`, like `ALLOWED_ORIGINS` and `SCORE_READ_ONLY_ORIGINS`. feedback.riftborn.us is admin only: scores and accounts refuse it like any unknown origin, its `POST /api/feedback` gets 403 before the rate limiter, the body or the database, and its preflight offers only `GET` (`PATCH` on an item). The Worker deploy refuses a `RIFTBORN_SITE_ORIGIN` that names feedback.riftborn.us (in `ALLOWED_ORIGINS` it would stop being admin only). The admin key check and the admin rate limit are unchanged; player feedback from riftborn.us and dev.riftborn.us is unchanged.
 - **The old address.** https://chancrisp.github.io/riftborn/feedback/ keeps working until GitHub Pages is shut down, in case the new address has a problem: the same `inbox.js` (API https://api.riftborn.us, which has always answered that origin) with a banner on top, "The inbox has moved to feedback.riftborn.us", linking there. The key is not carried over (it never leaves the tab): enter it once on the new address. When GitHub Pages is shut down, remove `HOSTS.legacyOrigin` from `WORKER_ALLOWED_ORIGINS` and `FEEDBACK_ADMIN_ORIGINS`.
 
+## The stats dashboard: feedback.riftborn.us/metrics/
+
+The owner-only stats page lives beside the inbox, on the same origin (`feedback.riftborn.us`), under the same strict headers. Open it from the STATS button in the inbox header (same tab, so the key you typed is still there). It asks for the same admin key as the inbox, keeps it for that tab only (closing the tab forgets it, a refused key is wiped, nothing is written to `localStorage` except the chosen range), and sends it only as a Bearer header to the Worker. The Worker's admin limiter allows 30 requests a minute. Each load makes two requests: the chosen range, then a wider one used only for the change against the previous period (7 days compares with 30, 30 with 90, 90 with all; ALL makes one request and says "whole history").
+
+Ranges are 7, 30, 90 and all. The headline figures use the complete UTC days before today; today is the Worker's own day, drawn dashed in the trend and left out of every figure. A change figure needs twice the range plus one day of history and shows "no earlier period yet" until then. Players per day and runs per day are daily means, sign-ups are a sum, the win rate is wins over runs. Breakdown counts are finished runs (one count per report); only players is counted per device and day, so days are never added into a unique-player number.
+
+What each number means (the same words as the page):
+
+- Players: devices that finished a real run on a day, counted once per device per UTC day.
+- Runs: finished real runs; practice, the tutorial, the demo and developer runs are never counted.
+- Win rate: wins divided by runs in the same period.
+- Sign-ups: accounts created in the period.
+- Accounts: the total number of accounts today; not part of the daily counters.
+- Stage reached: the furthest stage a run reached; a win counts as stage 6, "finished the route".
+- Run length: six buckets from under 2 minutes to over 40.
+- Character, Weapon, Device and Game version: as chosen or detected when the run ended.
+- A lower bound: players who opt out, block the request or never finish a run are not counted, and past the daily write ceiling counting stops until the next UTC day.
+- Visits: counted by Cloudflare, not by this page.
+
+Test traffic: the dev site, previews, localhost and `/classic/` send nothing; turn the Settings switch (Share play stats) off in your own browsers so your testing on the live page adds nothing. The visits card links to the Cloudflare dashboard (https://dash.cloudflare.com/), where the report is named Web Analytics; this page never loads or names that script. A wrong day can be corrected by hand in D1 Studio on the `daily_stats` table. The page shows a "counting stopped" line when the daily write ceiling is reached; today's numbers are then incomplete.
+
+## Visit counter (Cloudflare Web Analytics)
+
+The game loads Cloudflare's visit counter itself (`src/meta/beacon.js` in the game), on riftborn.us only, and only when the player's "Share anonymous stats" switch is on and the first-run notice has been shown. Cloudflare's own automatic injection is switched OFF, so the player's choice decides. The tooling is `scripts/cloudflare-web-analytics.mjs`, run by the one-off workflow `.github/workflows/cloudflare-web-analytics.yml` (started from the Actions page, main only, with the `cloudflare-production` token):
+
+- `inspect` (read-only): which mechanism injects the beacon today, the zone and Workers plans, what the token may do, whether Workers Logs can hold IPs. It prints derived facts only (this repository is public: never a token, id or tag).
+- `apply --confirm`: switches automatic injection off for our sites only (the riftborn.us zone site and the three Pages names; every other site in the account is left alone), creates the zone site with injection off when there is none, and prints the site token once as `WEB_ANALYTICS_TOKEN=<value>` (public by design; it goes into the game's `src/data/links.js`). Without `--confirm` it writes nothing and exits 2. It needs "Account > Account Settings > Edit" on the token. The Pages projects' own Metrics toggle has no documented API: any watched site still injecting is named in `remaining`, and the dashboard switch is flipped by hand.
+- `verify`: fetches the three live hosts and fails when any still serves the beacon (a page that cannot be read is unknown, never clean).
+
+Order of the two pushes (Stage 6 of the player-metrics plan): push 1 carries the Worker route, the stats page and the dev release candidate, and counts nothing; push 2 carries the game, the privacy page, the live CSP hosts and the removal of the `TOLERATED` beacon entry in `scripts/post-deploy-check.mjs`, after `apply` has run and `verify` is clean everywhere. When the counter is removed again: set `WEB_ANALYTICS_TOKEN` back to `""` in the game, drop the two CSP hosts, and re-run `inspect`.
+
 ## Preview links (versions side by side)
 
 Every build can have its own password-gated link next to dev.riftborn.us, named after its version (`v2-4-0`), with an optional tag for several previews of one version (`v2-4-0-logo`), so builds can be played side by side without replacing the release candidate on dev.

@@ -1,17 +1,28 @@
-# One-off and READ-ONLY here: reads the state of Cloudflare Web Analytics for riftborn.us (which mechanism
-# injects the visit-counting beacon, the zone and Workers plans, what the deploy token may do, whether Workers
-# Logs can hold client IPs) with scripts/cloudflare-web-analytics.mjs inspect, and prints derived facts only as
-# annotations (this is a public repository: no token, id, tag or snippet is ever printed). It changes nothing.
-# Tasks 3.4 and 3.5 of the player-metrics plan extend it with `apply` and `verify`, started from the Actions
-# page; Task 6.9 Step 2 removes it. It runs when a push to main touches THIS file; to run it again, push a
-# change to this file or use "Re-run all jobs" on the run page.
+# One-off: Cloudflare Web Analytics for riftborn.us (the player-metrics visit counter), run BY HAND from the Actions page
+# ("Run workflow", main only, with the cloudflare-production token). It runs scripts/cloudflare-web-analytics.mjs:
+#   inspect   read-only: which mechanism injects the beacon today, the plans, what the token may do (derived facts only:
+#             this is a public repository, so no token, id, tag or snippet is ever printed)
+#   apply     switches Cloudflare's automatic injection OFF for our sites and prints the site token (public by design);
+#             it writes only when the "confirm" input says apply, and needs "Account > Account Settings > Edit" on the token
+#   verify    fetches the live hosts and fails when any still serves the beacon (no token needed)
+# Nothing runs on a push. This file is removed after the one-off (Task 6.9 Step 2 of the player-metrics plan) and nowhere else.
 name: Cloudflare Web Analytics check
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/cloudflare-web-analytics.yml'
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'What to run: inspect (read-only), apply (switch automatic injection off) or verify (check the live pages)'
+        type: choice
+        options:
+          - inspect
+          - apply
+          - verify
+        default: inspect
+      confirm:
+        description: 'Type apply here to let the apply command write; anything else makes apply only print its plan'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -34,7 +45,24 @@ jobs:
         with:
           node-version: 24
       - name: Inspect (read-only)
+        if: github.event_name == 'workflow_dispatch' && inputs.command == 'inspect'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: node scripts/cloudflare-web-analytics.mjs inspect
+      - name: Apply, plan only (nothing is written)
+        if: github.event_name == 'workflow_dispatch' && inputs.command == 'apply' && inputs.confirm != 'apply'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/cloudflare-web-analytics.mjs apply
+      - name: Apply (switch automatic injection off)
+        if: github.event_name == 'workflow_dispatch' && inputs.command == 'apply' && inputs.confirm == 'apply'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: node scripts/cloudflare-web-analytics.mjs apply --confirm | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Verify (the live pages serve no beacon)
+        if: github.event_name == 'workflow_dispatch' && inputs.command == 'verify'
+        run: node scripts/cloudflare-web-analytics.mjs verify

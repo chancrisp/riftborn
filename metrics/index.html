@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Owner-only stats page, built into feedback.riftborn.us/metrics/. GitHub Pages cannot send headers,
+     so the policy is here too (the strict _headers policy of scripts/pages-headers.mjs applies as
+     well; the browser enforces both). No inline script or style: the module and stylesheets are
+     same-origin files. The admin key only ever goes to the Worker host. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src data:; connect-src https://api.riftborn.us; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#10141e">
+<title>Riftborn · Stats</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23161c42'/%3E%3Cpath d='m18 2-12 17h9l-2 11 13-18h-9z' fill='%238effd1'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="../inbox.css">
+<link rel="stylesheet" href="metrics.css">
+</head>
+<body>
+<header class="top">
+  <h1>RIFT<span>BORN</span> <small>STATS</small></h1>
+  <div class="top-actions">
+    <a class="ghost" href="../">INBOX</a>
+    <button id="lock" type="button" class="ghost" hidden>LOCK</button>
+  </div>
+</header>
+
+<main>
+  <section id="login" class="panel login" hidden>
+    <h2>ADMIN KEY</h2>
+    <p class="hint">Enter the same admin key you use for the feedback inbox (24+ random characters). It is kept for this tab only (closing the tab forgets it).</p>
+    <form id="loginForm" autocomplete="off">
+      <input id="keyInput" type="password" autocomplete="current-password" spellcheck="false" autocapitalize="off" aria-label="Admin key" required>
+      <button type="submit" class="primary">UNLOCK</button>
+    </form>
+    <p id="loginError" class="error" role="alert"></p>
+  </section>
+
+  <section id="stats" hidden>
+    <div class="toolbar">
+      <span class="ranges-label">DAYS:</span>
+      <div id="range" class="ranges" role="group" aria-label="Range">
+        <button type="button" class="range" data-range="7" aria-pressed="false">7</button>
+        <button type="button" class="range" data-range="30" aria-pressed="true">30</button>
+        <button type="button" class="range" data-range="90" aria-pressed="false">90</button>
+        <button type="button" class="range" data-range="all" aria-pressed="false">ALL</button>
+      </div>
+      <div class="tools">
+        <button id="refresh" type="button" class="ghost">REFRESH</button>
+        <button id="tableToggle" type="button" class="ghost" aria-pressed="false">TABLE VIEW</button>
+        <button id="csv" type="button" class="ghost">EXPORT CSV</button>
+      </div>
+    </div>
+
+    <p id="status" class="status" role="status"></p>
+    <div id="health" class="health" aria-live="polite"></div>
+    <p class="foot lower-bound" data-def="lowerBound"></p>
+
+    <div id="figures" class="kpis" aria-label="Headline figures">
+      <div class="kpi" data-figure="players"><span class="kpi-label"></span><span class="kpi-value">—</span><span class="delta flat"></span></div>
+      <div class="kpi" data-figure="runs"><span class="kpi-label"></span><span class="kpi-value">—</span><span class="delta flat"></span></div>
+      <div class="kpi" data-figure="winRate"><span class="kpi-label"></span><span class="kpi-value">—</span><span class="delta flat"></span></div>
+      <div class="kpi" data-figure="signups"><span class="kpi-label"></span><span class="kpi-value">—</span><span class="delta flat"></span></div>
+      <div class="kpi" data-figure="accounts"><span class="kpi-label"></span><span class="kpi-value">—</span><span class="delta flat"></span></div>
+    </div>
+
+    <div id="charts" class="cards">
+      <section class="card wide">
+        <h2>Per day</h2>
+        <label class="series">SHOW <select id="trendSeries" aria-label="Series"><option value="players">Players per day</option><option value="runs">Finished runs per day</option><option value="signups">New accounts per day</option></select></label>
+        <div id="trend" class="chart-host"></div>
+        <p class="foot">Dashed: today, still filling. Not part of any figure above.</p>
+      </section>
+      <section class="card">
+        <h2>How far runs got</h2>
+        <div id="funnel" class="chart-host"></div>
+        <p class="foot" data-def="stage"></p>
+      </section>
+      <section class="card">
+        <h2>Run length</h2>
+        <div id="lengths" class="chart-host"></div>
+        <p class="foot" data-def="length"></p>
+      </section>
+      <section class="card">
+        <h2>Characters</h2>
+        <div id="characters" class="chart-host"></div>
+        <p class="foot" data-def="character"></p>
+      </section>
+      <section class="card">
+        <h2>Weapons</h2>
+        <div id="weapons" class="chart-host"></div>
+        <p class="foot" data-def="weapon"></p>
+      </section>
+      <section class="card">
+        <h2>Devices</h2>
+        <div id="devices" class="chart-host"></div>
+        <p class="foot" data-def="device"></p>
+      </section>
+      <section class="card">
+        <h2>Game versions</h2>
+        <div id="versions" class="chart-host"></div>
+        <p class="foot" data-def="version"></p>
+      </section>
+    </div>
+    <div id="tables" class="tables" hidden></div>
+
+    <div class="cards after">
+      <a id="visits" class="card link-card" href="https://dash.cloudflare.com/" target="_blank" rel="noopener noreferrer">
+        <h2>Visits: counted by Cloudflare, not on this page</h2>
+        <span class="go">Open the Cloudflare dashboard (visits report)</span>
+        <p class="foot" data-def="visits"></p>
+      </a>
+      <section class="card defs wide">
+        <h2>What do these numbers mean?</h2>
+        <dl id="definitions"></dl>
+      </section>
+    </div>
+  </section>
+</main>
+<script type="module" src="metrics.js"></script>
+</body>
+</html>

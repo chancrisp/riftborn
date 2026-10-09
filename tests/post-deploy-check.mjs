@@ -22,8 +22,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  DEPLOY_WORKFLOW, EXTRA_PAGES, FEEDBACK_DOMAIN_GRACE_UNTIL, FEEDBACK_REDIRECTS, GET_TRIES, INBOX_KEY_STORE, PLAYWRIGHT_DIR, PRELOAD_SESSION, PRELOAD_STORAGE, SOCIAL_TAGS,
-  TOLERATED, checkFeedbackRedirects, checkInbox, checkLiveFiles, checkVersion, committedPage, discordPayload, dryRun, escData, expectedVersions, get, githubContext,
+  DEPLOY_WORKFLOW, EXTRA_PAGES, METRICS_FILES, METRICS_PATH, FEEDBACK_DOMAIN_GRACE_UNTIL, FEEDBACK_REDIRECTS, GET_TRIES, INBOX_KEY_STORE, PLAYWRIGHT_DIR, PRELOAD_SESSION, PRELOAD_STORAGE, SOCIAL_TAGS,
+  TOLERATED, checkFeedbackRedirects, checkInbox, checkMetrics, checkLiveFiles, checkVersion, committedPage, discordPayload, dryRun, escData, expectedVersions, get, githubContext,
   inboxHeaderProblems, isDiscordWebhook, isWriteRequest, linkedFiles, metaTags, missingCommittedFiles, newerDeploy, notAttached, pageExpectations, report, retryable,
   sameBuild, scrub, sendAlert, servedAsPage, socialImages, socialProblems, splitTolerated, supersededReason, versionProblem
 } from '../scripts/post-deploy-check.mjs';
@@ -525,6 +525,54 @@ console.log('PASS reporting: annotations (capped), job summary and a one-line Di
   assert.match(dryRun().lines.join('\n'), /feedback: https:\/\/riftborn\.us\/feedback, .* redirect to https:\/\/feedback\.riftborn\.us\/; .*not attached yet = a warning until 2026-10-15/);
 }
 console.log('PASS feedback inbox: riftborn.us/feedback[/...] must redirect to feedback.riftborn.us/ (read, not followed); the inbox must serve its key form, the exact headers the build writes and its files; not attached yet (DNS, certificate, 52x/530) is a warning until 2026-10-15, then a failure; the browser never types or sends a key.');
+
+// --- the stats page: served locked under the inbox's strict headers --------------------------------------------------
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'riftborn-metrics-check-'));
+  let built;
+  try {
+    fs.copyFileSync(new URL('../metrics/index.html', import.meta.url), path.join(tmp, 'index.html'));
+    built = Object.fromEntries([...matchHeaders(parseHeaders(buildInboxHeaders(tmp, { api: HOSTS.api }).text), '/').entries()].map(([name, { value }]) => [name, value]));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  const INBOX = HOSTS.feedback;
+  assert.equal(METRICS_PATH, '/metrics/');
+  assert.deepEqual([...METRICS_FILES], ['metrics/metrics.js', 'metrics/chart.js', 'metrics/metrics.css']);
+  const stats = {
+    '/metrics/': { status: 200, type: 'text/html; charset=utf-8', text: read('metrics/index.html'), headers: built },
+    '/metrics/metrics.js': { status: 200, type: 'text/javascript', text: read('metrics/metrics.js') },
+    '/metrics/chart.js': { status: 200, type: 'text/javascript', text: read('metrics/chart.js') },
+    '/metrics/metrics.css': { status: 200, type: 'text/css', text: read('metrics/metrics.css') }
+  };
+  const site = (overrides = {}) => async url => {
+    const hit = { ...stats, ...overrides }[new URL(url).pathname];
+    return hit ? { tries: 1, headers: {}, ...hit } : { status: 404, type: 'text/html', text: '<!doctype html>not found', headers: {}, tries: 1 };
+  };
+  const healthy = await checkMetrics(INBOX, { getImpl: site() });
+  assert.deepEqual(healthy.checks.map(check => [check.site, check.name, check.ok]), [['feedback.riftborn.us', 'stats page', true], ['feedback.riftborn.us', 'stats headers', true], ['feedback.riftborn.us', 'stats files', true]]);
+  const failing = async overrides => (await checkMetrics(INBOX, { getImpl: site(overrides) })).checks.filter(check => !check.ok).map(check => `${check.name}: ${check.detail}`).join('\n');
+  assert.match(await failing({ '/metrics/': { ...stats['/metrics/'], status: 404 } }), /^stats page: HTTP 404$/, 'a 404 fails');
+  assert.match(await failing({ '/metrics/': { ...stats['/metrics/'], text: read('feedback/index.html') } }), /stats page: HTTP 200 but no key form/, 'the inbox served in its place fails');
+  assert.match(await failing({ '/metrics/': { ...stats['/metrics/'], headers: { ...built, 'referrer-policy': 'origin' } } }), /stats headers: Referrer-Policy is origin/);
+  assert.match(await failing({ '/metrics/metrics.js': { ...stats['/metrics/metrics.js'], text: read('metrics/metrics.js').replace(`'${HOSTS.api}'`, `'${HOSTS.workersDev}'`) } }), /stats files: \/metrics\/metrics\.js does not use https:\/\/api\.riftborn\.us/);
+  assert.match(await failing({ '/metrics/chart.js': undefined }), /stats files: \/metrics\/chart\.js HTTP 404/, 'a missing file fails');
+  assert.match(await failing({ '/metrics/metrics.css': { status: 200, type: 'text/html', text: '<!doctype html>' } }), /\/metrics\/metrics\.css answers with an HTML page/);
+
+  // The browser part: never fills, types or clicks; opens with empty storage; wired after the inbox's.
+  const script = read('scripts/post-deploy-check.mjs');
+  const browse = script.slice(script.indexOf('async function browseMetrics('), script.indexOf('/** Every check, in order.'));
+  assert.ok(browse.length > 500, 'browseMetrics found');
+  assert.ok(!/\.(fill|type|press|click|check|setInputFiles)\(/.test(browse), 'browseMetrics never fills, types or clicks anything');
+  assert.match(browse, /openPage\(browser, `\$\{feedback\}\/metrics\/`, \{ storage: \{\}, session: \{\} \}\)/, 'opened with nothing preloaded');
+  assert.match(browse, /request\.authorization \|\| new URL\(request\.url\)\.origin === apiOrigin/, 'any request to the API or with an Authorization header fails it');
+  assert.ok(/new URL\(request\.url\)\.origin !== pageOrigin/.test(browse), 'a request to any other origin fails it');
+  for (const name of ['stats key form shows', 'stats zero console errors', 'stats never sends a key', 'stats stays on its own origin']) assert.ok(browse.includes(`'${name}'`), name);
+  assert.ok(script.indexOf('browseMetrics(browser, feedback)') > script.indexOf('browseInbox(browser, feedback)'), 'wired after browseInbox');
+  assert.match(script, /if \(inbox\.attached && inbox\.checks\[0\]\.ok\) checks\.push\(\.\.\.\(await browseMetrics\(browser, feedback\)\)\)/, 'only when the inbox answered');
+  assert.match(dryRun().lines.join('\n'), /stats: https:\/\/feedback\.riftborn\.us\/metrics\/ .*locked, no request/);
+}
+console.log('PASS stats page check: served under the inbox headers with its files; the browser never types a key and sees no request to the API or another origin.');
 
 // --- the workflow --------------------------------------------------------------------------------
 {

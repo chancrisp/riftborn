@@ -154,6 +154,8 @@ assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\
 assert.ok(JSON.parse(await uploadRequest.body.get('metadata').text()).bindings.some(binding => binding.name === 'FEEDBACK_ADMIN_KEY' && binding.text === 'deploy-key'));
 
 assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\/account/, 'The bundled Worker serves the accounts routes');
+assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\/stats/, 'The bundled Worker serves the stats route');
+assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\/admin\/stats/, 'The bundled Worker serves the admin stats route');
 
 // Riftborn accounts (v2.2): OAuth credentials and the signing key are secrets, bound only when set.
 assert.ok(!metadata.bindings.some(binding => binding.name === 'FAKE_OAUTH'), 'The fake provider is never enabled on the deployed Worker');
@@ -177,7 +179,7 @@ assert.deepEqual(uploadModule.ACCOUNT_SECRETS.map(([, binding, envName]) => [bin
 assert.ok(uploadModule.ACCOUNT_SECRETS.every(([, , envName]) => !envName.startsWith('GITHUB_')));
 const workflow = fs.readFileSync('.github/workflows/cloudflare-worker.yml', 'utf8');
 for (const [, , envName] of uploadModule.ACCOUNT_SECRETS) assert.ok(workflow.includes(`${envName}: \${{ secrets.${envName} }}`), 'The workflow passes ' + envName);
-for (const path of ['server/accounts-api.js', 'server/username-rules.js']) assert.ok(workflow.includes(`- '${path}'`), 'The workflow redeploys on ' + path);
+for (const path of ['server/accounts-api.js', 'server/username-rules.js', 'server/admin-auth.js', 'server/stats-api.js', 'server/stats-counters.js']) assert.ok(workflow.includes(`- '${path}'`), 'The workflow redeploys on ' + path);
 // Key rotation: the previous key is an optional secret with the same length rule; ACCOUNTS_LIVE=1
 // refuses a deploy that would drop AUTH_SIGNING_KEY.
 const rotated = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, authSigningKey: 'n'.repeat(43), authSigningKeyPrevious: ' ' + 'o'.repeat(43) + ' ' }).get('metadata').text());
@@ -249,4 +251,14 @@ assert.ok(!/FAKE_OAUTH/.test(wrangler + workflow), 'FAKE_OAUTH never reaches a d
   assert.ok(uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, feedbackAdminKey: long, feedbackKeyStrict: '1', warn }), 'Strict with a long key deploys');
 }
 
+{
+  // /api/stats (player metrics) through the real Worker entry: only the live game may report; every other site origin is refused.
+  const worker = (await import('../cloudflare/worker.js')).default;
+  const env = { ENVIRONMENT: 'production' };
+  const preflight = origin => worker.fetch(new Request('https://api.riftborn.us/api/stats', { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' } }), env, { waitUntil() {} });
+  const live = await preflight('https://riftborn.us');
+  assert.equal(live.status, 204);
+  assert.match(live.headers.get('Access-Control-Allow-Methods'), /POST/);
+  for (const origin of ['https://dev.riftborn.us', 'https://chancrisp.github.io', 'https://feedback.riftborn.us']) assert.equal((await preflight(origin)).status, 403, '/api/stats preflight from ' + origin);
+}
 console.log('PASS Cloudflare Worker upload: entry module, D1, production origin, and score rate limit, feedback rate limit and optional feedback secrets, optional account secrets, previous signing key, ACCOUNTS_LIVE guard, accounts rate limiter, main-only deploys, admin key length, read-only score origins (site.hosts.mjs = upload = wrangler.jsonc, dev preflight offers no score write), feedback admin origins (feedback.riftborn.us: only the inbox admin preflights; scores, accounts and player feedback refused; RIFTBORN_SITE_ORIGIN cannot add it to ALLOWED_ORIGINS).');

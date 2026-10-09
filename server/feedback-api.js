@@ -4,6 +4,10 @@
 // No IP address is ever stored: CF-Connecting-IP only becomes a rate-limit key, as a keyed hash
 // (ipLimitKey) wherever the Worker has its signing key.
 import { ipLimitKey } from './accounts-api.js';
+import { json, corsHeaders, CORS_METHODS as METHODS, CORS_ALLOW_HEADERS as ALLOW_HEADERS, originAllowed, adminOnlyOrigin, limitAdmin, authorize } from './admin-auth.js';
+
+// Admin auth (the key check, its rate limit, the CORS and origin helpers) lives in server/admin-auth.js.
+export { ADMIN_LIMIT } from './admin-auth.js';
 
 export const CATEGORIES = ['bug', 'balance', 'idea', 'other'];
 export const STATUSES = ['new', 'read', 'archived'];
@@ -17,57 +21,6 @@ export const SETTINGS_KEYS = ['nightmare', 'pixelation', 'lighting', 'fog', 'fps
   'autoFire', 'fireMode', 'palette', 'flashes', 'shake', 'gameSpeed', 'uiScale', 'textures', 'outline', 'weaponSlots'];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const METHODS = 'GET, POST, PATCH, OPTIONS';
-const ALLOW_HEADERS = 'Content-Type, Authorization';
-
-function corsHeaders(origin) {
-  return origin ? {
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': METHODS,
-    'Access-Control-Allow-Headers': ALLOW_HEADERS,
-    'Access-Control-Expose-Headers': 'Content-Disposition'
-  } : {};
-}
-
-const json = (value, status = 200, origin = null, extra = {}) => new Response(JSON.stringify(value), {
-  status,
-  headers: {
-    'Content-Type': 'application/json',
-    'Cache-Control': 'no-store',
-    'X-Content-Type-Options': 'nosniff',
-    Vary: 'Origin',
-    ...corsHeaders(origin),
-    ...extra
-  }
-});
-
-// Same origin rule as server/scores-api.js (kept separate so the score route stays untouched).
-// These origins (the games) submit feedback; they have always been able to reach the admin routes
-// too, which still need the admin key.
-function originAllowed(origin, env) {
-  if (!origin) return true;
-  const defaults = 'https://riftborn.chanmanc10.chatgpt.site' +
-    (env.ENVIRONMENT === 'production' ? '' : ',http://127.0.0.1:4173,http://localhost:4173');
-  return `${defaults},${env.ALLOWED_ORIGINS || ''}`
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean)
-    .includes(origin);
-}
-
-// Admin-only origins (FEEDBACK_ADMIN_ORIGINS, from site.hosts.mjs: the inbox at feedback.riftborn.us
-// and its old github.io copy). An origin listed there but not allowed above (feedback.riftborn.us)
-// may use the admin routes only (list, CSV, status changes: the same key check and admin rate limit
-// as everyone), never submit player feedback: its POST gets 403 before the rate limiter, the body or
-// the database, and its preflight offers only that route's admin method. Scores and accounts never
-// read this list, so they refuse it like any unknown origin.
-function adminOnlyOrigin(origin, env) {
-  return Boolean(origin) && String(env.FEEDBACK_ADMIN_ORIGINS || '')
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean)
-    .includes(origin);
-}
 
 // ---- validation -----------------------------------------------------------------------------
 
@@ -166,44 +119,6 @@ export function validateFeedback(p) {
   }
   const id = typeof p.id === 'string' && UUID.test(p.id) ? p.id.toLowerCase() : null;
   return { value: { id, category: p.category, rating, message, contact, context: cleanContext(p.context) } };
-}
-
-// ---- admin auth -----------------------------------------------------------------------------
-
-// Constant-time: compare SHA-256 digests byte by byte, so neither content nor length leaks.
-async function sameSecret(given, expected) {
-  const enc = new TextEncoder();
-  const [a, b] = await Promise.all([
-    crypto.subtle.digest('SHA-256', enc.encode(given)),
-    crypto.subtle.digest('SHA-256', enc.encode(expected))
-  ]);
-  const x = new Uint8Array(a), y = new Uint8Array(b);
-  let diff = 0;
-  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
-  return diff === 0;
-}
-
-// Every admin request (list, CSV, status change), right or wrong key, first takes a slot in the
-// per-IP limiter shared with the accounts API (ACCOUNTS_RATE_LIMITER, 30 a minute, under its own
-// key), so the admin key cannot be guessed at speed. Checked before the key: counting only failures
-// would never slow down a guess that is right.
-export const ADMIN_LIMIT = Object.freeze({ scope: 'feedback-admin', retryAfter: 60 });
-async function limitAdmin(request, env, origin) {
-  const limiter = env.ACCOUNTS_RATE_LIMITER;
-  if (!limiter || typeof limiter.limit !== 'function') return null;
-  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-  const key = (await ipLimitKey(request, env, ADMIN_LIMIT.scope)) || `${ADMIN_LIMIT.scope}:${ip}`;
-  const { success } = await limiter.limit({ key });
-  return success ? null : json({ error: 'Too many requests. Wait a minute and try again.' }, 429, origin, { 'Retry-After': String(ADMIN_LIMIT.retryAfter) });
-}
-
-async function authorize(request, env, origin) {
-  if (!env.FEEDBACK_ADMIN_KEY) return json({ error: 'Feedback admin key not configured' }, 503, origin);
-  const match = /^Bearer\s+(.+)$/i.exec(request.headers.get('Authorization') || '');
-  if (!match || !(await sameSecret(match[1].trim(), String(env.FEEDBACK_ADMIN_KEY)))) {
-    return json({ error: 'Unauthorized' }, 401, origin, { 'WWW-Authenticate': 'Bearer' });
-  }
-  return null;
 }
 
 // ---- schema ---------------------------------------------------------------------------------

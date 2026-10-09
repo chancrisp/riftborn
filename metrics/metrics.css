@@ -1,0 +1,334 @@
+/* The stats page shares inbox.css (one level up: colours, Crypt Pixel, panels, buttons). This file adds the dashboard:
+   five figure cards, a two-column grid of chart cards (one column on a phone), hand-drawn SVG classes. Colours come from
+   the inbox variables; the SVG is styled by class only (the page has no inline style). */
+:root {
+  --good: #a9dc8e;
+}
+
+main {
+  width: min(1040px, 100%);
+}
+
+/* ---- toolbar ---- */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.ranges-label {
+  font-family: var(--pixel);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ranges,
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tools {
+  margin-left: auto;
+}
+
+button.range[aria-pressed="true"],
+button#tableToggle[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--yellow);
+  text-shadow: none;
+}
+
+#stats .status {
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  background: #181b21;
+  border-left: 4px solid var(--mint);
+  font-size: 13px;
+}
+
+#stats .status:empty {
+  display: none;
+}
+
+.health {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.health .line {
+  margin: 2px 0;
+}
+
+.health b {
+  font-weight: 400;
+  color: var(--mint);
+}
+
+.health b.bad {
+  color: var(--danger);
+}
+
+.foot {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.lower-bound {
+  margin: 0 0 14px;
+}
+
+/* ---- figure cards ---- */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 3px solid;
+  border-color: #888879 var(--edge-dark) var(--edge-dark) #888879;
+  box-shadow: 4px 4px #000;
+}
+
+.kpi-label {
+  font-family: var(--pixel);
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--mint);
+}
+
+.kpi-value {
+  font-family: var(--pixel);
+  font-size: 28px;
+  line-height: 1.15;
+  color: var(--yellow);
+  text-shadow: 2px 2px #000;
+}
+
+.delta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.delta.up {
+  color: var(--good);
+}
+
+.delta.down {
+  color: var(--danger);
+}
+
+.delta.flat {
+  color: var(--muted);
+}
+
+/* ---- cards ---- */
+.cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.card {
+  min-width: 0;
+  padding: 14px 16px 16px;
+  background: var(--panel);
+  border: 3px solid;
+  border-color: #888879 var(--edge-dark) var(--edge-dark) #888879;
+  box-shadow: 5px 5px #000;
+}
+
+.card.wide {
+  grid-column: 1 / -1;
+}
+
+.card h2 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  line-height: 1.35;
+  color: var(--yellow);
+}
+
+.series {
+  display: inline-block;
+  margin-bottom: 8px;
+  font-family: var(--pixel);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chart-host {
+  width: 100%;
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  font-family: var(--read);
+}
+
+.nodata {
+  margin: 0;
+  padding: 18px 0;
+  color: var(--muted);
+}
+
+/* ---- SVG, by class ---- */
+.s-grid {
+  stroke: #343942;
+  stroke-width: 1;
+}
+
+.s-axis {
+  font-size: 11px;
+  fill: var(--muted);
+}
+
+.s-line {
+  fill: none;
+  stroke: #8f5bff;
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+
+.s-partial {
+  fill: none;
+  stroke: #8f5bff;
+  stroke-width: 2.5;
+  stroke-dasharray: 4 4;
+}
+
+.s-area {
+  fill: #8f5bff;
+  fill-opacity: 0.12;
+  stroke: none;
+}
+
+.s-bar {
+  fill: var(--mint);
+}
+
+.s-drop {
+  fill: var(--danger);
+}
+
+.s-label {
+  font-size: 13px;
+  fill: var(--white);
+}
+
+.s-value {
+  font-size: 12px;
+  fill: var(--muted);
+}
+
+/* ---- table view ---- */
+.tables {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.tables table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.tables th,
+.tables td {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid #343942;
+}
+
+.tables th {
+  font-family: var(--pixel);
+  font-weight: 400;
+  color: var(--mint);
+}
+
+.tables td:not(:first-child),
+.tables th:not(:first-child) {
+  text-align: right;
+}
+
+/* ---- visits link and definitions ---- */
+.link-card {
+  display: block;
+  align-self: start;
+  color: var(--white);
+  text-decoration: none;
+}
+
+.link-card h2 {
+  margin-bottom: 6px;
+}
+
+.link-card .go {
+  font-family: var(--pixel);
+  font-size: 12px;
+  color: var(--mint);
+}
+
+.defs dl {
+  margin: 0;
+}
+
+.defs dt {
+  margin-top: 8px;
+  font-family: var(--pixel);
+  font-size: 13px;
+  color: var(--mint);
+}
+
+.defs dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+
+/* ---- tablets and phones: one column, 16px gutters ---- */
+@media (max-width: 900px) {
+  .kpis {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  main {
+    padding: 12px 16px;
+  }
+
+  .kpis {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .cards,
+  .tables {
+    grid-template-columns: 1fr;
+  }
+
+  .tools {
+    margin-left: 0;
+  }
+
+  .kpi-value {
+    font-size: 24px;
+  }
+}

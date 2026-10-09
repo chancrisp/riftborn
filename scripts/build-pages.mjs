@@ -58,6 +58,7 @@ if (refusals.length) throw new Error(refusals.join('\n'));
 const live = path.join(root, 'live');
 const dev = path.join(root, 'dev');
 const inbox = path.join(root, 'feedback');
+const metrics = path.join(root, 'metrics');
 const privacy = path.join(root, 'privacy');
 const hasLive = fs.existsSync(path.join(live, 'index.html'));
 const hasDev = fs.existsSync(path.join(dev, 'index.html'));
@@ -242,8 +243,12 @@ if (hasDev) {
 // The inbox on its own origin: its three files, the heading font (inbox.css asks for
 // ../assets/crypt-pixel.ttf, which is /assets/ here; a missing file would be a console error), a
 // plain 404 page with no script (without one Pages would answer every path with the inbox), and a
-// robots.txt that keeps crawlers out. The strict headers come below.
+// robots.txt that keeps crawlers out. The strict headers come below. The owner-only stats page
+// (metrics/) is built in beside it at /metrics/ under the same strict headers; it is NOT copied to
+// the github.io inbox copy, which stays exactly its three files.
 copy(inbox, cfFeedback);
+if (!fs.existsSync(path.join(metrics, 'index.html'))) throw new Error('No metrics/index.html: the stats page at ' + HOSTS.feedback + '/metrics/ is missing.');
+copy(metrics, path.join(cfFeedback, 'metrics'));
 if (!pixelFont) throw new Error('No crypt-pixel.ttf in live/assets or dist/assets: the inbox at ' + HOSTS.feedback + ' needs it.');
 write(path.join(cfFeedback, 'assets', 'crypt-pixel.ttf'), fs.readFileSync(pixelFont));
 const inboxIcon = /<link rel="icon"[^>]*>/.exec(fs.readFileSync(path.join(inbox, 'index.html'), 'utf8'))?.[0] || '';
