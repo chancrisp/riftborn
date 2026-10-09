@@ -2,6 +2,7 @@
 import { handleScores } from '../server/scores-api.js';
 import { handleFeedback } from '../server/feedback-api.js';
 import { handleAccounts, scoreAccounts } from '../server/accounts-api.js';
+import { handleStats } from '../server/stats-api.js';
 
 // Every https answer pins the host to https in the browser (api.riftborn.us and workers.dev).
 // (Only the default export: the Workers runtime treats named exports of an entry as entrypoints.)
@@ -35,7 +36,7 @@ export default {
     if (refused) return refused;
     // Accounts first (v2.2); scores get the account hooks (session, name protection, username join).
     const response = (await handleAccounts(request, env, ctx)) || (await handleScores(request, env, scoreAccounts)) ||
-      (await handleFeedback(request, env, ctx)) || new Response('Not found', { status: 404 });
+      (await handleFeedback(request, env, ctx)) || (await handleStats(request, env, ctx)) || new Response('Not found', { status: 404 });
     return url.protocol === 'https:' ? withHsts(response) : response;
   }
 };

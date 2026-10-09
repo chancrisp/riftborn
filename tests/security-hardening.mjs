@@ -25,6 +25,8 @@ const fetchWorker = (url, init = {}, env = prod) => worker.fetch(new Request(url
     ['/api/account', { headers: bearer }],
     ['/api/profile', { method: 'PUT', headers: { ...bearer, 'Content-Type': 'application/json' }, body: '{}' }],
     ['/api/feedback', { headers: { Authorization: 'Bearer ' + prod.FEEDBACK_ADMIN_KEY, Origin: ORIGIN } }],
+    ['/api/stats', { method: 'POST', headers: { Origin: ORIGIN, 'Content-Type': 'application/json' }, body: '{}' }],
+    ['/api/admin/stats', { headers: { Origin: ORIGIN } }],
     ['/auth/logout', { method: 'POST', headers: bearer }],
     ['/auth/session', { method: 'POST', headers: { Origin: ORIGIN, 'Content-Type': 'application/json' }, body: '{}' }]
   ]) {
@@ -54,6 +56,7 @@ console.log('PASS https only: production refuses every plaintext API request (40
     ['/elsewhere', {}, 404],
     ['/api/scores', { method: 'OPTIONS', headers: { Origin: ORIGIN, 'Access-Control-Request-Method': 'POST' } }, 204],
     ['/api/auth/providers', { headers: { Origin: ORIGIN } }, 200],
+    ['/api/stats', { method: 'OPTIONS', headers: { Origin: 'https://riftborn.us', 'Access-Control-Request-Method': 'POST' } }, 204],
     ['/api/scores', { headers: { Origin: 'https://evil.example' } }, 403]
   ];
   for (const [path, init, status] of cases) {
@@ -139,7 +142,7 @@ console.log('PASS inbox: meta CSP (no inline code, inline scripts hashed, https 
   assert.ok(privacy.includes('stops working after 10 minutes'), 'The sign-in check value is described as the game handles it');
   // "a scrambled, one-way version" of the IP: every limiter key goes through a keyed hash.
   assert.ok(privacy.includes('scrambled, one-way version'));
-  for (const file of ['server/feedback-api.js', 'server/scores-api.js', 'server/admin-auth.js']) {
+  for (const file of ['server/feedback-api.js', 'server/scores-api.js', 'server/admin-auth.js', 'server/stats-api.js']) {
     const text = fs.readFileSync(file, 'utf8');
     for (const match of text.matchAll(/\.limit\(\{ key[^}]*\}\)/g)) assert.ok(!/key: ip\b/.test(match[0]), `${file}: limiter keyed by hash, not the raw address: ${match[0]}`);
   }

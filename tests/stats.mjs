@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import * as auth from '../server/admin-auth.js';
 import * as feedback from '../server/feedback-api.js';
+import worker from '../cloudflare/worker.js';
 import { createD1, openDatabase } from '../server/d1-sqlite.mjs';
 import { DIM_PATTERN, STATS_BODY_MAX, STATS_METRICS, STATS_ORIGIN, handleStats, reportRows, validateReport } from '../server/stats-api.js';
 import { COUNTER_METRICS, DIM_CAPS, STATS_DAILY_WRITE_CEILING, WRITES_METRIC, ensureStatsTable, reportStatements, utcDay } from '../server/stats-counters.js';
@@ -302,6 +303,14 @@ assert.equal(await handleStats(new Request('https://api.test/api/scores', { meth
     fs.rmSync(file, { force: true });
     fs.rmdirSync(dir);
   }
+}
+
+{ // Task 1.6: the route is reachable through the real Worker entry
+  const { sqlite, env } = makeEnv();
+  const r = await worker.fetch(new Request('https://api.test/api/stats', { method: 'POST', body: JSON.stringify(GOOD), headers: { Origin: STATS_ORIGIN, 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.250' } }), env, { waitUntil() {} });
+  assert.equal(r.status, 204);
+  assert.equal(r.headers.get('Strict-Transport-Security'), 'max-age=31536000', 'HSTS on https answers');
+  assert.equal(countOf(sqlite, 'runs', 'all'), 1);
 }
 
 console.log('PASS stats: the inbox admin helpers live in server/admin-auth.js and feedback-api.js still exports ADMIN_LIMIT.');
