@@ -4,10 +4,12 @@
 // The last line of this file is the PASS line; later tasks add their blocks above it.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import * as auth from '../server/admin-auth.js';
 import * as feedback from '../server/feedback-api.js';
 import { createD1, openDatabase } from '../server/d1-sqlite.mjs';
-import { DIM_PATTERN, STATS_BODY_MAX, STATS_METRICS, reportRows, validateReport } from '../server/stats-api.js';
+import { DIM_PATTERN, STATS_BODY_MAX, STATS_METRICS, STATS_ORIGIN, handleStats, reportRows, validateReport } from '../server/stats-api.js';
 import { COUNTER_METRICS, DIM_CAPS, STATS_DAILY_WRITE_CEILING, WRITES_METRIC, ensureStatsTable, reportStatements, utcDay } from '../server/stats-counters.js';
 
 // ---- Task 1.1: the inbox admin helpers moved into server/admin-auth.js without a change in behaviour -------------
@@ -133,6 +135,173 @@ assert.equal(auth.originAllowed(null, {}), true);
   assert.deepEqual(reportRows(GOOD).slice(-2), [['version', '2.6.0'], ['length', '5-10']]);
   assert.equal(STATS_METRICS, COUNTER_METRICS, 'one list of metrics');
   assert.deepEqual([...STATS_METRICS], ['players', 'runs', 'wins', 'stage_reached', 'character', 'weapon', 'device', 'version', 'length', 'signups']);
+}
+
+// ---- Task 1.5: POST /api/stats --------------------------------------------------------------------------------
+const GOOD = { v: 1, game: '2.6.0', device: 'desktop', character: 'rift-knight', weapon: 'rail_pistol', stage: 3, outcome: 'death', length: '5-10', first: false };
+const stubNow = iso => { const real = Date.now; Date.now = () => Date.parse(iso); return () => { Date.now = real; }; };
+const quietConsole = () => { const real = { log: console.log, error: console.error, warn: console.warn }; const logs = []; for (const k of Object.keys(real)) console[k] = (...a) => logs.push(a.join(' ')); return { logs, restore: () => Object.assign(console, real) }; };
+const makeEnv = (over = {}) => {
+  const sqlite = openDatabase(':memory:', 'drizzle', fs);
+  return { sqlite, env: { DB: createD1(sqlite), ENVIRONMENT: 'production', AUTH_SIGNING_KEY: 'k'.repeat(43), ACCOUNTS_RATE_LIMITER: { async limit() { return { success: true }; } }, ...over } };
+};
+let ipSeq = 0;
+const send = (env, { method = 'POST', origin = STATS_ORIGIN, body = GOOD, contentType = 'application/json', url = 'https://api.test/api/stats', headers = {} } = {}) => handleStats(new Request(url, {
+  method,
+  body: method === 'POST' ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
+  headers: { ...(origin === null ? {} : { Origin: origin }), ...(contentType ? { 'Content-Type': contentType } : {}), 'CF-Connecting-IP': `198.51.100.${++ipSeq}`, ...headers }
+}), env, { waitUntil() {} });
+const rowsOf = sqlite => sqlite.prepare('SELECT day, metric, dim, n FROM daily_stats ORDER BY day, metric, dim').all().map(r => ({ ...r }));
+const countOf = (sqlite, metric, dim, day) => sqlite.prepare('SELECT n FROM daily_stats WHERE metric = ? AND dim = ?' + (day ? ' AND day = ?' : '')).get(...(day ? [metric, dim, day] : [metric, dim]))?.n;
+
+assert.equal(STATS_ORIGIN, 'https://riftborn.us');
+assert.equal(await handleStats(new Request('https://api.test/api/scores', { method: 'POST' }), {}, {}), null, 'not its path: null');
+{ // PRIVACY: the handler reads only Origin, Content-Type and the limiter key; nothing about the sender reaches D1, the limiter key or the logs.
+  const seen = { headers: new Set(), props: new Set(), other: new Set() }, keys = [];
+  const spy = request => new Proxy(request, { get(target, prop) {
+    seen.props.add(String(prop));
+    const value = Reflect.get(target, prop, target);
+    if (prop === 'headers') return new Proxy(value, { get(h, name) {
+      if (name === 'get') return key => (seen.headers.add(String(key).toLowerCase()), h.get(key));
+      seen.other.add(String(name)); return undefined;
+    } });
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
+  const q = quietConsole();
+  const { sqlite, env } = makeEnv({ ACCOUNTS_RATE_LIMITER: { async limit({ key }) { keys.push(key); return { success: true }; } } });
+  const request = new Request('https://api.test/api/stats', { method: 'POST', body: JSON.stringify(GOOD), headers: { Origin: STATS_ORIGIN, 'Content-Type': 'application/json', 'CF-Connecting-IP': '203.0.113.9', 'User-Agent': 'PrivacyProbe/1.0' } });
+  const r = await handleStats(spy(request), env, { waitUntil() {} });
+  q.restore();
+  assert.equal(r.status, 204);
+  assert.deepEqual([...seen.headers].sort(), ['cf-connecting-ip', 'content-type', 'origin'], 'only Origin, Content-Type and the limiter key');
+  assert.ok(!seen.props.has('cf') && seen.other.size === 0, 'no request.cf, no header enumeration');
+  const dump = JSON.stringify(sqlite.prepare('SELECT * FROM daily_stats').all()) + keys.join() + q.logs.join('\n');
+  assert.ok(!dump.includes('203.0.113.9') && !dump.includes('PrivacyProbe'), 'no IP or user agent in D1, limiter key or logs');
+  assert.match(keys[0], /^[A-Za-z0-9_-]{43}$/, 'the limiter key is a keyed hash');
+}
+{ // (1) the gate is the Origin
+  const q = quietConsole();
+  for (const origin of ['https://dev.riftborn.us', null, 'https://riftborn.us.evil.example', 'http://riftborn.us', 'https://www.riftborn.us', 'null']) {
+    let limited = 0;
+    const env = { DB: { prepare() { throw new Error('touched'); }, batch() { throw new Error('touched'); } }, AUTH_SIGNING_KEY: 'k'.repeat(43), ACCOUNTS_RATE_LIMITER: { async limit() { limited++; return { success: true }; } } };
+    const r = await send(env, { origin });
+    assert.equal(r.status, 403, String(origin));
+    assert.equal(r.headers.get('Access-Control-Allow-Origin'), null, 'no CORS header for a refused origin: ' + origin);
+    assert.equal(limited, 0, 'nothing ran: ' + origin);
+  }
+  q.restore();
+  const { env } = makeEnv();
+  const workers = 'https://riftborn-leaderboard.chanmanc10.workers.dev/api/stats';
+  assert.equal((await send(env, { url: workers })).status, 204, 'the gate is the Origin, not the host');
+  assert.equal((await send(env, { url: workers, origin: 'https://dev.riftborn.us' })).status, 403);
+}
+{ // (2) preflight and methods
+  const { env } = makeEnv();
+  const pre = await send(env, { method: 'OPTIONS' });
+  assert.equal(pre.status, 204);
+  assert.deepEqual([pre.headers.get('Access-Control-Allow-Origin'), pre.headers.get('Access-Control-Allow-Methods'), pre.headers.get('Access-Control-Allow-Headers'), pre.headers.get('Access-Control-Max-Age')], [STATS_ORIGIN, 'POST, OPTIONS', 'Content-Type', '86400']);
+  assert.equal((await send(env, { method: 'OPTIONS', origin: 'https://dev.riftborn.us' })).status, 403);
+  const get = await send(env, { method: 'GET' });
+  assert.equal(get.status, 405);
+  assert.equal(get.headers.get('Allow'), 'POST, OPTIONS');
+}
+{ // (3) body: exactly 512 bytes passes, 513 is too large, bad content type, bad JSON, wrong shape
+  const { sqlite, env } = makeEnv();
+  const body = JSON.stringify(GOOD);
+  const padded = n => body + ' '.repeat(n - Buffer.byteLength(body));
+  assert.equal((await send(env, { body: padded(STATS_BODY_MAX) })).status, 204);
+  const rowsBefore = rowsOf(sqlite);
+  const big = await send(env, { body: padded(STATS_BODY_MAX + 1) });
+  assert.equal(big.status, 413);
+  assert.equal(big.headers.get('Access-Control-Allow-Origin'), STATS_ORIGIN);
+  for (const [options, label] of [[{ contentType: 'text/plain' }, 'text/plain'], [{ body: '{nope' }, 'bad JSON'], [{ body: { ...GOOD, ip: '1.2.3.4' } }, 'wrong shape'], [{ contentType: null }, 'no content type']]) {
+    const r = await send(env, options);
+    assert.equal(r.status, 400, label);
+    assert.equal(r.headers.get('Access-Control-Allow-Origin'), STATS_ORIGIN, label);
+  }
+  assert.deepEqual(rowsOf(sqlite), rowsBefore, 'nothing written by a refused body');
+}
+{ // (4) the limiter
+  const { sqlite, env } = makeEnv({ ACCOUNTS_RATE_LIMITER: { async limit() { return { success: false }; } } });
+  const r = await send(env);
+  assert.equal(r.status, 429);
+  assert.equal(r.headers.get('Retry-After'), '60');
+  assert.equal(r.headers.get('Access-Control-Allow-Origin'), STATS_ORIGIN);
+  assert.deepEqual(rowsOf(sqlite), [], 'no write');
+  let called = 0;
+  const open = makeEnv({ AUTH_SIGNING_KEY: undefined, ACCOUNTS_RATE_LIMITER: { async limit() { called++; return { success: true }; } } });
+  assert.equal((await send(open.env)).status, 204, 'no signing key: the limiter is skipped and the report still counts');
+  assert.equal(called, 0, 'no raw-address key is ever built');
+  assert.equal(countOf(open.sqlite, 'runs', 'all'), 1);
+  const none = makeEnv({ ACCOUNTS_RATE_LIMITER: undefined });
+  assert.equal((await send(none.env)).status, 204, 'no limiter binding: still counted');
+}
+{ // (5) counting, (6) one batch per report
+  const { sqlite, env } = makeEnv();
+  const realBatch = env.DB.batch.bind(env.DB), sizes = [];
+  env.DB.batch = async statements => { sizes.push(statements.length); return realBatch(statements); };
+  assert.equal(await (await send(env)).text(), '', 'the 204 body is empty');
+  await send(env);
+  assert.equal(countOf(sqlite, 'runs', 'all'), 2);
+  assert.equal(countOf(sqlite, 'stage_reached', '3'), 2);
+  assert.equal(countOf(sqlite, 'players', 'all'), undefined);
+  assert.equal(countOf(sqlite, 'wins', 'all'), undefined);
+  await send(env, { body: { ...GOOD, first: true, outcome: 'win', stage: 6 } });
+  assert.equal(countOf(sqlite, 'players', 'all'), 1);
+  assert.equal(countOf(sqlite, 'wins', 'all'), 1);
+  assert.deepEqual(sizes, [8, 8, 10], 'one batch per report: 10 statements for first+win, 8 for a non-first death');
+}
+{ // (7) a bare database gets the table; a failing database answers 503
+  const bare = createD1(openDatabase(':memory:'));
+  assert.equal((await send({ DB: bare, AUTH_SIGNING_KEY: 'k'.repeat(43) })).status, 204);
+  assert.equal(bare.sqlite.prepare('SELECT n FROM daily_stats WHERE metric = ?').get('runs').n, 1);
+  const q = quietConsole();
+  const { env } = makeEnv();
+  env.DB.batch = async () => { throw new Error('boom'); };
+  for (const broken of [env, { ...env, DB: undefined }]) {
+    const r = await send(broken);
+    assert.equal(r.status, 503);
+    assert.deepEqual(await r.json(), { error: 'unavailable' });
+    assert.equal(r.headers.get('Access-Control-Allow-Origin'), STATS_ORIGIN);
+  }
+  q.restore();
+  assert.ok(q.logs.every(line => !line.includes('198.51.100')), 'no address in the logs');
+}
+{ // (8) the day rule: the UTC day of receipt
+  const { sqlite, env } = makeEnv();
+  let restore = stubNow('2026-10-20T23:59:59.999Z');
+  await send(env);
+  restore();
+  restore = stubNow('2026-10-21T00:00:00.000Z');
+  await send(env, { body: { ...GOOD, first: true, outcome: 'win' } });
+  restore();
+  assert.equal(countOf(sqlite, 'runs', 'all', '2026-10-20'), 1);
+  assert.equal(countOf(sqlite, 'runs', 'all', '2026-10-21'), 1);
+  assert.equal(countOf(sqlite, 'players', 'all', '2026-10-21'), 1, 'a first report received after midnight counts on the new day');
+  assert.equal(countOf(sqlite, 'players', 'all', '2026-10-20'), undefined);
+  const metrics = sqlite.prepare('SELECT DISTINCT metric FROM daily_stats').all().map(r => r.metric);
+  assert.ok(metrics.every(m => COUNTER_METRICS.includes(m) || m === '_writes'), 'only known metrics: ' + metrics);
+}
+{ // Step 1b: the ceiling lives in D1, not in memory: a fresh isolate over the same file still drops the report
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-stats-'));
+  const file = path.join(dir, 'stats.sqlite');
+  const restore = stubNow('2026-10-20T12:00:00Z');
+  try {
+    const first = openDatabase(file, 'drizzle', fs);
+    first.prepare("INSERT INTO daily_stats VALUES ('2026-10-20', '_writes', 'all', ?)").run(STATS_DAILY_WRITE_CEILING);
+    first.prepare("INSERT INTO daily_stats VALUES ('2026-10-20', 'runs', 'all', 5)").run();
+    first.close();
+    const again = openDatabase(file, 'drizzle', fs);
+    const r = await send({ DB: createD1(again), AUTH_SIGNING_KEY: 'k'.repeat(43) });
+    assert.equal(r.status, 204);
+    assert.equal(again.prepare("SELECT n FROM daily_stats WHERE metric = 'runs'").get().n, 5, 'dropped: runs unchanged');
+    assert.equal(again.prepare("SELECT n FROM daily_stats WHERE metric = '_writes'").get().n, STATS_DAILY_WRITE_CEILING, 'a dropped report does not even touch _writes');
+    again.close();
+  } finally {
+    restore();
+    fs.rmSync(file, { force: true });
+    fs.rmdirSync(dir);
+  }
 }
 
 console.log('PASS stats: the inbox admin helpers live in server/admin-auth.js and feedback-api.js still exports ADMIN_LIMIT.');
