@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { PAGES_PROJECTS } from '../site.config.mjs';
 import {
-  INSPECT_PROJECTS, IP_KEY, PERMISSIONS, SERVED_URLS, WORKER_SCRIPT, injectionVerdict, inspect, inspectPlan, inspectRefusals, renderAnnotations
+  INSPECT_PROJECTS, IP_KEY, PERMISSIONS, SERVED_URLS, WATCHED_HOSTS, WORKER_SCRIPT, applyAnnotations, applyRefusals, applyWebAnalytics, injectionVerdict, inspect, inspectPlan, inspectRefusals, renderAnnotations, verifyNoInjection
 } from '../scripts/cloudflare-web-analytics.mjs';
 
 const ACCOUNT = '0123456789abcdef0123456789abcdef', TOKEN = 'cf-test-token-never-printed', API = 'https://api.cloudflare.com';
@@ -136,18 +136,19 @@ console.log('PASS web analytics inspect privacy: read-only calls, the token only
   const bare = cli('inspect');
   assert.equal(bare.status, 1, 'Without a token it refuses');
   assert.match(bare.stderr, /Set the CLOUDFLARE_API_TOKEN secret/);
-  for (const args of [['apply'], []]) {
-    const other = cli(...args);
-    assert.equal(other.status, 1, 'only inspect exists yet: ' + args.join(' '));
-    assert.match(other.stderr, /only `inspect` exists yet/);
-  }
+  const bareCli = cli();
+  assert.equal(bareCli.status, 1, 'no subcommand');
+  assert.match(bareCli.stderr, /usage: .*inspect.*apply.*verify/i);
+  const unconfirmed = cli('apply');
+  assert.equal(unconfirmed.status, 2, 'apply without --confirm writes nothing and exits 2');
+  assert.match(unconfirmed.stderr + unconfirmed.stdout, /--confirm/);
   // Refusals: CI off main, a bad account id; a local run with credentials is fine.
   assert.ok(inspectRefusals({ ...env, GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/other' }).some(r => /only refs\/heads\/main/.test(r)));
   assert.ok(inspectRefusals({ ...env, CLOUDFLARE_ACCOUNT_ID: 'nope' }).some(r => /CLOUDFLARE_ACCOUNT_ID/.test(r)));
   assert.deepEqual(inspectRefusals(env), []);
   assert.deepEqual(inspectRefusals({ ...env, GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main' }), []);
 }
-console.log('PASS web analytics inspect plan: every call and permission is named, --dry-run needs no token, CI off main and a bad account id are refused, and only `inspect` exists yet.');
+console.log('PASS web analytics inspect plan: every call and permission is named, --dry-run needs no token, CI off main and a bad account id are refused, and apply needs --confirm.');
 
 // ---- zone and Workers plan -------------------------------------------------------------------------------------
 {
@@ -282,6 +283,104 @@ console.log('PASS web analytics inspect plan: every call and permission is named
   assert.equal((await run({}, { now: () => new Date('2026-10-09T12:00:00Z') })).report.at, '2026-10-09T12:00:00.000Z');
 }
 console.log('PASS web analytics inspect: zone and Workers plan, the Web Analytics sites, the Pages toggle, what is really served, the injection verdict, whether Workers Logs can hold IPs, what the token can change, and exact token permissions (required fail, optional warn).');
+
+// ---- apply (injection off, site token) and verify -----------------------------------------------------------------------
+{
+  const log = () => {};
+  const SITE_TOKEN = 'ZONESITETOKEN0123456789abcdef';
+  const zoneSite = (auto) => ({ site_tag: 'zone-tag', site_token: SITE_TOKEN, auto_install: auto, ruleset: { zone_name: 'riftborn.us', zone_tag: 'zone-1', enabled: true }, rules: [] });
+  const pagesSite = (name, auto) => ({ site_tag: 'tag-' + name, site_token: 'token-' + name, auto_install: auto, ruleset: { zone_name: name, enabled: true }, rules: [] });
+  const otherSite = (zone, auto) => ({ site_tag: 'tag-' + zone, site_token: 'token-' + zone, auto_install: auto, ruleset: { zone_name: zone, zone_tag: 'zone-9', enabled: true }, rules: [] });
+  function fakeRum({ sites, zones = [{ id: 'zone-1', name: 'riftborn.us' }], deny = [], stuck = [] } = {}) {
+    const state = { sites: sites.map(site => ({ ...site })) }, calls = [];
+    const reply = (code, body) => new Response(JSON.stringify(body), { status: code, headers: { 'Content-Type': 'application/json' } });
+    const ok = result => reply(200, { success: true, errors: [], messages: [], result });
+    const fail = () => reply(403, { success: false, errors: [{ code: 10000, message: 'Authentication error' }], messages: [], result: null });
+    const fetchImpl = async (url, init = {}) => {
+      const u = new URL(url), method = init.method || 'GET', body = init.body ? JSON.parse(init.body) : undefined;
+      calls.push({ method, path: u.pathname, body, authorization: init.headers?.Authorization });
+      if (u.pathname === '/client/v4/zones') return ok(zones.filter(z => z.name === u.searchParams.get('name')));
+      if (u.pathname === `${ACCT}/rum/site_info/list`) return deny.includes('list') ? fail() : ok(state.sites);
+      if (method === 'PUT' && u.pathname.startsWith(`${ACCT}/rum/site_info/`)) {
+        if (deny.includes('put')) return fail();
+        const site = state.sites.find(s => s.site_tag === u.pathname.split('/').at(-1));
+        if (!site) return reply(404, { success: false, errors: [{ code: 1, message: 'not found' }], messages: [], result: null });
+        if (!stuck.includes(site.site_tag)) site.auto_install = body.auto_install;
+        return ok(site);
+      }
+      if (method === 'POST' && u.pathname === `${ACCT}/rum/site_info`) {
+        if (deny.includes('post')) return fail();
+        const site = { site_tag: 'new-tag', site_token: 'NEWSITETOKEN0123456789abcdef', auto_install: body.auto_install, ruleset: { zone_name: 'riftborn.us', zone_tag: body.zone_tag, enabled: true }, rules: [] };
+        state.sites.push(site);
+        return ok(site);
+      }
+      return reply(404, { success: false, errors: [{ code: 7003, message: 'No route' }], messages: [], result: null });
+    };
+    return { fetchImpl, calls, state };
+  }
+  const writes = fake => fake.calls.filter(c => c.method !== 'GET');
+  assert.deepEqual([...WATCHED_HOSTS], ['riftborn.us', 'dev.riftborn.us', 'feedback.riftborn.us', 'riftborn.pages.dev', 'riftborn-dev.pages.dev', 'riftborn-feedback.pages.dev']);
+
+  { // no write without --confirm
+    const fake = fakeRum({ sites: [zoneSite(true), pagesSite('riftborn-feedback.pages.dev', true), otherSite('example.com', true)] });
+    const dry = await applyWebAnalytics({ env, fetchImpl: fake.fetchImpl, log, confirm: false });
+    assert.equal(dry.ok, false);
+    assert.deepEqual(dry.remaining.sort(), ['riftborn-feedback.pages.dev', 'riftborn.us'], 'the plan names what would change');
+    assert.deepEqual(writes(fake), [], 'no write without --confirm');
+  }
+  { // (a) confirmed: only our sites are touched; (b) a second run writes nothing
+    const fake = fakeRum({ sites: [zoneSite(true), pagesSite('riftborn-feedback.pages.dev', true), otherSite('example.com', true)] });
+    const first = await applyWebAnalytics({ env, fetchImpl: fake.fetchImpl, log, confirm: true });
+    assert.deepEqual(writes(fake).map(c => [c.method, c.path.split('/').at(-1), c.body]), [['PUT', 'zone-tag', { auto_install: false, zone_tag: 'zone-1' }], ['PUT', 'tag-riftborn-feedback.pages.dev', { auto_install: false }]]);
+    assert.deepEqual([first.ok, first.token, first.remaining], [true, SITE_TOKEN, []]);
+    assert.deepEqual(first.changed.sort(), ['riftborn-feedback.pages.dev', 'riftborn.us']);
+    assert.equal(fake.state.sites.find(s => s.site_tag === 'tag-example.com').auto_install, true, "another zone's site is never touched");
+    const before = writes(fake).length;
+    const second = await applyWebAnalytics({ env, fetchImpl: fake.fetchImpl, log, confirm: true });
+    assert.deepEqual([second.ok, second.changed, writes(fake).length], [true, [], before]);
+  }
+  { // (c) no zone site yet: one POST creates it with injection off, and its token is returned
+    const fake = fakeRum({ sites: [] });
+    const made = await applyWebAnalytics({ env, fetchImpl: fake.fetchImpl, log, confirm: true });
+    assert.deepEqual(writes(fake).map(c => [c.method, c.body]), [['POST', { zone_tag: 'zone-1', auto_install: false }]]);
+    assert.deepEqual([made.ok, made.token], [true, 'NEWSITETOKEN0123456789abcdef']);
+  }
+  { // (d) the exact permission is named
+    await assert.rejects(applyWebAnalytics({ env, fetchImpl: fakeRum({ sites: [zoneSite(true)], deny: ['list'] }).fetchImpl, log, confirm: true }), /Account > Account Settings > Read/);
+    await assert.rejects(applyWebAnalytics({ env, fetchImpl: fakeRum({ sites: [zoneSite(true)], deny: ['put'] }).fetchImpl, log, confirm: true }), /Account > Account Settings > Edit/);
+  }
+  { // (e) refusals
+    assert.ok(applyRefusals({ ...env, GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/other' }).some(r => /only refs\/heads\/main/.test(r)));
+    assert.ok(applyRefusals({ CLOUDFLARE_ACCOUNT_ID: ACCOUNT }).some(r => /CLOUDFLARE_API_TOKEN/.test(r)));
+    assert.ok(applyRefusals({ CLOUDFLARE_API_TOKEN: TOKEN, CLOUDFLARE_ACCOUNT_ID: 'x' }).some(r => /CLOUDFLARE_ACCOUNT_ID/.test(r)));
+    assert.deepEqual(applyRefusals(env), []);
+  }
+  { // (f) the API token and the account id never reach the log; the site token exactly once
+    const logs = [];
+    await applyWebAnalytics({ env, fetchImpl: fakeRum({ sites: [zoneSite(true)] }).fetchImpl, log: line => logs.push(line), confirm: true });
+    const text = logs.join('\n');
+    assert.ok(!text.includes(TOKEN) && !text.includes(ACCOUNT));
+    assert.equal(text.split(SITE_TOKEN).length - 1, 1, 'the public site token is printed once');
+    assert.ok(text.includes('WEB_ANALYTICS_TOKEN=' + SITE_TOKEN));
+  }
+  { // (g) a site that stays on after the writes is named, and the run is not ok
+    const stuck = await applyWebAnalytics({ env, fetchImpl: fakeRum({ sites: [zoneSite(true), pagesSite('riftborn.pages.dev', true)], stuck: ['tag-riftborn.pages.dev'] }).fetchImpl, log, confirm: true });
+    assert.deepEqual([stuck.ok, stuck.remaining], [false, ['riftborn.pages.dev']]);
+  }
+  { // (h) verify: the served HTML must not hold the beacon; a failed fetch is unknown, never clean
+    const html = { 'riftborn.us': '<html><script defer src="https://static.cloudflareinsights.com/beacon.min.js"></script></html>', 'dev.riftborn.us': '<html data-cf-beacon="x"></html>', 'feedback.riftborn.us': '<html>clean</html>' };
+    const fetchImpl = async url => { const host = new URL(url).hostname; if (host === 'riftborn.pages.dev') throw new TypeError('fetch failed'); return new Response(html[host] ?? '<html>clean</html>', { status: 200 }); };
+    const verdict = await verifyNoInjection({ hosts: ['riftborn.us', 'dev.riftborn.us', 'feedback.riftborn.us', 'riftborn.pages.dev'], fetchImpl });
+    assert.deepEqual(verdict, [{ host: 'riftborn.us', injected: true }, { host: 'dev.riftborn.us', injected: true }, { host: 'feedback.riftborn.us', injected: false }, { host: 'riftborn.pages.dev', injected: null }]);
+  }
+  { // (j) the public annotations carry the site token and the plan, never the API token
+    const result = await applyWebAnalytics({ env, fetchImpl: fakeRum({ sites: [zoneSite(true)] }).fetchImpl, log, confirm: true });
+    const lines = applyAnnotations(result);
+    assert.ok(lines.length >= 3 && lines.every(l => /^::(notice|error|warning) title=/.test(l) && !l.includes('\n')));
+    assert.ok(lines.some(l => l.includes(SITE_TOKEN)) && lines.every(l => !l.includes(TOKEN) && !l.includes(ACCOUNT)));
+  }
+}
+console.log('PASS web analytics apply and verify: only our sites are switched, nothing is written without --confirm, a second run is a no-op, the exact permission is named, the site token prints once and the API token never, and a failed check is unknown, not clean.');
 
 // STAGE0-WORKFLOW-PINS begin
 // The one-off workflow (.github/workflows/cloudflare-web-analytics.yml): main only, read-only, the token in one step.
