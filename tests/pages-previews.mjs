@@ -161,6 +161,7 @@ for (const p of staged.previews) {
     const csp = headers.get('content-security-policy');
     assert.ok(csp && !csp.joined, `${p.name} ${file}: one CSP`);
     assert.match(csp.value, /connect-src 'self' https:\/\/api\.riftborn\.us https:\/\/riftborn-leaderboard\.chanmanc10\.workers\.dev(;|$)/, 'The dev build\'s policy');
+    assert.ok(!csp.value.includes('cloudflareinsights'), 'previews never allow the visit counter');
     const allowed = new Set(csp.value.split(';').map(part => part.trim()).find(part => part.startsWith('script-src ')).split(/\s+/).slice(1));
     assert.ok(!allowed.has("'unsafe-inline'"));
     for (const script of inlineScripts(read(path.join(dir, file)))) assert.ok(allowed.has(scriptHash(script)), `${p.name} ${file}: inline script hashed`);
