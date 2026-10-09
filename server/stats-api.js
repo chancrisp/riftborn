@@ -5,7 +5,7 @@
 import { HOSTS } from '../site.hosts.mjs';
 import { json } from './admin-auth.js';
 import { ipLimitKey } from './accounts-api.js';
-import { ensureStatsTable, reportStatements, utcDay } from './stats-counters.js';
+import { STATS_DAILY_WRITE_CEILING, WRITES_METRIC, ensureStatsTable, reportStatements, utcDay } from './stats-counters.js';
 export { COUNTER_METRICS as STATS_METRICS } from './stats-counters.js';
 
 /** A report is refused above this many bytes (the real one is about 150). */
@@ -114,4 +114,56 @@ export async function handleStats(request, env, ctx) {
     return json({ error: 'unavailable' }, 503, STATS_ORIGIN);
   }
   return new Response(null, { status: 204, headers: { ...cors, 'Cache-Control': 'no-store' } });
+}
+
+// ---- the admin read model ---------------------------------------------------------------------------------------
+
+/** The windows the admin read offers: the last 7, 30 or 90 UTC days (today included), or everything. */
+export const STATS_RANGES = ['7', '30', '90', 'all'];
+const BREAKDOWNS = ['stage_reached', 'character', 'weapon', 'device', 'version', 'length'];
+const FIXED_ORDER = { stage_reached: ['1', '2', '3', '4', '5', '6'], length: ['u2', '2-5', '5-10', '10-20', '20-40', 'o40'] };
+const DAY_MS = 86400000;
+
+/**
+ * What the private stats page shows: per-day players, runs, wins and sign-ups (zero-filled, oldest first, ending
+ * today, a partial UTC day); one-dimensional breakdowns summed over the window (only values with counts: stage in
+ * stage order, length in bucket order, the rest by count then name); the account total; the newest day with a
+ * report; and how much of today's write ceiling is used. now is milliseconds.
+ */
+export async function readStats(db, range, now) {
+  const today = utcDay(now);
+  const start = range === 'all' ? null : utcDay(Date.parse(today + 'T00:00:00Z') - (Number(range) - 1) * DAY_MS);
+  const bound = start ? ' AND day >= ?' : '';
+  const binds = start ? [start] : [];
+  const [daily, breakdown, last, writes] = await db.batch([
+    db.prepare(`SELECT day, metric, n FROM daily_stats WHERE metric IN ('players', 'runs', 'wins', 'signups') AND dim = 'all'${bound}`).bind(...binds),
+    db.prepare(`SELECT metric, dim, SUM(n) AS n FROM daily_stats WHERE metric IN (${BREAKDOWNS.map(m => `'${m}'`).join(', ')})${bound} GROUP BY metric, dim`).bind(...binds),
+    db.prepare("SELECT MAX(day) AS day FROM daily_stats WHERE metric = 'runs'"),
+    db.prepare(`SELECT n FROM daily_stats WHERE day = ? AND metric = '${WRITES_METRIC}' AND dim = 'all'`).bind(today)
+  ]);
+  const byDay = new Map();
+  for (const row of daily.results) byDay.set(row.day, { ...(byDay.get(row.day) || {}), [row.metric]: row.n });
+  const first = start || [...byDay.keys()].sort()[0] || null;
+  const days = [];
+  if (first) {
+    for (let ms = Date.parse(first + 'T00:00:00Z'); utcDay(ms) <= today; ms += DAY_MS) {
+      const day = utcDay(ms), row = byDay.get(day) || {};
+      days.push({ day, players: row.players || 0, runs: row.runs || 0, wins: row.wins || 0, signups: row.signups || 0 });
+    }
+  }
+  const breakdowns = Object.fromEntries(BREAKDOWNS.map(metric => {
+    const order = FIXED_ORDER[metric];
+    const rows = breakdown.results.filter(row => row.metric === metric).map(row => ({ dim: row.dim, n: row.n }));
+    rows.sort(order
+      ? (a, b) => (order.indexOf(a.dim) < 0 ? order.length : order.indexOf(a.dim)) - (order.indexOf(b.dim) < 0 ? order.length : order.indexOf(b.dim)) || a.dim.localeCompare(b.dim)
+      : (a, b) => b.n - a.n || (a.dim < b.dim ? -1 : a.dim > b.dim ? 1 : 0));
+    return [metric, rows];
+  }));
+  let accountsTotal = 0;
+  try {
+    accountsTotal = (await db.prepare('SELECT COUNT(*) AS n FROM accounts').first('n')) || 0;
+  } catch (error) {
+    if (!/no such table/i.test(String(error?.message))) throw error;
+  }
+  return { range: String(range), days, breakdowns, accountsTotal, lastReceived: last.results[0]?.day ?? null, ceiling: { day: today, used: writes.results[0]?.n ?? 0, limit: STATS_DAILY_WRITE_CEILING } };
 }

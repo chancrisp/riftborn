@@ -9,8 +9,9 @@ import path from 'node:path';
 import * as auth from '../server/admin-auth.js';
 import * as feedback from '../server/feedback-api.js';
 import worker from '../cloudflare/worker.js';
+import { ensureAccountTables } from '../server/accounts-api.js';
 import { createD1, openDatabase } from '../server/d1-sqlite.mjs';
-import { DIM_PATTERN, STATS_BODY_MAX, STATS_METRICS, STATS_ORIGIN, handleStats, reportRows, validateReport } from '../server/stats-api.js';
+import { DIM_PATTERN, STATS_BODY_MAX, STATS_METRICS, STATS_ORIGIN, STATS_RANGES, handleStats, readStats, reportRows, validateReport } from '../server/stats-api.js';
 import { COUNTER_METRICS, DIM_CAPS, STATS_DAILY_WRITE_CEILING, WRITES_METRIC, ensureStatsTable, reportStatements, utcDay } from '../server/stats-counters.js';
 
 // ---- Task 1.1: the inbox admin helpers moved into server/admin-auth.js without a change in behaviour -------------
@@ -311,6 +312,57 @@ assert.equal(await handleStats(new Request('https://api.test/api/scores', { meth
   assert.equal(r.status, 204);
   assert.equal(r.headers.get('Strict-Transport-Security'), 'max-age=31536000', 'HSTS on https answers');
   assert.equal(countOf(sqlite, 'runs', 'all'), 1);
+}
+
+// ---- Task 1.7: readStats, the admin read model ---------------------------------------------------------------------
+{
+  assert.deepEqual(STATS_RANGES, ['7', '30', '90', 'all']);
+  const NOW = Date.parse('2026-10-20T12:00:00Z');
+  const empty = createD1(openDatabase(':memory:', 'drizzle', fs));
+  const none = await readStats(empty, 'all', NOW);
+  assert.deepEqual([none.days, none.lastReceived, none.ceiling, none.accountsTotal], [[], null, { day: '2026-10-20', used: 0, limit: STATS_DAILY_WRITE_CEILING }, 0]);
+  assert.deepEqual(none.breakdowns, { stage_reached: [], character: [], weapon: [], device: [], version: [], length: [] });
+  assert.equal(none.range, 'all');
+
+  const sqlite = openDatabase(':memory:', 'drizzle', fs), db = createD1(sqlite);
+  const seed = (day, metric, dim, n) => sqlite.prepare('INSERT OR REPLACE INTO daily_stats VALUES (?, ?, ?, ?)').run(day, metric, dim, n);
+  seed('2026-07-01', 'runs', 'all', 4);
+  for (const day of ['2026-10-12', '2026-10-15', '2026-10-19']) { seed(day, 'players', 'all', 2); seed(day, 'runs', 'all', 5); seed(day, 'wins', 'all', 1); }
+  seed('2026-10-12', 'character', 'old-one', 3); // 8 days back: in '30', not in '7'
+  seed('2026-10-15', 'character', 'rift-knight', 4); seed('2026-10-19', 'character', 'rift-knight', 2); seed('2026-10-19', 'character', 'abbot', 6); seed('2026-10-19', 'character', 'aaa', 6);
+  seed('2026-10-19', 'stage_reached', '6', 1); seed('2026-10-19', 'stage_reached', '2', 3); seed('2026-10-19', 'stage_reached', '10', 1);
+  seed('2026-10-19', 'length', 'o40', 1); seed('2026-10-19', 'length', '2-5', 2); seed('2026-10-19', 'length', 'u2', 1);
+  seed('2026-10-19', 'device', 'desktop', 5); seed('2026-10-19', 'weapon', 'rail_pistol', 5); seed('2026-10-19', 'version', '2.6.0', 5);
+  seed('2026-10-20', 'signups', 'all', 2); // a later day with only sign-ups
+  seed('2026-10-20', '_writes', 'all', 37);
+  ensureAccountTables(db);
+  sqlite.exec("INSERT INTO accounts (id, username) VALUES ('a1', 'one'), ('a2', 'two'), ('a3', 'three')");
+
+  const windows = { 7: ['2026-10-14', 7], 30: ['2026-09-21', 30], 90: ['2026-07-23', 90], all: ['2026-07-01', 112] };
+  for (const [range, [first, count]] of Object.entries(windows)) {
+    const r = await readStats(db, range, NOW);
+    assert.equal(r.range, range, 'the range is echoed as a string');
+    assert.equal(r.days.length, count, range);
+    assert.equal(r.days[0].day, first, range);
+    assert.equal(r.days.at(-1).day, '2026-10-20', range);
+  }
+  const seven = await readStats(db, '7', NOW);
+  assert.deepEqual(seven.days.find(d => d.day === '2026-10-16'), { day: '2026-10-16', players: 0, runs: 0, wins: 0, signups: 0 }, 'an unseeded day is all zeros');
+  assert.deepEqual(seven.days.find(d => d.day === '2026-10-15'), { day: '2026-10-15', players: 2, runs: 5, wins: 1, signups: 0 });
+  assert.equal(seven.days.at(-1).signups, 2);
+  assert.equal(seven.breakdowns.character.some(c => c.dim === 'old-one'), false, 'a row 8 days back is not in the 7-day window');
+  const thirty = await readStats(db, '30', NOW);
+  assert.deepEqual(thirty.breakdowns.character.find(c => c.dim === 'old-one'), { dim: 'old-one', n: 3 }, 'but it is in the 30-day window');
+  assert.deepEqual(seven.breakdowns.character, [{ dim: 'aaa', n: 6 }, { dim: 'abbot', n: 6 }, { dim: 'rift-knight', n: 6 }], 'by count, then by name; sums over the window');
+  assert.deepEqual(seven.breakdowns.stage_reached.map(s => s.dim), ['2', '6', '10'], 'stage order, then anything unexpected');
+  assert.deepEqual(seven.breakdowns.length.map(s => s.dim), ['u2', '2-5', 'o40'], 'length bucket order');
+  assert.deepEqual(Object.keys(seven.breakdowns), ['stage_reached', 'character', 'weapon', 'device', 'version', 'length'], 'no _writes, no signups');
+  assert.equal(seven.lastReceived, '2026-10-19', 'a later day with only sign-ups is not a received report');
+  assert.deepEqual(seven.ceiling, { day: '2026-10-20', used: 37, limit: STATS_DAILY_WRITE_CEILING });
+  assert.equal(seven.accountsTotal, 3);
+  const noAccounts = createD1(openDatabase(':memory:'));
+  await ensureStatsTable(noAccounts);
+  assert.equal((await readStats(noAccounts, '7', NOW)).accountsTotal, 0, 'no accounts table yet: zero');
 }
 
 console.log('PASS stats: the inbox admin helpers live in server/admin-auth.js and feedback-api.js still exports ADMIN_LIMIT.');
