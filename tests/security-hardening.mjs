@@ -126,6 +126,13 @@ console.log('PASS Pages HSTS: includeSubDomains, no preload.');
     if (local.other) assert.equal(win.localStorage.getItem('other'), 'kept', 'Nothing else is touched');
   }
 }
+{ // the inbox links to the stats page: absolute (the github.io copy leads to the new place), same tab (the per-tab key stays)
+  const inboxHtml = fs.readFileSync('feedback/index.html', 'utf8');
+  const link = /<a[^>]*id="statsLink"[^>]*>/.exec(inboxHtml)?.[0];
+  assert.ok(link, 'the inbox has a statsLink');
+  assert.equal(/href="([^"]+)"/.exec(link)[1], HOSTS.feedback + '/metrics/');
+  assert.ok(!/target=|rel=/.test(link), 'no target or rel on the stats link');
+}
 { // the stats page: as strict as the inbox
   const html = fs.readFileSync('metrics/index.html', 'utf8');
   const meta = /<meta http-equiv="Content-Security-Policy" content="([^"]+)">/.exec(html);
