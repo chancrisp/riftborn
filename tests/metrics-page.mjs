@@ -2,6 +2,7 @@
 // Period math and the headline figures (metrics/chart.js); chart geometry, the response parser, the page shell and the markup
 // are added below by the later tasks of the dashboard stage. The last line of this file is the PASS line.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { BAR_BOX, LENGTH_LABELS, LENGTH_ORDER, TREND_BOX, addDays, barGeometry, barRows, compareFigures, fillDays, funnelSteps, headlinePeriods, niceMax, periodTotals, reachedCounts, trendGeometry } from '../metrics/chart.js';
 import { DEFINITIONS, ageText, buildView, ceilingStatus, compareVersions, formatChange, formatNumber, parseStats, toCsv } from '../metrics/chart.js';
 import { statsResponse } from './fixtures/stats-admin-response.mjs';
@@ -158,6 +159,30 @@ import { statsResponse } from './fixtures/stats-admin-response.mjs';
   assert.deepEqual(['2.10.0', '2.9.0', '2.9.1'].sort(compareVersions), ['2.9.0', '2.9.1', '2.10.0']);
   assert.deepEqual([formatChange({ kind: 'percent', value: 0.12 }), formatChange({ kind: 'percent', value: -0.04 }), formatChange({ kind: 'points', value: 1.5 }), formatChange({ kind: 'percent', value: 0 }), formatChange(null)], ['+12%', '-4%', '+1.5 pts', '0%', '—']);
   assert.deepEqual([formatNumber(1234), formatNumber(12.34), formatNumber(0.5, 2), formatNumber(null), formatNumber(NaN)], ['1,234', '12.3', '0.50', '—', '—']);
+}
+
+// ---- Task 4.5: the dashboard markup and styles ------------------------------------------------------------------------
+{
+  const html = fs.readFileSync(new URL('../metrics/index.html', import.meta.url), 'utf8');
+  const css = fs.readFileSync(new URL('../metrics/metrics.css', import.meta.url), 'utf8');
+  const ids = ['range', 'refresh', 'csv', 'tableToggle', 'trendSeries', 'figures', 'visits', 'health', 'charts', 'trend', 'funnel', 'lengths', 'characters', 'weapons', 'devices', 'versions', 'tables', 'definitions'];
+  for (const id of ids) assert.equal([...html.matchAll(new RegExp('\\sid="' + id + '"', 'g'))].length, 1, 'id "' + id + '" exactly once');
+  assert.deepEqual([...html.matchAll(/data-range="(\w+)"/g)].map(m => m[1]), ['7', '30', '90', 'all'], 'the four range buttons');
+  assert.equal([...html.matchAll(/data-range="\w+"[^>]*aria-pressed="(true|false)"/g)].length, 4, 'every range button says if it is pressed');
+  assert.deepEqual([...html.matchAll(/data-figure="(\w+)"/g)].map(m => m[1]), ['players', 'runs', 'winRate', 'signups', 'accounts'], 'five figure cards in order');
+  const defIds = new Set(DEFINITIONS.map(d => d.id));
+  const used = [...html.matchAll(/data-def="(\w+)"/g)].map(m => m[1]);
+  assert.ok(used.length >= 7 && used.every(id => defIds.has(id)), 'every data-def is a definition id: ' + used);
+  assert.ok(html.indexOf('data-def="lowerBound"') > 0 && html.indexOf('data-def="lowerBound"') < html.indexOf('id="charts"'), 'the lower-bound note sits above the first chart');
+  assert.ok(/<a id="visits" [^>]*href="https:\/\/dash\.cloudflare\.com\/"/.test(html) && /<a id="visits" [^>]*target="_blank"[^>]*rel="noopener noreferrer"/.test(html), '#visits links to the Cloudflare dashboard');
+  assert.ok(/Open the Cloudflare dashboard \(visits report\)/.test(html));
+  assert.equal([...html.matchAll(/target=/g)].length, 1, 'no other link has a target');
+  assert.equal((css.match(/{/g) || []).length, (css.match(/}/g) || []).length, 'balanced braces');
+  assert.ok(!/url\(|@import/.test(css), 'no url() and no @import in metrics.css');
+  assert.ok(/@media \(max-width: 640px\)/.test(css), 'a phone block');
+  assert.ok(!/(^|[;{\s])(color|background|background-color|border-color|fill|stroke)\s*:[^;}]*!important/.test(css), 'no colour set with !important');
+  for (const cls of ['s-line', 's-partial', 's-area', 's-grid', 's-axis', 's-bar', 's-drop', 's-label']) assert.ok(css.includes('.' + cls), 'the SVG class ' + cls + ' is styled');
+  for (const cls of ['delta', 'up', 'down', 'flat']) assert.ok(css.includes('.' + cls), 'the change class ' + cls + ' is styled');
 }
 
 console.log('PASS stats page: period math, headline figures, chart geometry, parser, view model and safe CSV.');

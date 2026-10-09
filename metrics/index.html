@@ -37,7 +37,84 @@
   </section>
 
   <section id="stats" hidden>
+    <div class="toolbar">
+      <span class="ranges-label">DAYS:</span>
+      <div id="range" class="ranges" role="group" aria-label="Range">
+        <button type="button" class="range" data-range="7" aria-pressed="false">7</button>
+        <button type="button" class="range" data-range="30" aria-pressed="true">30</button>
+        <button type="button" class="range" data-range="90" aria-pressed="false">90</button>
+        <button type="button" class="range" data-range="all" aria-pressed="false">ALL</button>
+      </div>
+      <div class="tools">
+        <button id="refresh" type="button" class="ghost">REFRESH</button>
+        <button id="tableToggle" type="button" class="ghost" aria-pressed="false">TABLE VIEW</button>
+        <button id="csv" type="button" class="ghost">EXPORT CSV</button>
+      </div>
+    </div>
+
     <p id="status" class="status" role="status"></p>
+    <div id="health" class="health" aria-live="polite"></div>
+    <p class="foot lower-bound" data-def="lowerBound"></p>
+
+    <div id="figures" class="kpis" aria-label="Headline figures">
+      <div class="kpi" data-figure="players"><span class="kpi-label"></span><span class="kpi-value">—</span><span class="delta flat"></span></div>
+      <div class="kpi" data-figure="runs"><span class="kpi-label"></span><span class="kpi-value">—</span><span class="delta flat"></span></div>
+      <div class="kpi" data-figure="winRate"><span class="kpi-label"></span><span class="kpi-value">—</span><span class="delta flat"></span></div>
+      <div class="kpi" data-figure="signups"><span class="kpi-label"></span><span class="kpi-value">—</span><span class="delta flat"></span></div>
+      <div class="kpi" data-figure="accounts"><span class="kpi-label"></span><span class="kpi-value">—</span><span class="delta flat"></span></div>
+    </div>
+
+    <div id="charts" class="cards">
+      <section class="card wide">
+        <h2>Per day</h2>
+        <label class="series">SHOW <select id="trendSeries" aria-label="Series"><option value="players">Players per day</option><option value="runs">Finished runs per day</option><option value="signups">New accounts per day</option></select></label>
+        <div id="trend" class="chart-host"></div>
+        <p class="foot">Dashed: today, still filling. Not part of any figure above.</p>
+      </section>
+      <section class="card">
+        <h2>How far runs got</h2>
+        <div id="funnel" class="chart-host"></div>
+        <p class="foot" data-def="stage"></p>
+      </section>
+      <section class="card">
+        <h2>Run length</h2>
+        <div id="lengths" class="chart-host"></div>
+        <p class="foot" data-def="length"></p>
+      </section>
+      <section class="card">
+        <h2>Characters</h2>
+        <div id="characters" class="chart-host"></div>
+        <p class="foot" data-def="character"></p>
+      </section>
+      <section class="card">
+        <h2>Weapons</h2>
+        <div id="weapons" class="chart-host"></div>
+        <p class="foot" data-def="weapon"></p>
+      </section>
+      <section class="card">
+        <h2>Devices</h2>
+        <div id="devices" class="chart-host"></div>
+        <p class="foot" data-def="device"></p>
+      </section>
+      <section class="card">
+        <h2>Game versions</h2>
+        <div id="versions" class="chart-host"></div>
+        <p class="foot" data-def="version"></p>
+      </section>
+    </div>
+    <div id="tables" class="tables" hidden></div>
+
+    <div class="cards after">
+      <a id="visits" class="card link-card" href="https://dash.cloudflare.com/" target="_blank" rel="noopener noreferrer">
+        <h2>Visits: counted by Cloudflare, not on this page</h2>
+        <span class="go">Open the Cloudflare dashboard (visits report)</span>
+        <p class="foot" data-def="visits"></p>
+      </a>
+      <section class="card defs wide">
+        <h2>What do these numbers mean?</h2>
+        <dl id="definitions"></dl>
+      </section>
+    </div>
   </section>
 </main>
 <script type="module" src="metrics.js"></script>
