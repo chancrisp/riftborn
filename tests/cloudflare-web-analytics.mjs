@@ -383,16 +383,32 @@ console.log('PASS web analytics inspect: zone and Workers plan, the Web Analytic
 console.log('PASS web analytics apply and verify: only our sites are switched, nothing is written without --confirm, a second run is a no-op, the exact permission is named, the site token prints once and the API token never, and a failed check is unknown, not clean.');
 
 // STAGE0-WORKFLOW-PINS begin
-// The one-off workflow (.github/workflows/cloudflare-web-analytics.yml): main only, read-only, the token in one step.
+// The one-off workflow (.github/workflows/cloudflare-web-analytics.yml) is started by hand: apply writes only when the confirm
+// input says apply, and the API token reaches only the inspect and apply steps. It is removed after the one-off (Task 6.9), so
+// these pins run only while the file exists.
 {
-  const wf = fs.readFileSync(new URL('../.github/workflows/cloudflare-web-analytics.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-  const code = wf.split('\n').filter(line => !/^\s*#/.test(line)).join('\n') + '\n';
-  assert.match(code, /\non:\n  push:\n    branches: \[main\]\n    paths:\n      - '\.github\/workflows\/cloudflare-web-analytics\.yml'\n(?!\s+- )/, 'push on main, this file only');
-  assert.doesNotMatch(code, /workflow_dispatch|workflow_run|schedule|pull_request/, 'no other trigger');
-  for (const part of ['environment: cloudflare-production', "if: github.ref == 'refs/heads/main'", 'contents: read', 'actions/checkout@v7', 'actions/setup-node@v7', 'persist-credentials: false']) assert.ok(code.includes(part), 'the workflow has: ' + part);
-  assert.ok(code.includes('run: node scripts/cloudflare-web-analytics.mjs inspect\n'), 'it runs inspect');
-  assert.doesNotMatch(code, /apply|--confirm/, 'read-only: no apply or confirm');
-  for (const step of code.split('\n      - ').slice(1)) assert.equal(step.includes('secrets.CLOUDFLARE_API_TOKEN'), step.includes('cloudflare-web-analytics.mjs inspect'), 'the token reaches only the inspect step');
+  const file = new URL('../.github/workflows/cloudflare-web-analytics.yml', import.meta.url);
+  if (fs.existsSync(file)) {
+    const wf = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+    const code = wf.split('\n').filter(line => !/^\s*#/.test(line)).join('\n') + '\n';
+    assert.match(code, /\non:\n  workflow_dispatch:\n    inputs:\n/, 'started by hand from the Actions page');
+    assert.ok(/\n      command:\n/.test(code) && /\n      confirm:\n/.test(code), 'the command and confirm inputs');
+    assert.doesNotMatch(code, /schedule:|push:|pull_request|workflow_run/, 'no other trigger');
+    for (const part of ['environment: cloudflare-production', "if: github.ref == 'refs/heads/main'", 'contents: read', 'actions/checkout@v7', 'actions/setup-node@v7', 'persist-credentials: false']) assert.ok(code.includes(part), 'the workflow has: ' + part);
+    const steps = code.split('\n      - ').slice(1);
+    const withConfirm = steps.filter(step => step.includes('--confirm'));
+    assert.equal(code.split('--confirm').length - 1, 1, 'the only --confirm in the file');
+    assert.equal(withConfirm.length, 1);
+    assert.ok(withConfirm[0].includes("if: github.event_name == 'workflow_dispatch' && inputs.command == 'apply' && inputs.confirm == 'apply'"), 'apply writes only when confirm says apply');
+    for (const command of ['inspect', 'apply', 'verify']) assert.ok(steps.some(step => step.includes(`cloudflare-web-analytics.mjs ${command}`)), command + ' has a step');
+    assert.equal(code.split('secrets.').length - 1, code.split('secrets.CLOUDFLARE_API_TOKEN').length - 1, 'the only secret is the API token');
+    for (const step of steps) {
+      const hasSecret = step.includes('secrets.CLOUDFLARE_API_TOKEN');
+      assert.equal(hasSecret, /cloudflare-web-analytics\.mjs (inspect|apply)/.test(step), 'the token reaches only the inspect and apply steps');
+      if (hasSecret) assert.ok(/\n        env:\n[\s\S]*CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}[\s\S]*CLOUDFLARE_ACCOUNT_ID: \$\{\{ vars\.CLOUDFLARE_ACCOUNT_ID \}\}/.test(step), 'secrets and vars only in the step env');
+    }
+    assert.ok(wf.includes('removed after the one-off'), 'a comment says the file is removed after the one-off');
+  }
 }
-console.log('PASS web analytics workflow: push on main for this file only, production environment, read-only permissions, no apply, and the token reaches only the inspect step.');
+console.log('PASS web analytics workflow: started by hand, apply writes only with confirm, the token reaches only the inspect and apply steps, main only.');
 // STAGE0-WORKFLOW-PINS end
