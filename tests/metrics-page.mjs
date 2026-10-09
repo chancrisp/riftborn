@@ -185,4 +185,16 @@ import { statsResponse } from './fixtures/stats-admin-response.mjs';
   for (const cls of ['delta', 'up', 'down', 'flat']) assert.ok(css.includes('.' + cls), 'the change class ' + cls + ' is styled');
 }
 
+// ---- Task 4.9: the docs section ---------------------------------------------------------------------------------------
+{
+  const docs = fs.readFileSync(new URL('../docs/GITHUB-CLOUDFLARE-DEPLOYMENT.md', import.meta.url), 'utf8');
+  const heading = '## The stats dashboard: feedback.riftborn.us/metrics/';
+  const at = docs.indexOf(heading);
+  assert.ok(at >= 0, 'the stats dashboard section exists');
+  const rest = docs.slice(at + heading.length);
+  const section = rest.slice(0, rest.search(/\n## /) >= 0 ? rest.search(/\n## /) : undefined);
+  for (const item of DEFINITIONS) assert.ok(section.toLowerCase().includes(item.title.toLowerCase()), 'the docs name "' + item.title + '"');
+  assert.ok(!/European Union|\bEU\b|\bUK\b/.test(section), 'no country rule in the dashboard docs');
+}
+
 console.log('PASS stats page: period math, headline figures, chart geometry, parser, view model and safe CSV.');
