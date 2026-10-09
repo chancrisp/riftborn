@@ -3,7 +3,7 @@
 // turns it into one-dimensional daily counters (server/stats-counters.js). It holds the strict validation of a
 // report, the counter rows it makes and the POST route (the admin read is added below it).
 import { HOSTS } from '../site.hosts.mjs';
-import { json } from './admin-auth.js';
+import { adminOnlyOrigin, authorize, json, limitAdmin } from './admin-auth.js';
 import { ipLimitKey } from './accounts-api.js';
 import { STATS_DAILY_WRITE_CEILING, WRITES_METRIC, ensureStatsTable, reportStatements, utcDay } from './stats-counters.js';
 export { COUNTER_METRICS as STATS_METRICS } from './stats-counters.js';
@@ -86,6 +86,7 @@ export async function readBodyCapped(request, max) {
  */
 export async function handleStats(request, env, ctx) {
   const url = new URL(request.url);
+  if (url.pathname === '/api/admin/stats') return handleAdminStats(request, env, url);
   if (url.pathname !== '/api/stats') return null;
   const origin = request.headers.get('Origin');
   if (origin !== STATS_ORIGIN) return json({ error: 'forbidden_origin' }, 403);
@@ -166,4 +167,33 @@ export async function readStats(db, range, now) {
     if (!/no such table/i.test(String(error?.message))) throw error;
   }
   return { range: String(range), days, breakdowns, accountsTotal, lastReceived: last.results[0]?.day ?? null, ceiling: { day: today, used: writes.results[0]?.n ?? 0, limit: STATS_DAILY_WRITE_CEILING } };
+}
+
+/**
+ * GET /api/admin/stats?range=7|30|90|all (default 30): the read model behind the inbox's admin key. Only the inbox
+ * origins (FEEDBACK_ADMIN_ORIGINS) or no Origin at all may ask; the game's origins are refused. Order: origin,
+ * preflight, cross-site check, method, the admin rate limit (before the key, so right and wrong keys cost the same),
+ * the key, the range, then the read.
+ */
+async function handleAdminStats(request, env, url) {
+  const origin = request.headers.get('Origin') || '';
+  if (origin && !adminOnlyOrigin(origin, env)) return json({ error: 'Forbidden origin' }, 403);
+  const answer = (value, status, extra) => json(value, status, origin || null, extra);
+  if (request.method === 'OPTIONS') {
+    if (!origin) return json({ error: 'Origin required' }, 400);
+    return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization', 'Access-Control-Max-Age': '86400', Vary: 'Origin' } });
+  }
+  if (!origin && request.headers.get('Sec-Fetch-Site') === 'cross-site') return json({ error: 'Forbidden origin' }, 403);
+  if (request.method !== 'GET') return answer({ error: 'method_not_allowed' }, 405, { Allow: 'GET, OPTIONS' });
+  const refused = (await limitAdmin(request, env, origin || null)) || (await authorize(request, env, origin || null));
+  if (refused) return refused;
+  const range = url.searchParams.has('range') ? url.searchParams.get('range') : '30';
+  if (!STATS_RANGES.includes(range)) return answer({ error: 'Invalid range' }, 400);
+  try {
+    await ensureStatsTable(env.DB);
+    return answer(await readStats(env.DB, range, Date.now()), 200);
+  } catch (error) {
+    console.error('Stats read failed', error?.message || 'unknown error');
+    return answer({ error: 'unavailable' }, 503);
+  }
 }

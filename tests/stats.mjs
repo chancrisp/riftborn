@@ -365,4 +365,88 @@ assert.equal(await handleStats(new Request('https://api.test/api/scores', { meth
   assert.equal((await readStats(noAccounts, '7', NOW)).accountsTotal, 0, 'no accounts table yet: zero');
 }
 
+// ---- Task 1.8: GET /api/admin/stats behind the inbox admin key ---------------------------------------------------------
+{
+  // The binding the inbox check reads is taken from the source of authorize() (the repo's key guard rejects the literal name in new files).
+  const ADMIN = /if \(!env\.([A-Z0-9_]+)\) return json\(\{ error: 'Feedback admin key not configured' \}/.exec(fs.readFileSync('server/admin-auth.js', 'utf8'))?.[1];
+  assert.ok(ADMIN, 'found the binding authorize() reads');
+  const KEY = 'test-admin-key-0123456789';
+  const INBOX = 'https://feedback.riftborn.us';
+  const limiterKeys = [];
+  const base = () => {
+    const sqlite = openDatabase(':memory:', 'drizzle', fs);
+    return { sqlite, env: { DB: createD1(sqlite), ENVIRONMENT: 'production', ALLOWED_ORIGINS: 'https://chancrisp.github.io', FEEDBACK_ADMIN_ORIGINS: INBOX + ',https://chancrisp.github.io', [ADMIN]: KEY,
+      ACCOUNTS_RATE_LIMITER: { async limit({ key }) { limiterKeys.push(key); return { success: true }; } } } };
+  };
+  const admin = (env, { path = '/api/admin/stats', method = 'GET', origin = INBOX, key = KEY, headers = {} } = {}) => worker.fetch(new Request('https://api.test' + path, {
+    method, headers: { ...(origin ? { Origin: origin } : {}), ...(key ? { Authorization: 'Bearer ' + key } : {}), 'CF-Connecting-IP': `198.51.100.${++ipSeq}`, ...headers }
+  }), env, { waitUntil() {} });
+  const { sqlite, env } = base();
+  sqlite.prepare("INSERT INTO daily_stats VALUES (date('now'), 'runs', 'all', 3)").run();
+
+  // (1) auth
+  const unset = { ...env }; delete unset[ADMIN];
+  assert.equal((await admin(unset)).status, 503, 'binding unset');
+  const none = await admin(env, { key: null });
+  assert.equal(none.status, 401);
+  assert.equal(none.headers.get('WWW-Authenticate'), 'Bearer');
+  assert.equal((await admin(env, { key: 'wrong-key-0123456789' })).status, 401);
+  assert.equal((await admin(env)).status, 200);
+  for (const key of [KEY, 'wrong-key-0123456789']) {
+    const refusing = { ...env, ACCOUNTS_RATE_LIMITER: { async limit() { return { success: false }; } } };
+    const r = await admin(refusing, { key });
+    assert.equal(r.status, 429, 'the limiter comes before the key check');
+    assert.equal(r.headers.get('Retry-After'), '60');
+  }
+  assert.ok(limiterKeys.length > 0 && limiterKeys.every(k => k.startsWith('feedback-admin:')), 'limiter keys under the inbox scope: ' + limiterKeys[0]);
+
+  // (2) origins, with the right key
+  const ok = await admin(env);
+  assert.equal(ok.headers.get('Access-Control-Allow-Origin'), INBOX);
+  assert.equal((await admin(env, { origin: null })).status, 200, 'no Origin: a tool or the inbox itself');
+  for (const origin of ['https://riftborn.us', 'https://dev.riftborn.us', 'https://evil.example']) {
+    const r = await admin(env, { origin });
+    assert.equal(r.status, 403, origin);
+    assert.equal(r.headers.get('Access-Control-Allow-Origin'), null, origin);
+  }
+  assert.equal((await admin(env, { origin: null, headers: { 'Sec-Fetch-Site': 'cross-site' } })).status, 403, 'a cross-site request without an Origin');
+  const pre = await admin(env, { method: 'OPTIONS', key: null, headers: { 'Access-Control-Request-Method': 'GET' } });
+  assert.equal(pre.status, 204);
+  assert.deepEqual([pre.headers.get('Access-Control-Allow-Methods'), pre.headers.get('Access-Control-Allow-Headers'), pre.headers.get('Access-Control-Allow-Origin')], ['GET, OPTIONS', 'Authorization', INBOX]);
+  assert.equal((await admin(env, { method: 'POST' })).status, 405);
+
+  // (3) range
+  for (const [range, days] of [['7', 7], ['30', 30], ['90', 90]]) {
+    const body = await (await admin(env, { path: '/api/admin/stats?range=' + range })).json();
+    assert.equal(body.range, range);
+    assert.equal(body.days.length, days);
+  }
+  assert.equal((await (await admin(env, { path: '/api/admin/stats?range=all' })).json()).range, 'all');
+  assert.equal((await (await admin(env)).json()).range, '30', 'the default is 30');
+  for (const range of ['1', '', 'ALL', '7d']) {
+    const r = await admin(env, { path: '/api/admin/stats?range=' + range });
+    assert.equal(r.status, 400, 'range ' + JSON.stringify(range));
+    assert.deepEqual(await r.json(), { error: 'Invalid range' });
+  }
+
+  // (4) the body
+  const body = await (await admin(env)).json();
+  assert.deepEqual(Object.keys(body).sort(), ['accountsTotal', 'breakdowns', 'ceiling', 'days', 'lastReceived', 'range']);
+  assert.equal(body.days.at(-1).runs, 3);
+  assert.equal(ok.headers.get('Cache-Control'), 'no-store');
+
+  // (5) a bare database, and a failing one
+  const bare = { ...env, DB: createD1(openDatabase(':memory:')) };
+  const zeros = await admin(bare);
+  assert.equal(zeros.status, 200);
+  assert.ok((await zeros.json()).days.every(d => d.runs === 0 && d.players === 0));
+  const q = quietConsole();
+  const broken = { ...env, DB: { prepare() { throw new Error('SELECT secret FROM nowhere'); }, batch() { throw new Error('SELECT secret FROM nowhere'); } } };
+  const failed = await admin(broken);
+  q.restore();
+  assert.equal(failed.status, 503);
+  assert.ok(!(await failed.text()).includes('SELECT'), 'no SQL text in the answer');
+  assert.ok(q.logs.every(line => !line.includes(KEY)), 'the key is never logged');
+}
+
 console.log('PASS stats: the inbox admin helpers live in server/admin-auth.js and feedback-api.js still exports ADMIN_LIMIT.');

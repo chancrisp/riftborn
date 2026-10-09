@@ -155,6 +155,7 @@ assert.ok(JSON.parse(await uploadRequest.body.get('metadata').text()).bindings.s
 
 assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\/account/, 'The bundled Worker serves the accounts routes');
 assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\/stats/, 'The bundled Worker serves the stats route');
+assert.match(await uploadRequest.body.get('riftborn-worker.mjs').text(), /\/api\/admin\/stats/, 'The bundled Worker serves the admin stats route');
 
 // Riftborn accounts (v2.2): OAuth credentials and the signing key are secrets, bound only when set.
 assert.ok(!metadata.bindings.some(binding => binding.name === 'FAKE_OAUTH'), 'The fake provider is never enabled on the deployed Worker');
