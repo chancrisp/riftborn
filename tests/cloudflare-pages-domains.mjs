@@ -213,3 +213,7 @@ console.log('PASS connect: a first run adds the Pages custom domain, then a prox
   assert.equal(one.domain, 'added');
 }
 console.log('PASS refusals: a record that is not ours is never changed; each missing token permission is named exactly (Pages Edit, Zone Read, DNS Edit); a project not deployed yet, a broken domain and no answer are clear failures; pending passes.');
+
+// The read-only Web Analytics state check has its own file, run with these tests (npm test runs this
+// file; package.json is left alone because cloudflare-worker.yml redeploys the Worker on any change to it).
+await import('./cloudflare-web-analytics.mjs');
