@@ -100,6 +100,9 @@ export const FEEDBACK_DOMAIN_GRACE_UNTIL = '2026-10-15';
 export const INBOX_KEY_STORE = 'riftborn-feedback-admin-key';
 /** Features the inbox's Permissions-Policy must switch off (a sample of scripts/pages-headers.mjs INBOX_PERMISSIONS_POLICY). */
 export const INBOX_DENIED_FEATURES = Object.freeze(['camera', 'microphone', 'geolocation', 'clipboard-read', 'payment', 'usb']);
+/** The owner-only stats page beside the inbox (metrics/ in the repo), and the files it needs. */
+export const METRICS_PATH = '/metrics/';
+export const METRICS_FILES = Object.freeze(['metrics/metrics.js', 'metrics/chart.js', 'metrics/metrics.css']);
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const MAX_ANNOTATIONS = 8; // GitHub shows 10 error annotations per step; the rest go to the log
 /** Every HTTP GET: this many tries, waiting RETRY_BACKOFF_MS, then twice that, between them. */
@@ -539,6 +542,29 @@ export async function checkInbox(feedback, { getImpl = get, api = HOSTS.api, now
 }
 
 /**
+ * The stats page over plain HTTP, served from the inbox's own origin under the same strict headers: the page with its key form,
+ * its headers (inboxHeaderProblems, unchanged) and its three files. Only called once the inbox answered. -> { checks }
+ */
+export async function checkMetrics(feedback, { getImpl = get, api = HOSTS.api } = {}) {
+  const site = new URL(feedback).host;
+  const page = await getImpl(`${feedback}${METRICS_PATH}`);
+  if (page.status !== 200) return { checks: [{ site, name: 'stats page', ok: false, detail: statusText(page) }] };
+  const form = ['id="loginForm"', 'id="keyInput"', 'src="metrics.js"'].every(marker => page.text.includes(marker));
+  const checks = [{ site, name: 'stats page', ok: form, detail: form ? 'HTTP 200 with the key form and metrics.js' : 'HTTP 200 but no key form (loginForm, keyInput) or no metrics.js: not the stats page' }];
+  const headers = inboxHeaderProblems(page.headers || {}, api);
+  checks.push({ site, name: 'stats headers', ok: !headers.length, detail: headers.length ? headers.join('; ') : `CSP connects to ${api} only, noindex, no referrer, no-cache, nosniff, Permissions-Policy` });
+  const failures = [];
+  for (const file of METRICS_FILES) {
+    const result = await getImpl(`${feedback}/${file}`);
+    if (result.status !== 200) failures.push(`/${file} ${statusText(result)}`);
+    else if (servedAsPage(`${feedback}/${file}`, result.type)) failures.push(`/${file} answers with an HTML page, not the file`);
+    else if (file === 'metrics/metrics.js' && !result.text.includes(`const API = '${api}'`)) failures.push(`/${file} does not use ${api}`);
+  }
+  checks.push({ site, name: 'stats files', ok: !failures.length, detail: failures.length ? failures.join('; ') : `metrics.js (API ${api}), chart.js and metrics.css answer 200` });
+  return { checks };
+}
+
+/**
  * The checkout this run compares with, as GitHub knows it: { repo, token, sha } inside GitHub Actions
  * (GITHUB_REPOSITORY, GITHUB_TOKEN, the checked-out commit), else null (no superseded detection).
  */
@@ -804,6 +830,48 @@ async function browseInbox(browser, feedback, { api = HOSTS.api } = {}) {
   }
 }
 
+/**
+ * The stats page in the browser, as a fresh visit: it stays locked (the key form shows, the stats are hidden, no key in this tab),
+ * nothing errors, and it sends nothing: no request to the Worker, no Authorization header, no request to any origin but its own.
+ * The key field is never filled. -> checks
+ */
+async function browseMetrics(browser, feedback, { api = HOSTS.api } = {}) {
+  const site = new URL(feedback).host;
+  const pageOrigin = new URL(feedback).origin;
+  const { page, context, events } = await openPage(browser, `${feedback}/metrics/`, { storage: {}, session: {} });
+  try {
+    const response = await page.goto(`${feedback}/metrics/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    if (!response || response.status() !== 200) return [{ site, name: 'stats key form shows', ok: false, detail: `HTTP ${response?.status() ?? 'no response'}` }];
+    await page.waitForSelector('#keyInput', { state: 'visible', timeout: 20000 });
+    await page.waitForTimeout(1500);
+    const state = await page.evaluate(store => {
+      let key = null;
+      try { key = sessionStorage.getItem(store); } catch {}
+      return { locked: document.getElementById('stats')?.hidden === true && document.getElementById('login')?.hidden === false, key: Boolean(key) };
+    }, INBOX_KEY_STORE);
+    const checks = [{ site, name: 'stats key form shows', ok: state.locked && !state.key, detail: state.locked && !state.key ? 'locked: the key form shows, the stats are hidden, no key in this tab' : 'a fresh visit is not locked' }];
+    const [errors, knownErrors] = splitTolerated(events.errors);
+    const [bad, knownBad] = splitTolerated(events.bad);
+    checks.push({
+      site, name: 'stats zero console errors', ok: !errors.length && !bad.length, warning: toleratedNote([...knownErrors, ...knownBad]),
+      detail: errors.length || bad.length ? `${errors.length + bad.length}: ${[...errors, ...bad].slice(0, 3).join(' | ')}` : 'none, every request answered'
+    });
+    const apiOrigin = new URL(api).origin;
+    const sent = events.requests.filter(request => request.authorization || new URL(request.url).origin === apiOrigin).map(request => `${request.method} ${request.url}`);
+    checks.push({
+      site, name: 'stats never sends a key', ok: !sent.length && !events.blocked.length,
+      detail: sent.length || events.blocked.length ? `the locked page sent ${[...sent, ...events.blocked].slice(0, 3).join(' | ')}` : `nothing to ${new URL(api).host}, no Authorization header, no writes`
+    });
+    const elsewhere = events.requests.filter(request => new URL(request.url).origin !== pageOrigin && !request.url.startsWith('data:')).map(request => request.url);
+    checks.push({ site, name: 'stats stays on its own origin', ok: !elsewhere.length, detail: elsewhere.length ? `requests to other origins: ${elsewhere.slice(0, 3).join(' | ')}` : `every request went to ${site}` });
+    return checks;
+  } catch (error) {
+    return [{ site, name: 'stats key form shows', ok: false, detail: scrub(error.message.split('\n')[0], 300) }];
+  } finally {
+    await context.close();
+  }
+}
+
 /** Every check, in order. -> { checks, expected, superseded } (superseded: supersededReason(), or '') */
 export async function runChecks({ live = HOSTS.live, dev = HOSTS.dev, feedback = HOSTS.feedback, base = root, outDir, log = () => {}, github = githubContext(base) } = {}) {
   const expected = expectedVersions(base);
@@ -832,6 +900,7 @@ export async function runChecks({ live = HOSTS.live, dev = HOSTS.dev, feedback =
   checks.push(await checkFeedbackRedirects(live));
   const inbox = await checkInbox(feedback);
   checks.push(...inbox.checks);
+  if (inbox.attached && inbox.checks[0].ok) checks.push(...(await checkMetrics(feedback)).checks);
   log(inbox.attached ? `${feedback}/ answers.` : `${feedback}/ is not attached yet: ${inbox.checks[0].ok ? 'a warning' : 'a failure'}; the browser skips it.`);
   log(`HTTP checks done (${checks.filter(c => c.ok).length}/${checks.length} passed); starting the browser.`);
   let browser;
@@ -858,6 +927,7 @@ export async function runChecks({ live = HOSTS.live, dev = HOSTS.dev, feedback =
       checks.push(...first.checks);
       checks.push(...(await browseDevGate(browser, dev)));
       if (inbox.attached && inbox.checks[0].ok) checks.push(...(await browseInbox(browser, feedback)));
+      if (inbox.attached && inbox.checks[0].ok) checks.push(...(await browseMetrics(browser, feedback)));
     } finally {
       await browser.close();
     }
@@ -892,6 +962,7 @@ export function dryRun(base = root) {
   lines.push(missing.length ? `MISSING from live/: ${missing.join(', ')}` : 'every file the committed page links is in live/');
   lines.push('always: version.json match, the page boots with zero console errors, the menu shows the title and START RUN, SETTINGS opens and closes');
   lines.push(`feedback: ${FEEDBACK_REDIRECTS.map(p => HOSTS.live + p).join(', ')} redirect to ${HOSTS.feedback}/; ${HOSTS.feedback}/ answers 200 with the key form (never filled), CSP connect-src ${HOSTS.api} only, noindex, no referrer, no-cache, nosniff, Permissions-Policy; locked with zero console errors and no request to the API; not attached yet = a warning until ${FEEDBACK_DOMAIN_GRACE_UNTIL}`);
+  lines.push(`stats: ${HOSTS.feedback}/metrics/ answers 200 with the key form (never filled) under the same strict headers, its three files answer; locked, no request to the API or any other origin, zero console errors`);
   return { lines, ok: Boolean(expected.live) && !missing.length };
 }
 
