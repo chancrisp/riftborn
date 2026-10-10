@@ -233,4 +233,24 @@ Full notes in {#patch-notes} · Play now: https://riftborn.us`,
 
 Full notes in-game: **PATCH NOTES** on the main menu.`,
   },
+  // 2.5.2, owner-approved 2026-10-10 (texts approved, "ping both", "go live"):
+  // News pings on the announcement, Patch pings on the patch notes.
+  {
+    version: '2.5.2',
+    ping: { announcement: true, patchNotes: true },
+    announcement: `**Riftborn 2.5.2 · Play Stats is live!**
+- Riftborn now counts **finished runs anonymously**: game version, device type, character, weapon, stage and result. No names, no IDs
+- Cloudflare's **visit counter** now loads on riftborn.us
+- One new switch, **Share play stats**, turns both off (Settings › Accessibility › Privacy)
+- A short note explains it the first time you open the menu
+
+Full notes in {#patch-notes} · What is counted: https://riftborn.us/privacy/ · Play now: https://riftborn.us`,
+    patchNotes: `**v2.5.2 · Play Stats** (10 Oct 2026)
+- **Play stats:** finished runs on riftborn.us are counted anonymously: game version, device type, character, weapon, stage reached, win or death and a run-length range, and nothing else. No names, no IDs, no IP addresses. Practice runs, the Tutorial, the demo and the test build count nothing.
+- **Share play stats:** a new PRIVACY group at the end of the Accessibility tab has one switch, Share play stats. Off stops the counts and Cloudflare's visit counter (from the next page load) and clears anything waiting to be sent. It stays on this device, RESET ALL leaves it alone, and a browser that sends Global Privacy Control starts with it off and locked.
+- **First-run note:** the first time you open the main menu a short toast shows once with what is counted and where the switch is. Nothing is counted before you have seen it.
+- **Privacy policy:** the privacy page now lists exactly what is counted, what is not, and how the switch works.
+
+Full notes in-game: **PATCH NOTES** on the main menu.`,
+  },
 ];
