@@ -160,7 +160,15 @@ function renderHealth(v) {
   const last = node('p', 'line');
   last.append('Last report received: ');
   last.append(node('b', v.health.stale ? 'bad' : '', v.health.last));
-  const lines = [last];
+  // Today is in no headline figure (a partial UTC day would drag every average down), so it gets its own line:
+  // a run counted a minute ago shows here straight away.
+  const today = v.trend.todayRow;
+  const plural = (n, one) => `${formatNumber(n)} ${one}${n === 1 ? '' : 's'}`;
+  const sofar = node('p', 'line');
+  sofar.append('Today so far: ');
+  sofar.append(node('b', '', `${plural(today.players, 'player')}, ${plural(today.runs, 'run')}`));
+  sofar.append(' (still filling, not in the figures below)');
+  const lines = [sofar, last];
   const { used, limit, state } = v.health.ceiling;
   const budget = node('p', 'line');
   budget.append("Today's counting: ");

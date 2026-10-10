@@ -177,6 +177,8 @@ import { statsResponse } from './fixtures/stats-admin-response.mjs';
   assert.ok(/<a id="visits" [^>]*href="https:\/\/dash\.cloudflare\.com\/"/.test(html) && /<a id="visits" [^>]*target="_blank"[^>]*rel="noopener noreferrer"/.test(html), '#visits links to the Cloudflare dashboard');
   assert.ok(/Open the Cloudflare dashboard \(visits report\)/.test(html));
   assert.equal([...html.matchAll(/target=/g)].length, 1, 'no other link has a target');
+  const page = fs.readFileSync(new URL('../metrics/metrics.js', import.meta.url), 'utf8');
+  assert.ok(page.includes("'Today so far: '") && page.includes('v.trend.todayRow'), 'the health block has a Today so far line built from the row of today itself');
   assert.equal((css.match(/{/g) || []).length, (css.match(/}/g) || []).length, 'balanced braces');
   assert.ok(!/url\(|@import/.test(css), 'no url() and no @import in metrics.css');
   assert.ok(/@media \(max-width: 640px\)/.test(css), 'a phone block');
