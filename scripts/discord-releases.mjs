@@ -253,4 +253,26 @@ Full notes in {#patch-notes} · What is counted: https://riftborn.us/privacy/ ·
 
 Full notes in-game: **PATCH NOTES** on the main menu.`,
   },
+  // 2.5.3, owner-approved 2026-10-10 (texts approved, "ping both", "ship it"):
+  // News pings on the announcement, Patch pings on the patch notes.
+  {
+    version: '2.5.3',
+    ping: { announcement: true, patchNotes: true },
+    announcement: `**Riftborn 2.5.3 · Small Fixes is live!**
+- **Settings search** lists its results in one column
+- The **presets bar** lines up on wide screens
+- The results card shows your **leaderboard place** beside the score, and a labelled **DEATH MODE** button
+- The **Shattered Quarry** and **Aurora Citadel** fall back to their classic map far less often
+
+Full notes in {#patch-notes} · Play now: https://riftborn.us`,
+    patchNotes: `**v2.5.3 · Small Fixes** (10 Oct 2026)
+- **Settings search:** results now stack in one full-width column, in tab order, so a single match is no longer left in one half of the page.
+- **Graphics presets:** the PRESETS bar now lines up in two rows on wide screens, the label and the preset chips on top and the actions and note below, however many presets you have saved.
+- **Rank medal:** the results card now shows your leaderboard place, such as #3 OF 41, as a medal in the SCORE tile once the run's score is saved and the board is read. A run that does not place on the board shows no medal.
+- **Death Mode button:** on the results card the DEATH MODE skull no longer drifts over the card. It sits in the outcome band as a labelled button that still turns the mode off.
+- **Aurora Citadel ramps:** a route that brushed a ramp part-way up could leave a steep step in it on some layouts. Those ramps are no longer built that way.
+- **Layout fallback:** the Shattered Quarry and Aurora Citadel use their classic map much less often. A layout that cannot be built with its first theme now gets a fresh theme before the classic map is used.
+
+Full notes in-game: **PATCH NOTES** on the main menu.`,
+  },
 ];
