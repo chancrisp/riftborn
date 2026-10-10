@@ -31,8 +31,8 @@
 // live/version.json on main), the result is "superseded" and the run passes without an alert: the
 // newer deploy's own check covers riftborn.us (GitHub API, read only; only inside GitHub Actions).
 // Never a scored run, never a sound: START RUN is only read, never clicked; before the page loads,
-// audio is muted (riftborn-reborn-preferences-v1 {muted:true,master:0}, plus Chrome's --mute-audio)
-// and the welcome popup counts as answered; every request from the page other than GET, HEAD or
+// audio is muted (riftborn-reborn-preferences-v1 {muted:true,master:0}, plus Chrome's --mute-audio),
+// the stats switch is off (shareStats:false, the notice counted as seen) and the welcome popup counts as answered; every request from the page other than GET, HEAD or
 // OPTIONS is blocked and reported (a menu that only loads has nothing to send). Results go to GitHub
 // annotations and the job summary; any problem exits 1 (and the workflow's alert job pings the
 // feedback Discord channel). Reads only; nothing is written anywhere.
@@ -63,23 +63,18 @@ export const PLAYWRIGHT_DIR = 'tools/post-deploy-check';
 
 /** Set in the page's localStorage before any of its scripts run: silent, and no first-visit popup. */
 export const PRELOAD_STORAGE = Object.freeze({
-  'riftborn-reborn-preferences-v1': JSON.stringify({ muted: true, master: 0 }),
-  'riftborn-reborn-welcome-v1': '1'
+  'riftborn-reborn-preferences-v1': JSON.stringify({ muted: true, master: 0, shareStats: false }),
+  'riftborn-reborn-welcome-v1': '1',
+  'riftborn-reborn-stats-notice-v1': 'true' // the stats notice counts as seen (statsNotice in riftborn/src/core/storage.js)
 });
 /** And in its sessionStorage: this visit's patch notes count as shown (they would open over the menu). */
 export const PRELOAD_SESSION = Object.freeze({ 'riftborn-reborn-whats-new-visit-v1': '1' });
 /**
  * Console errors and failed requests that come from outside the build, reported as warnings rather
- * than failures. Keep this list short and remove an entry as soon as its cause is fixed.
+ * than failures. Empty since Cloudflare's automatic Web Analytics injection was switched off (the game loads its own
+ * counter, so a beacon error is now real). Keep this list short and remove an entry as soon as its cause is fixed.
  */
-export const TOLERATED = Object.freeze([
-  {
-    pattern: /static\.cloudflareinsights\.com\/beacon\.min\.js/,
-    reason: 'Cloudflare Web Analytics injects its beacon into every HTML page and the site CSP blocks it ' +
-      '(players get the same console error; the CSP stays as it is): turn off the automatic Web ' +
-      'Analytics setup on both Pages projects, then delete this entry'
-  }
-]);
+export const TOLERATED = Object.freeze([]);
 /** The link-preview tags checked (Discord, iMessage, X and the rest), each only when the committed page has it. */
 export const SOCIAL_TAGS = Object.freeze(['og:type', 'og:url', 'og:title', 'og:description', 'og:image', 'twitter:card', 'twitter:image']);
 /** The live site's other pages, checked for 200 next to the files index.html links. */
@@ -281,6 +276,20 @@ export const servedAsPage = (url, contentType) => !/(\/|\.html?)$/i.test(new URL
 
 /** True for requests the check never lets the page send (anything that could write). */
 export const isWriteRequest = method => !READ_METHODS.has(String(method).toUpperCase());
+/**
+ * Requests that belong to Cloudflare's visit counter: any request to cloudflareinsights.com or a subdomain, or to a path under
+ * /cdn-cgi/rum on any host. The page starts with the stats switch off, so none may happen. -> 'METHOD url' strings
+ */
+export function visitCounterRequests(requests) {
+  const found = [];
+  for (const request of requests) {
+    let url;
+    try { url = new URL(request.url); } catch { continue; }
+    const host = url.hostname.toLowerCase();
+    if (host === 'cloudflareinsights.com' || host.endsWith('.cloudflareinsights.com') || url.pathname.startsWith('/cdn-cgi/rum')) found.push(`${request.method} ${request.url}`);
+  }
+  return found;
+}
 
 /**
  * Why a get() answer looks like a custom domain that is not attached to its Pages project (yet), or
@@ -758,6 +767,11 @@ async function browseLive(browser, live, outDir) {
     checks.push({
       site, name: 'nothing sent', ok: !events.blocked.length,
       detail: events.blocked.length ? `the menu tried to send ${events.blocked.slice(0, 3).join(' | ')} (blocked)` : 'no POST/PUT/DELETE from the page'
+    });
+    const counter = visitCounterRequests(events.requests);
+    checks.push({
+      site, name: 'visit counter stays off', ok: !counter.length,
+      detail: counter.length ? `the page asked for ${counter.slice(0, 3).join(' | ')} with the stats switch off` : 'no request to Cloudflare\'s visit counter'
     });
   } finally {
     if (checks.some(check => !check.ok) && outDir) {

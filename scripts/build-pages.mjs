@@ -27,7 +27,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { HOSTS, MIGRATION, ciLaunchRefusals, resolveSiteConfig } from '../site.config.mjs';
-import { buildHeaders, buildInboxHeaders, inlineScripts } from './pages-headers.mjs';
+import { WEB_ANALYTICS_HOSTS, buildHeaders, buildInboxHeaders, inlineScripts } from './pages-headers.mjs';
 import { SOCIAL_CARD, classicImportScript, classicLoaderScript, handoffPage, notFoundPage, prelaunchPage, redirectPage } from './pages-templates.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
@@ -292,7 +292,8 @@ if (config.launched) {
 
 // ---- security headers, from the final HTML ------------------------------------------------------------
 const connect = [config.api, config.workersDev];
-const outputs = [[cfLive, { connect }], ...(hasDev ? [[cfDev, { connect, noindex: true }]] : [])];
+// The visit counter's hosts are allowed on the launched riftborn.us only (the game loads the beacon there); dev, previews and the inbox never.
+const outputs = [[cfLive, { connect, ...(config.launched ? WEB_ANALYTICS_HOSTS : {}) }], ...(hasDev ? [[cfDev, { connect, noindex: true }]] : [])];
 const summary = [];
 for (const [dir, options] of outputs) {
   const { text, hashes, htmlFiles } = buildHeaders(dir, options);

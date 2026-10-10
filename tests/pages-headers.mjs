@@ -192,7 +192,19 @@ const post = build('post', { RIFTBORN_FORCE_LAUNCHED: '1' });
   assert.deepEqual(auditOutput(live), []);
   const csp = cspOf(live);
   assert.match(csp, /(^|; )default-src 'self'(;|$)/);
-  assert.match(csp, /connect-src 'self' https:\/\/api\.riftborn\.us https:\/\/riftborn-leaderboard\.chanmanc10\.workers\.dev(;|$)/);
+  assert.match(csp, /connect-src 'self' https:\/\/api\.riftborn\.us https:\/\/riftborn-leaderboard\.chanmanc10\.workers\.dev https:\/\/cloudflareinsights\.com(;|$)/);
+  assert.match(csp, /(^|; )script-src [^;]*'self'[^;]* https:\/\/static\.cloudflareinsights\.com(;|$)/, 'the visit counter script host, live only');
+  // Only the launched live output allows the visit counter: dev, the inbox and the pre-launch live output do not, and each has one CSP rule.
+  for (const [name, dir] of [['pre-launch live', path.join(pre, '_cf', 'live')], ['dev', path.join(post, '_cf', 'dev')], ['inbox', path.join(post, '_cf', 'feedback')]]) {
+    if (!fs.existsSync(dir)) continue;
+    assert.ok(!cspOf(dir).includes('cloudflareinsights'), name + ' does not allow the visit counter');
+  }
+  for (const dir of [live, path.join(post, '_cf', 'dev'), path.join(post, '_cf', 'feedback')]) {
+    if (!fs.existsSync(dir)) continue;
+    const text = fs.readFileSync(path.join(dir, '_headers'), 'utf8');
+    assert.equal((text.match(/^\s+Content-Security-Policy:/gim) || []).length, 1, 'exactly one CSP rule in ' + dir);
+    assert.ok(Math.max(...text.split('\n').map(line => line.length)) <= CF_MAX_LINE, 'no line over CF_MAX_LINE in ' + dir);
+  }
   for (const part of ["object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'", "img-src 'self' data: blob:", "font-src 'self'", "worker-src 'self' blob:"]) assert.ok(csp.includes(part), part);
   // The classic edition's import map and edits are inline scripts too: all hashed.
   const classic = fs.readFileSync(path.join(live, 'classic', 'index.html'), 'utf8');

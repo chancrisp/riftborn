@@ -58,3 +58,27 @@ export function reportStatements(db, day, rows, ceiling = STATS_DAILY_WRITE_CEIL
     .bind(day, rows.length, day, ceiling));
   return statements;
 }
+
+const SIGNUP_SQL = "INSERT INTO daily_stats (day, metric, dim, n) VALUES (?, 'signups', 'all', 1) ON CONFLICT (day, metric, dim) DO UPDATE SET n = n + 1";
+
+/**
+ * Runs the account-creation statements and counts the sign-up in the SAME batch (one transaction, so a refused or raced
+ * sign-up counts nothing). Sign-up never depends on the stats table: when the table or its statement cannot be prepared, or
+ * the batch fails with an error naming daily_stats, the statements run alone. Any other error is rethrown unchanged.
+ * Go-live: nothing counts a sign-up before the privacy page says so, so this exists only from that commit on.
+ */
+export async function signupBatch(db, statements, now) {
+  let counter;
+  try {
+    await ensureStatsTable(db);
+    counter = db.prepare(SIGNUP_SQL).bind(utcDay(now));
+  } catch {
+    return db.batch(statements);
+  }
+  try {
+    return await db.batch([...statements, counter]);
+  } catch (error) {
+    if (/daily_stats/.test(String(error?.message ?? error))) return db.batch(statements);
+    throw error;
+  }
+}

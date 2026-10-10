@@ -192,3 +192,32 @@ console.log('PASS inbox: meta CSP (no inline code, inline scripts hashed, https 
   }
 }
 console.log('PASS privacy page: Discord disclosure, leaderboard fields, stored dates, sign-in check value and hashed limiter keys match the code.');
+// ---- the privacy page matches the stats code (player metrics) ----
+// The approved page.pins of docs/plans/metrics/privacy-text.md (2026-10-09), plus the one name the page must use for the counter.
+const PAGE_PINS = ['Share play stats', 'Settings &gt; Accessibility &gt; Privacy', 'Global Privacy Control', 'Cloudflare Web Analytics', 'finishes that page view', 'no time limit', 'send nothing', 'every country'];
+{
+  const html = fs.readFileSync('privacy/index.html', 'utf8');
+  const page = html.replace(/\s+/g, ' ');
+  const { STATS_METRICS } = await import('../server/stats-api.js');
+  const counters = fs.readFileSync('server/stats-counters.js', 'utf8');
+  const code = fs.readFileSync('server/stats-api.js', 'utf8') + counters;
+  assert.deepEqual([...STATS_METRICS], ['players', 'runs', 'wins', 'stage_reached', 'character', 'weapon', 'device', 'version', 'length', 'signups']);
+  assert.deepEqual([...html.matchAll(/<li data-metric="([a-z_]+)"/g)].map(m => m[1]), [...STATS_METRICS], 'the page lists the counters the Worker keeps');
+  const ddl = /CREATE TABLE IF NOT EXISTS daily_stats\s*\(([^`'"]*)\)(?:\s*WITHOUT ROWID)?\s*[`'"]/.exec(counters);
+  assert.ok(ddl, 'daily_stats is created lazily in stats-counters.js');
+  assert.deepEqual([...ddl[1].matchAll(/\b(\w+)\s+(?:TEXT|INTEGER)\b/gi)].map(m => m[1]), ['day', 'metric', 'dim', 'n'], 'no column for an ID, address or browser');
+  assert.ok(!/user-agent/i.test(code), 'the stats code never reads the user agent');
+  assert.ok(!/DELETE\s+FROM\s+daily_stats/i.test(code) && page.includes('no time limit'), 'kept with no time limit, and the page says so');
+  const report = { v: 1, game: '2.6.0', device: 'desktop', character: 'rifter', weapon: 'rifle', stage: 1, outcome: 'death', length: '2-5', first: true };
+  for (const origin of [HOSTS.dev, HOSTS.legacyOrigin, HOSTS.feedback, null]) {
+    const headers = { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) };
+    const r = await fetchWorker(API + '/api/stats', { method: 'POST', headers, body: JSON.stringify(report) });
+    assert.equal(r.status, 403, `a report from ${origin ?? 'no Origin'} is refused before the database`);
+  }
+  for (const phrase of PAGE_PINS) assert.ok(page.includes(phrase), 'the page says: ' + phrase);
+  for (const word of ['European Union', 'United Kingdom']) assert.equal(page.includes(word), PAGE_PINS.includes(word), word + ' only when the approved pins name it');
+  for (const gone of ['No ads, no analytics, no trackers', 'no analytics or tracking scripts', 'no tracking or advertising cookies', 'Last updated 2026-09-30']) assert.ok(!page.includes(gone), 'removed: ' + gone);
+  assert.ok(!/analytics/i.test(page.replaceAll('Cloudflare Web Analytics', '')), 'analytics is named only as Cloudflare Web Analytics');
+  for (const file of ['server/feedback-api.js', 'server/scores-api.js', 'server/admin-auth.js', 'server/stats-api.js']) assert.ok(/\.limit\(\{ key/.test(fs.readFileSync(file, 'utf8')), file + ' limits by key');
+}
+console.log('PASS privacy page matches the stats code.');
