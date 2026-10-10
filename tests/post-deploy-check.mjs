@@ -358,13 +358,12 @@ console.log('PASS superseded: when main moved on and its deploy is running or al
   assert.ok(/route\.abort\(/.test(script) && /isWriteRequest\(request\.method\(\)\)/.test(script), 'every write from the page is aborted');
 
   const beacon = "console: Loading the script 'https://static.cloudflareinsights.com/beacon.min.js/v31edd' violates the following Content Security Policy directive";
-  const [real, known] = splitTolerated([beacon, 'uncaught: boom', 'GET https://static.cloudflareinsights.com/beacon.min.js/v31edd csp']);
-  assert.deepEqual(real, ['uncaught: boom']);
-  assert.equal(known.length, 2);
-  assert.deepEqual(splitTolerated(['console: https://evil.example/static.cloudflareinsights.com.js failed'])[0].length, 1, 'only the beacon path is tolerated');
-  assert.ok(TOLERATED.length <= 2, 'the tolerated list stays short');
+  const [real, known] = splitTolerated([beacon, 'uncaught: boom']);
+  assert.deepEqual([real.length, known.length], [2, 0], 'a beacon error is a real error now');
+  assert.equal(TOLERATED.length, 0);
+
 }
-console.log('PASS no sound, no run, no writes: muted and popups pre-answered before load, START RUN never clicked, writes aborted; only the Cloudflare beacon is tolerated.');
+console.log('PASS no sound, no run, no writes: muted and popups pre-answered before load, START RUN never clicked, writes aborted; nothing is tolerated (a beacon error is a real error).');
 
 // --- reporting and the Discord alert -------------------------------------------------------------
 {

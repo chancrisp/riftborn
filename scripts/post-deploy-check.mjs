@@ -71,16 +71,10 @@ export const PRELOAD_STORAGE = Object.freeze({
 export const PRELOAD_SESSION = Object.freeze({ 'riftborn-reborn-whats-new-visit-v1': '1' });
 /**
  * Console errors and failed requests that come from outside the build, reported as warnings rather
- * than failures. Keep this list short and remove an entry as soon as its cause is fixed.
+ * than failures. Empty since Cloudflare's automatic Web Analytics injection was switched off (the game loads its own
+ * counter, so a beacon error is now real). Keep this list short and remove an entry as soon as its cause is fixed.
  */
-export const TOLERATED = Object.freeze([
-  {
-    pattern: /static\.cloudflareinsights\.com\/beacon\.min\.js/,
-    reason: 'Cloudflare Web Analytics injects its beacon into every HTML page and the site CSP blocks it ' +
-      '(players get the same console error; the CSP stays as it is): turn off the automatic Web ' +
-      'Analytics setup on both Pages projects, then delete this entry'
-  }
-]);
+export const TOLERATED = Object.freeze([]);
 /** The link-preview tags checked (Discord, iMessage, X and the rest), each only when the committed page has it. */
 export const SOCIAL_TAGS = Object.freeze(['og:type', 'og:url', 'og:title', 'og:description', 'og:image', 'twitter:card', 'twitter:image']);
 /** The live site's other pages, checked for 200 next to the files index.html links. */
