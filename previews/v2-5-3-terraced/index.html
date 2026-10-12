@@ -44,7 +44,7 @@ so a reload before it lands can't lose it, in this tab's sessionStorage. Runs be
 <script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
 the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
 makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
-window.RIFTBORN_BUILD = "11cec6572e";
+window.RIFTBORN_BUILD = "4bf6782015";
 (function () {
   var b = window.RIFTBORN_BUILD;
   if (b === "dev" || !window.fetch || !window.URL) return;
@@ -174,7 +174,7 @@ body:has(#devGate) #riftLoader{display:none}
 /* Reduced motion: a calm, still screen; the bar and skull step between stages, the eyes just switch on. */
 @media (prefers-reduced-motion:reduce){.rl-embers,.rl-heat,.rl-sweep,.rl-dots{display:none}#riftLoader .rl-ring,#riftLoader .rl-bob,#riftLoader .rl-rift-glow{animation:none}.rl-fill,.rl-rider,.rl-mark{transition:none}#riftLoader.rl-lit .rl-eyes{animation:none;opacity:1}#riftLoader.rl-lit .rl-rift-glow{animation:none;opacity:.9}#riftLoader{transition-duration:.25s}}
 </style>
-<link rel="stylesheet" href="css/riftborn.090f412ea9.css">
+<link rel="stylesheet" href="css/riftborn.fed2d135f1.css">
 </head>
 <body class="menu-open">
 <div id="riftLoader" role="dialog" aria-modal="true" aria-label="Loading Riftborn">
@@ -205,15 +205,15 @@ body:has(#devGate) #riftLoader{display:none}
 
 <div id="waveToast" role="status"></div>
 <div id="damageNumbers" aria-hidden="true"></div>
-<div id="portalCompass" class="portal-compass hidden" aria-live="polite"><span class="compass-arrow">➤</span><div><b id="portalLabel">RIFT PORTAL</b><small id="portalDistance">LOCKED · 12 KILLS</small></div></div>
+<div id="portalCompass" class="portal-compass hidden" aria-live="off"><span class="compass-arrow">➤</span><div><b id="portalLabel">RIFT PORTAL</b><small id="portalDistance">LOCKED · 12 KILLS</small></div></div>
 <aside id="tutorialGuide" class="hidden" aria-label="Tutorial guide"><div class="tutorial-heading"><strong id="tutorialTitle"></strong><span id="tutorialStep"></span></div><p id="tutorialHint" role="status" aria-live="polite"></p><p id="tutorialWeapon"></p></aside>
 <div id="trackedGoal" class="hidden"></div>
 <div id="difficultyMeter" class="hidden"></div>
-<div id="trialStatus" role="status"></div>
+<div id="trialStatus" role="status" aria-live="off"></div>
 <div id="modStatus"></div>
-<div id="powerupStatus" role="status"></div>
+<div id="powerupStatus" role="status" aria-live="off"></div>
 <div id="interactPrompt" class="hidden"></div>
-<div id="stageObjective" role="status"></div>
+<div id="stageObjective" role="status" aria-live="off"></div>
 <div id="bossHUD" class="hidden"><b id="bossPhase">RIFT WARDEN</b><div><i id="bossChip"></i><i id="bossFill"></i></div></div>
 
 <!-- The vitals plate (2.5, ui/hud-plate.js fills the cells, glyphs and caps): row 1 integrity number and the Bone Ward's
@@ -457,7 +457,7 @@ checks this table before every deploy. */
 (function () {
   var HASH = "6057f115a0d917397c72f5ca48b752fd27cf76370e923af446247ab2f525b87c";
   var KEY = "riftborn-dev-gate";
-  var GAME = "js/riftborn.cc454ac66e.js";
+  var GAME = "js/riftborn.651118118e.js";
   var gate = document.getElementById("devGate");
   var form = document.getElementById("devGateForm");
   var input = document.getElementById("devGatePass");
