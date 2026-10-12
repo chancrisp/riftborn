@@ -2,10 +2,10 @@
   "name": "v2-5-3-terraced",
   "url": "https://v2-5-3-terraced.riftborn-dev.pages.dev/",
   "version": "2.5.3",
-  "build": "86cfc4b813",
-  "module": "js/riftborn.2536785403.js",
+  "build": "d4dbbb5906",
+  "module": "js/riftborn.80a9e674f1.js",
   "branch": "balance-pass",
-  "commit": "7f5cb42f1f3c09a45a3d95e5c3afd8eb866e23a7",
+  "commit": "5c9bdc5e53c46354985624cb46550056e598712c",
   "dirty": false,
-  "staged": "2026-10-12T02:34:11.420Z"
+  "staged": "2026-10-12T03:03:56.724Z"
 }
