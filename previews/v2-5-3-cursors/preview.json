@@ -1,0 +1,11 @@
+{
+  "name": "v2-5-3-cursors",
+  "url": "https://v2-5-3-cursors.riftborn-dev.pages.dev/",
+  "version": "2.5.3",
+  "build": "bc2aa06331",
+  "module": "js/riftborn.ce696155bb.js",
+  "branch": "cursors-bolt-pumpkin",
+  "commit": "6142e6a4d5766abbeba8dec7bb18aaae8a3108a9",
+  "dirty": false,
+  "staged": "2026-10-12T14:43:13.800Z"
+}
