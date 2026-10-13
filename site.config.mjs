@@ -43,10 +43,11 @@ export const MIGRATION = Object.freeze({
     'riftborn-reborn-account-sync-v1',
     'riftborn-reborn-account-reminded',
     'riftborn-reborn-dev-accounts',
-    // Developer mode (the game's src/meta/dev-mode.js): its switch, loadout and one-shot carry stay
+    // Developer mode (the game's src/meta/dev-mode.js): its switch, loadout, recent setups and one-shot carry stay
     // on the device.
     'riftborn-reborn-dev-mode-v1',
     'riftborn-reborn-dev-loadout-v1',
+    'riftborn-reborn-dev-recent-v1',
     'riftborn-reborn-dev-carry-v1',
     'riftborn-reborn-touch-debug-v1',
     'riftborn-reborn-fullscreen-resume-v1',
