@@ -1,0 +1,11 @@
+{
+  "name": "v2-6-0-tutorial",
+  "url": "https://v2-6-0-tutorial.riftborn-dev.pages.dev/",
+  "version": "2.6.0",
+  "build": "37685f338a",
+  "module": "js/riftborn.bfddce61d7.js",
+  "branch": "tutorial-refresh",
+  "commit": "9625727506d45400953aeb50e0ff69fda9573fc4",
+  "dirty": false,
+  "staged": "2026-10-13T13:57:38.573Z"
+}
