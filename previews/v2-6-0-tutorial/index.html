@@ -44,7 +44,7 @@ so a reload before it lands can't lose it, in this tab's sessionStorage. Runs be
 <script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
 the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
 makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
-window.RIFTBORN_BUILD = "37685f338a";
+window.RIFTBORN_BUILD = "906ce18ed1";
 (function () {
   var b = window.RIFTBORN_BUILD;
   if (b === "dev" || !window.fetch || !window.URL) return;
@@ -174,7 +174,7 @@ body:has(#devGate) #riftLoader{display:none}
 /* Reduced motion: a calm, still screen; the bar and skull step between stages, the eyes just switch on. */
 @media (prefers-reduced-motion:reduce){.rl-embers,.rl-heat,.rl-sweep,.rl-dots{display:none}#riftLoader .rl-ring,#riftLoader .rl-bob,#riftLoader .rl-rift-glow{animation:none}.rl-fill,.rl-rider,.rl-mark{transition:none}#riftLoader.rl-lit .rl-eyes{animation:none;opacity:1}#riftLoader.rl-lit .rl-rift-glow{animation:none;opacity:.9}#riftLoader{transition-duration:.25s}}
 </style>
-<link rel="stylesheet" href="css/riftborn.d540554ad4.css">
+<link rel="stylesheet" href="css/riftborn.52a815cfc2.css">
 </head>
 <body class="menu-open">
 <div id="riftLoader" role="dialog" aria-modal="true" aria-label="Loading Riftborn">
@@ -206,7 +206,7 @@ body:has(#devGate) #riftLoader{display:none}
 <div id="waveToast" role="status"></div>
 <div id="damageNumbers" aria-hidden="true"></div>
 <div id="portalCompass" class="portal-compass hidden" aria-live="off"><span class="compass-arrow">➤</span><div><b id="portalLabel">RIFT PORTAL</b><small id="portalDistance">LOCKED · 12 KILLS</small></div></div>
-<aside id="tutorialGuide" class="hidden" aria-label="Tutorial guide"><div class="tutorial-heading"><strong id="tutorialTitle"></strong><span id="tutorialStep"></span></div><p id="tutorialHint" role="status" aria-live="polite"></p><p id="tutorialWeapon"></p><div id="tutorialGun" class="tutorial-gun hidden"><div class="tutorial-gun-head"><img id="tutorialGunSprite" alt=""><div><strong id="tutorialGunName"></strong><small id="tutorialGunRole"></small></div></div><small class="tutorial-gun-label">HOW IT WORKS</small><p id="tutorialGunHow"></p><small class="tutorial-gun-label">TRY IT</small><p id="tutorialGunTry" class="tutorial-gun-try"></p><small class="tutorial-gun-label">WATCH OUT</small><p id="tutorialGunWatch" class="tutorial-gun-watch"></p><ol id="tutorialGunRail" class="tutorial-gun-rail" aria-hidden="true"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li></ol><div class="tutorial-gun-foot"><span id="tutorialGunTried"></span><span id="tutorialGunIndex"></span></div></div></aside>
+<aside id="tutorialGuide" class="hidden" aria-label="Tutorial guide"><div class="tutorial-heading"><strong id="tutorialTitle"></strong><span id="tutorialStep"></span></div><p id="tutorialHint" role="status" aria-live="polite"></p><div id="tutorialKeys" class="tutorial-keys hidden"></div><p id="tutorialWeapon"></p><div id="tutorialGun" class="tutorial-gun hidden"><div class="tutorial-gun-head"><span class="tutorial-gun-sprite"><img id="tutorialGunSprite" alt=""></span><div><strong id="tutorialGunName"></strong><small id="tutorialGunRole"></small></div><span id="tutorialGunIndex"></span></div><dl class="tutorial-gun-rows"><dt>HOW</dt><dd id="tutorialGunHow"></dd><dt>TRY</dt><dd id="tutorialGunTry" class="tutorial-gun-try"></dd><dt>WATCH</dt><dd id="tutorialGunWatch" class="tutorial-gun-watch"></dd></dl><div class="tutorial-gun-foot"><ol id="tutorialGunRail" class="tutorial-gun-rail" aria-hidden="true"><li></li><li></li><li></li><li></li><li></li><li></li><li></li><li></li><li></li><li></li></ol><span class="tutorial-gun-tried"><span id="tutorialGunPips" aria-hidden="true"><i></i><i></i><i></i></span><span id="tutorialGunTried"></span></span></div></div></aside>
 <div id="trackedGoal" class="hidden"></div>
 <div id="difficultyMeter" class="hidden"></div>
 <div id="trialStatus" role="status" aria-live="off"></div>
@@ -457,7 +457,7 @@ checks this table before every deploy. */
 (function () {
   var HASH = "6057f115a0d917397c72f5ca48b752fd27cf76370e923af446247ab2f525b87c";
   var KEY = "riftborn-dev-gate";
-  var GAME = "js/riftborn.bfddce61d7.js";
+  var GAME = "js/riftborn.21e53b1f87.js";
   var gate = document.getElementById("devGate");
   var form = document.getElementById("devGateForm");
   var input = document.getElementById("devGatePass");
