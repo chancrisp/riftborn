@@ -30,7 +30,8 @@ import {
 import { buildInboxHeaders, matchHeaders, parseHeaders } from '../scripts/pages-headers.mjs';
 import { HOSTS } from '../site.config.mjs';
 
-const read = file => fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+// Line endings normalised, so a Windows checkout (core.autocrlf) reads the files as CI does.
+const read = file => fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 // --- version.json --------------------------------------------------------------------------------
 {

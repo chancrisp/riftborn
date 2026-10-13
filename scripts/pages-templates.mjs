@@ -38,7 +38,7 @@ export const SOCIAL_CARD = Object.freeze({
   // The Riftborn brand colour (rift violet): Discord colours link previews with theme-color.
   themeColor: '#8F5BFF',
   siteName: 'Riftborn',
-  description: 'A PS1-style survival shooter you play in your browser. Blast through five fractured worlds, break the Keepers and take down the Rift Warden. Free, no download.',
+  description: 'A PS1-style survival shooter you play in your browser. Blast through six fractured worlds, break the Keepers and take down the Rift Warden. Free, no download.',
   imagePath: '/assets/riftborn-card.jpg',
   imageVersion: 1,
   imageWidth: 1200,

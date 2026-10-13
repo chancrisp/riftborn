@@ -452,8 +452,8 @@ assert.equal(await handleStats(new Request('https://api.test/api/scores', { meth
 
 // ---- Task 1.11: the game's device-only keys, mirrored in MIGRATION.exclude -----------------------------------------
 {
-  // The game's MIGRATION_EXCLUDED (riftborn/src/meta/migration.js) as merged with its Task 2.1: 17 entries, in its order.
-  const GAME = ['session-v1', 'login-verifier-v1', 'account-sync-v1', 'account-reminded', 'dev-accounts', 'dev-mode-v1', 'dev-loadout-v1', 'dev-carry-v1',
+  // The game's MIGRATION_EXCLUDED (riftborn/src/meta/migration.js) as merged with its Task 2.1, plus the developer menu's recent setups: 18 entries, in its order.
+  const GAME = ['session-v1', 'login-verifier-v1', 'account-sync-v1', 'account-reminded', 'dev-accounts', 'dev-mode-v1', 'dev-loadout-v1', 'dev-recent-v1', 'dev-carry-v1',
     'touch-debug-v1', 'fullscreen-resume-v1', 'welcome-v1', 'whats-new-seen-v1', 'whats-new-visit-v1', 'profile-v1-bak', 'stats-day-v1', 'stats-notice-v1', 'stats-outbox-v1']
     .map(name => 'riftborn-reborn-' + name);
   assert.deepEqual([...MIGRATION.exclude], GAME, 'entry for entry, in the game order');
