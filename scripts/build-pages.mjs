@@ -292,7 +292,7 @@ if (config.launched) {
 
 // ---- security headers, from the final HTML ------------------------------------------------------------
 const connect = [config.api, config.workersDev];
-// The visit counter's hosts are allowed on the launched riftborn.us only (the game loads the beacon there); dev, previews and the inbox never.
+// The visit counter's hosts are allowed on the launched riftborn.us only (the game loads the beacon there); dev, preview builds and the inbox never.
 const outputs = [[cfLive, { connect, ...(config.launched ? WEB_ANALYTICS_HOSTS : {}) }], ...(hasDev ? [[cfDev, { connect, noindex: true }]] : [])];
 const summary = [];
 for (const [dir, options] of outputs) {
