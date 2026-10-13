@@ -16,6 +16,12 @@
 // GET only and no request headers: POST is a CORS-safelisted method, so it is the missing
 // Content-Type (and Authorization) that makes the browser stop a JSON post before it is sent.
 // Requests without an Origin (curl, servers) are not browser pages and are untouched.
+// The Daily Rift (accounts only): POST /api/daily/start claims an account's one ranked try of the day
+// (its run id); GET /api/daily/me answers the account's standing today. A score posted with a daily day
+// is that try: it needs the claiming account, the claimed run id, no earlier score, a time the clock
+// since the claim allows, Normal mode and a KEEPERS stamp, or it gets 409 daily_rejected. Daily rows
+// carry the daily column, show only on ?daily=<day>, and never on the normal boards. Without the
+// accounts hooks the Daily paths answer 404. The day is the server's UTC date.
 const CORS_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
 const CORS_HEADERS = 'Content-Type, Authorization';
 const READ_ONLY_METHODS = 'GET, OPTIONS';
@@ -46,7 +52,7 @@ const database = env => {
 // check or ALTER fails is simply left out (re-checked after a cooldown), so scores keep working
 // exactly as before without it. account_id (v2.2) links a run to a Riftborn account; it is set
 // only server-side from a signed-in session, never from the payload, and is never returned.
-const LATE_COLUMNS = Object.freeze({ game_version: 'TEXT', rift_score: 'INTEGER', account_id: 'TEXT' });
+const LATE_COLUMNS = Object.freeze({ game_version: 'TEXT', rift_score: 'INTEGER', account_id: 'TEXT', daily: 'TEXT' });
 const LATE_RETRY_MS = 300000;
 const lateColumnCache = new WeakMap();
 // -> Promise<string[]> of the late columns the scores table has (LATE_COLUMNS order). Never rejects.
@@ -105,6 +111,53 @@ const STAGE_MAX = 6;
 // surrogate code points, line/paragraph separators, and letters that render as blank space.
 export const GUEST_NAME_INVISIBLE = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u115F\u1160\u3164\uFFA0\u2800]/u;
 const isKeepers = version => typeof version === 'string' && version.startsWith('keepers-');
+const DAILY_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const RUN_ID = /^[0-9a-f-]{36}$/i;
+const DAILY_PATHS = Object.freeze({ '/api/daily/start': 'POST', '/api/daily/me': 'GET' });
+const serverDay = () => new Date().toISOString().slice(0, 10);
+// A Daily score's time may run 5% ahead of the server clock since the claim, plus 30 s of slack.
+const DAILY_CLOCK_SLACK = 1.05, DAILY_SLACK_SECONDS = 30;
+
+// The daily_rites table (one row per account and day: the claimed run id, when, and whether it was
+// scored), created on first use like the late columns. A failure is re-tried on the next request.
+const dailyCache = new WeakMap();
+function dailyReady(db) {
+  let ready = dailyCache.get(db);
+  if (!ready) {
+    ready = db.prepare('CREATE TABLE IF NOT EXISTS daily_rites (day TEXT NOT NULL, account_id TEXT NOT NULL, run_id TEXT NOT NULL,' +
+      ' started_at INTEGER NOT NULL, scored INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, account_id))').run().then(() => true, error => {
+      console.error('Daily rites unavailable', error);
+      dailyCache.delete(db);
+      return false;
+    });
+    dailyCache.set(db, ready);
+  }
+  return ready;
+}
+const dailyRite = (db, day, accountId) => db.prepare('SELECT run_id, started_at, scored FROM daily_rites WHERE day = ? AND account_id = ?').bind(day, accountId).first();
+// An account's standing on a day: none, started, or scored with its Rift Score and rank among the day's
+// tries (equal scores share a rank).
+async function dailyStanding(db, day, accountId) {
+  const rite = await dailyRite(db, day, accountId);
+  if (!rite) return { day, status: 'none' };
+  if (!rite.scored) return { day, status: 'started' };
+  const score = (await db.prepare('SELECT rift_score FROM scores WHERE id = ?').bind(rite.run_id).first('rift_score')) ?? 0;
+  const counts = await db.prepare('SELECT COUNT(*) AS total, SUM(CASE WHEN rift_score > ? THEN 1 ELSE 0 END) AS above FROM scores WHERE daily = ?').bind(score, day).first();
+  return { day, status: 'scored', score, rank: 1 + Number(counts?.above || 0), of: Math.max(1, Number(counts?.total || 0)) };
+}
+// -> the reason a Daily score is refused, or null. Throws (503) when the Daily cannot be checked.
+async function dailyRejection(db, p, account, late) {
+  if (!account) return 'guest';
+  if (!late.includes('daily') || !(await dailyReady(db))) throw new Error('Daily unavailable');
+  const rite = await dailyRite(db, p.daily, account.id);
+  if (!rite) return 'no_rite';
+  if (rite.run_id !== p.id) return 'wrong_run';
+  if (rite.scored) return 'scored';
+  if (p.seconds > (Date.now() - rite.started_at) / 1000 * DAILY_CLOCK_SLACK + DAILY_SLACK_SECONDS) return 'too_fast';
+  if (p.death_mode !== false) return 'mode';
+  if (!isKeepers(p.gameplay_version)) return 'ruleset';
+  return null;
+}
 
 function originAllowed(origin, env) {
   if (!origin) return true;
@@ -128,7 +181,8 @@ function originReadOnly(origin, env) {
 
 export async function handleScores(request, env, accounts = null) {
   const url = new URL(request.url);
-  if (url.pathname !== '/api/scores') return null;
+  const dailyMethod = DAILY_PATHS[url.pathname];
+  if (url.pathname !== '/api/scores' && !dailyMethod) return null;
 
   const origin = request.headers.get('Origin');
   const allowed = originAllowed(origin, env);
@@ -149,17 +203,51 @@ export async function handleScores(request, env, accounts = null) {
     });
   }
   if (readOnly && !['GET', 'HEAD'].includes(request.method)) return json({ error: 'read_only_origin' }, 403, origin);
-  if (!['GET', 'POST'].includes(request.method)) return json({ error: 'Method not allowed' }, 405, origin);
+  if (dailyMethod && !accounts) return json({ error: 'Not found' }, 404, origin);
+  if (dailyMethod ? request.method !== dailyMethod : !['GET', 'POST'].includes(request.method)) return json({ error: 'Method not allowed' }, 405, origin);
   if (request.headers.get('Sec-Fetch-Site') === 'cross-site' && !origin) return json({ error: 'Forbidden' }, 403);
 
   try {
     const db = database(env);
+    if (url.pathname === '/api/daily/me') {
+      const session = await accounts.session(request, env);
+      if (!session) return json({ day: serverDay(), status: 'guest' }, 200, origin);
+      if (session.unavailable) return json({ error: 'Leaderboard temporarily unavailable' }, 503, origin);
+      if (session.unauthorized || typeof session.id !== 'string') return json({ error: 'unauthorized' }, 401, origin, { 'WWW-Authenticate': 'Bearer' });
+      if (!(await dailyReady(db))) return json({ error: 'Leaderboard temporarily unavailable' }, 503, origin);
+      return json(await dailyStanding(db, serverDay(), session.id), 200, origin);
+    }
+    if (url.pathname === '/api/daily/start') {
+      if (env.SCORE_RATE_LIMITER) {
+        const key = (typeof accounts.limitKey === 'function' && await accounts.limitKey(request, env, 'daily')) || request.headers.get('CF-Connecting-IP') || 'unknown';
+        if (!(await env.SCORE_RATE_LIMITER.limit({ key })).success) return json({ error: 'Too many requests' }, 429, origin);
+      }
+      if (!(request.headers.get('Content-Type') || '').startsWith('application/json')) return json({ error: 'JSON required' }, 415, origin);
+      const text = await request.text();
+      if (text.length > 2048) return json({ error: 'Request too large' }, 413, origin);
+      let b;
+      try { b = JSON.parse(text); } catch { return json({ error: 'Invalid JSON' }, 400, origin); }
+      if (!b || typeof b.run_id !== 'string' || !RUN_ID.test(b.run_id)) return json({ error: 'Invalid run id' }, 400, origin);
+      const session = await accounts.session(request, env);
+      if (session && session.unavailable) return json({ error: 'Leaderboard temporarily unavailable' }, 503, origin);
+      if (!session || session.unauthorized || typeof session.id !== 'string') return json({ error: 'unauthorized' }, 401, origin, { 'WWW-Authenticate': 'Bearer' });
+      if (!(await dailyReady(db))) return json({ error: 'Leaderboard temporarily unavailable' }, 503, origin);
+      const day = serverDay();
+      await db.prepare('INSERT INTO daily_rites (day, account_id, run_id, started_at, scored) VALUES (?, ?, ?, ?, 0) ON CONFLICT DO NOTHING')
+        .bind(day, session.id, b.run_id, Date.now()).run();
+      // A retried claim of the same run id is answered again; any other claim of the day is refused.
+      const rite = await dailyRite(db, day, session.id);
+      if (rite && rite.run_id === b.run_id && !rite.scored) return json({ day, run_id: b.run_id }, 200, origin);
+      return json(await dailyStanding(db, day, session.id), 409, origin);
+    }
     if (request.method === 'GET') {
       const mode = url.searchParams.get('mode') || 'all';
       const version = url.searchParams.get('version') || 'all';
       // ruleset: absent = every run (as before); keepers = KEEPERS stamps (keepers-*), ranked by
       // Rift Score; original = everything else, legacy and unstamped runs included.
       const ruleset = url.searchParams.get('ruleset');
+      const dailyDay = url.searchParams.get('daily');
+      if (dailyDay !== null && !DAILY_DAY.test(dailyDay)) return json({ error: 'Invalid ranking filter' }, 400, origin);
       if (!['all', 'normal', 'death', 'unknown'].includes(mode) || !(/^[a-zA-Z0-9.-]{1,32}$/).test(version) || (ruleset !== null && !['keepers', 'original'].includes(ruleset))) {
         return json({ error: 'Invalid ranking filter' }, 400, origin);
       }
@@ -169,36 +257,41 @@ export async function handleScores(request, env, accounts = null) {
       if (version !== 'all') { clauses.push('gameplay_version = ?'); values.push(version); }
       if (ruleset === 'keepers') clauses.push("gameplay_version LIKE 'keepers-%'");
       else if (ruleset === 'original') clauses.push("(gameplay_version IS NULL OR gameplay_version NOT LIKE 'keepers-%')");
-      const limit = ruleset === 'keepers' ? (mode === 'all' ? 25 : 20) : mode === 'death' ? 10 : mode === 'normal' ? 20 : 25;
+      const limit = dailyDay !== null ? 20 : ruleset === 'keepers' ? (mode === 'all' ? 25 : 20) : mode === 'death' ? 10 : mode === 'normal' ? 20 : 25;
       // joined: account rows show the account's current username (a rename reaches old rows) and
       // verified marks rows that belong to a Riftborn account. account_id itself is never returned.
+      // With the daily column, a day board reads only that day's tries and every other board none.
+      const where = late => [...clauses, ...(late.includes('daily') ? [dailyDay !== null ? 's.daily = ?' : 's.daily IS NULL'] : [])];
+      const bound = late => (late.includes('daily') && dailyDay !== null ? [...values, dailyDay] : values);
       const query = (late, order, joined = false) => 'SELECT ' + (joined ? 'COALESCE(a.username, s.name) AS name' : 's.name AS name') +
         ',s.score,s.stage,s.played_at,s.kills,s.wave,s.seconds,s.death_mode,s.statue_count,s.statue_modifier,s.outcome,s.gameplay_version' +
         late.map(name => ',s.' + name).join('') + (joined ? ',(a.id IS NOT NULL) AS verified' : '') + ' FROM scores s' +
         (joined ? ' LEFT JOIN accounts a ON a.id = s.account_id' : '') +
-        (clauses.length ? ' WHERE ' + clauses.join(' AND ') : '') +
+        (where(late).length ? ' WHERE ' + where(late).join(' AND ') : '') +
         ` ORDER BY ${order} LIMIT ${limit}`;
       const byScore = 'score DESC, wave DESC, seconds DESC';
       const late = await lateColumns(db);
       const shown = late.filter(name => name !== 'account_id');
       let result = null;
-      if (late.length) {
-        const order = ruleset === 'keepers' && shown.includes('rift_score') ? 'rift_score DESC, stage DESC, seconds ASC' : byScore;
+      if (dailyDay !== null && !shown.includes('daily')) result = { results: [] }; // no Daily tries yet
+      else if (late.length) {
+        const order = (ruleset === 'keepers' || dailyDay !== null) && shown.includes('rift_score') ? 'rift_score DESC, stage DESC, seconds ASC' : byScore;
         if (accounts && late.includes('account_id') && await accounts.ready(env)) {
-          try { result = await db.prepare(query(shown, order, true)).bind(...values).all(); } catch (error) {
+          try { result = await db.prepare(query(shown, order, true)).bind(...bound(shown)).all(); } catch (error) {
             // No accounts table after all: read without the join. Late-column errors as before.
             if (!/no such table: accounts/i.test(String(error?.message || error))) lateColumnLost(db, error);
           }
         }
         if (!result) {
-          try { result = await db.prepare(query(shown, order)).bind(...values).all(); } catch (error) { lateColumnLost(db, error); }
+          try { result = await db.prepare(query(shown, order)).bind(...bound(shown)).all(); } catch (error) { lateColumnLost(db, error); }
         }
       }
-      result ||= await db.prepare(query([], byScore)).bind(...values).all();
+      // The fallback never names the daily column; a day board without it has no rows.
+      result ||= dailyDay !== null ? { results: [] } : await db.prepare(query([], byScore)).bind(...values).all();
       return json({
-        scores: result.results.map(({ verified, ...row }) => ({ ...row, death_mode: row.death_mode == null ? null : row.death_mode === 1, game_version: row.game_version ?? null, rift_score: row.rift_score ?? null, verified: verified === 1 || verified === true })),
-        capabilities: { modeFilter: true, versionFilter: true, runMetadata: true, rulesetFilter: true },
-        ranking: { mode, version, ruleset: ruleset || 'all' },
+        scores: result.results.map(({ verified, ...row }) => ({ ...row, death_mode: row.death_mode == null ? null : row.death_mode === 1, game_version: row.game_version ?? null, rift_score: row.rift_score ?? null, daily: row.daily ?? null, verified: verified === 1 || verified === true })),
+        capabilities: { modeFilter: true, versionFilter: true, runMetadata: true, rulesetFilter: true, daily: Boolean(accounts) },
+        ranking: { mode, version, ruleset: ruleset || 'all', ...(dailyDay !== null ? { daily: dailyDay } : {}) },
         verified: false
       }, 200, origin);
     }
@@ -241,6 +334,14 @@ export async function handleScores(request, env, accounts = null) {
     // Rift Score belongs to KEEPERS runs only.
     if (p.rift_score !== undefined && (!isKeepers(p.gameplay_version) || !integer(p.rift_score, RIFT_SCORE_MAX))) return json({ error: 'Invalid rift score' }, 400, origin);
 
+    if (p.daily !== undefined && (typeof p.daily !== 'string' || !DAILY_DAY.test(p.daily))) return json({ error: 'Invalid daily' }, 400, origin);
+    const late = await lateColumns(db);
+    if (p.daily !== undefined) {
+      if (!accounts) return json({ error: 'Invalid daily' }, 400, origin);
+      const reason = await dailyRejection(db, p, account, late);
+      if (reason) return json({ error: 'daily_rejected', reason }, 409, origin);
+    }
+
     if (!account && accounts && GUEST_NAME_INVISIBLE.test(guestName)) return json({ error: 'invalid_name' }, 400, origin);
     const name = account ? account.username : guestName;
     // Name protection: a guest cannot post under a Riftborn account's username, in any letter case
@@ -252,12 +353,17 @@ export async function handleScores(request, env, accounts = null) {
     }
 
     const now = Date.now();
-    const insert = late => db.prepare('INSERT INTO scores (id,name,score,kills,wave,seconds,created_at,stage,played_at,death_mode,statue_count,statue_modifier,outcome,gameplay_version' +
+    const insertStmt = late => db.prepare('INSERT INTO scores (id,name,score,kills,wave,seconds,created_at,stage,played_at,death_mode,statue_count,statue_modifier,outcome,gameplay_version' +
       late.map(name => ',' + name).join('') + ') VALUES (' + Array(14 + late.length).fill('?').join(',') + ') ON CONFLICT(id) DO NOTHING')
       .bind(p.id, name, p.score, p.kills, p.wave, p.seconds, now, p.stage ?? null, p.played_at ?? now,
         p.death_mode === undefined ? null : Number(p.death_mode), p.statue_count ?? null, p.statue_modifier ?? null,
-        p.outcome ?? null, p.gameplay_version ?? null, ...late.map(column => column === 'account_id' ? (account ? account.id : null) : p[column] ?? null)).run();
-    const late = await lateColumns(db);
+        p.outcome ?? null, p.gameplay_version ?? null, ...late.map(column => column === 'account_id' ? (account ? account.id : null) : p[column] ?? null));
+    if (p.daily !== undefined) {
+      await db.batch([insertStmt(late), db.prepare('UPDATE daily_rites SET scored = 1 WHERE day = ? AND account_id = ? AND scored = 0').bind(p.daily, account.id)]);
+      const { rank, of } = await dailyStanding(db, p.daily, account.id);
+      return json({ saved: true, rank, of }, 200, origin);
+    }
+    const insert = late => insertStmt(late).run();
     let saved = false;
     if (late.length) {
       try { await insert(late); saved = true; } catch (error) { lateColumnLost(db, error); }
