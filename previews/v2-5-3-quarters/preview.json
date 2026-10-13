@@ -1,0 +1,11 @@
+{
+  "name": "v2-5-3-quarters",
+  "url": "https://v2-5-3-quarters.riftborn-dev.pages.dev/",
+  "version": "2.5.3",
+  "build": "bbbeeb6e15",
+  "module": "js/riftborn.d9f5f5e870.js",
+  "branch": "aurora-terrain",
+  "commit": "53a6e27f4d011cdf5aa347d0179d80dc93f18b62",
+  "dirty": false,
+  "staged": "2026-10-13T11:38:01.040Z"
+}
