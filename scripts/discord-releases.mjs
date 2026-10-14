@@ -305,4 +305,18 @@ Full notes in {#patch-notes} · Play now: https://riftborn.us`,
 
 Full notes in-game: **PATCH NOTES** on the main menu.`,
   },
+  // 2.6.2, owner-approved 2026-10-14 (texts approved, "Post, both pings", "go live"):
+  // News pings on the announcement, Patch pings on the patch notes.
+  {
+    version: '2.6.2',
+    ping: { announcement: true, patchNotes: true },
+    announcement: `**Riftborn 2.6.2 · Small Fixes is live!**
+- **Space** only dashes now: it never picks a reward or presses a button by accident
+
+Full notes in {#patch-notes} · Play now: https://riftborn.us`,
+    patchNotes: `**v2.6.2 · Small Fixes** (14 Oct 2026)
+- **Space never selects:** Space only dashes now. A reward that pops up mid-dash waits for you to see it and choose with a click, Enter or the controller. Space still skips cinematics.
+
+Full notes in-game: **PATCH NOTES** on the main menu.`,
+  },
 ];
