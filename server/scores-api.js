@@ -52,7 +52,7 @@ const database = env => {
 // check or ALTER fails is simply left out (re-checked after a cooldown), so scores keep working
 // exactly as before without it. account_id (v2.2) links a run to a Riftborn account; it is set
 // only server-side from a signed-in session, never from the payload, and is never returned.
-const LATE_COLUMNS = Object.freeze({ game_version: 'TEXT', rift_score: 'INTEGER', account_id: 'TEXT', daily: 'TEXT' });
+const LATE_COLUMNS = Object.freeze({ game_version: 'TEXT', rift_score: 'INTEGER', account_id: 'TEXT', daily: 'TEXT', endless: 'INTEGER' });
 const LATE_RETRY_MS = 300000;
 const lateColumnCache = new WeakMap();
 // -> Promise<string[]> of the late columns the scores table has (LATE_COLUMNS order). Never rejects.
@@ -112,6 +112,9 @@ const STAGE_MAX = 6;
 export const GUEST_NAME_INVISIBLE = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u115F\u1160\u3164\uFFA0\u2800]/u;
 const isKeepers = version => typeof version === 'string' && version.startsWith('keepers-');
 const DAILY_DAY = /^\d{4}-\d{2}-\d{2}$/;
+// Endless (accounts only): a KEEPERS-stamped run with a rift_score and an endless depth (1 to 999). A depth
+// needs at least ENDLESS_MIN_SECONDS of play each. The score bound stays client-side (plausible.js).
+const ENDLESS_MAX = 999, ENDLESS_MIN_SECONDS = 8;
 const RUN_ID = /^[0-9a-f-]{36}$/i;
 const DAILY_PATHS = Object.freeze({ '/api/daily/start': 'POST', '/api/daily/me': 'GET' });
 const serverDay = () => new Date().toISOString().slice(0, 10);
@@ -248,6 +251,9 @@ export async function handleScores(request, env, accounts = null) {
       const ruleset = url.searchParams.get('ruleset');
       const dailyDay = url.searchParams.get('daily');
       if (dailyDay !== null && !DAILY_DAY.test(dailyDay)) return json({ error: 'Invalid ranking filter' }, 400, origin);
+      const endlessParam = url.searchParams.get('endless');
+      if (endlessParam !== null && (endlessParam !== '1' || dailyDay !== null)) return json({ error: 'Invalid ranking filter' }, 400, origin);
+      const endlessBoard = endlessParam !== null;
       if (!['all', 'normal', 'death', 'unknown'].includes(mode) || !(/^[a-zA-Z0-9.-]{1,32}$/).test(version) || (ruleset !== null && !['keepers', 'original'].includes(ruleset))) {
         return json({ error: 'Invalid ranking filter' }, 400, origin);
       }
@@ -257,11 +263,13 @@ export async function handleScores(request, env, accounts = null) {
       if (version !== 'all') { clauses.push('gameplay_version = ?'); values.push(version); }
       if (ruleset === 'keepers') clauses.push("gameplay_version LIKE 'keepers-%'");
       else if (ruleset === 'original') clauses.push("(gameplay_version IS NULL OR gameplay_version NOT LIKE 'keepers-%')");
-      const limit = dailyDay !== null ? 20 : ruleset === 'keepers' ? (mode === 'all' ? 25 : 20) : mode === 'death' ? 10 : mode === 'normal' ? 20 : 25;
+      const limit = dailyDay !== null || endlessBoard ? 20 : ruleset === 'keepers' ? (mode === 'all' ? 25 : 20) : mode === 'death' ? 10 : mode === 'normal' ? 20 : 25;
       // joined: account rows show the account's current username (a rename reaches old rows) and
       // verified marks rows that belong to a Riftborn account. account_id itself is never returned.
       // With the daily column, a day board reads only that day's tries and every other board none.
-      const where = late => [...clauses, ...(late.includes('daily') ? [dailyDay !== null ? 's.daily = ?' : 's.daily IS NULL'] : [])];
+      // The endless column splits the boards the same way: the Endless board reads only depth rows, every other board none.
+      const where = late => [...clauses, ...(late.includes('daily') ? [dailyDay !== null ? 's.daily = ?' : 's.daily IS NULL'] : []),
+        ...(late.includes('endless') ? [endlessBoard ? 's.endless IS NOT NULL' : 's.endless IS NULL'] : [])];
       const bound = late => (late.includes('daily') && dailyDay !== null ? [...values, dailyDay] : values);
       const query = (late, order, joined = false) => 'SELECT ' + (joined ? 'COALESCE(a.username, s.name) AS name' : 's.name AS name') +
         ',s.score,s.stage,s.played_at,s.kills,s.wave,s.seconds,s.death_mode,s.statue_count,s.statue_modifier,s.outcome,s.gameplay_version' +
@@ -273,9 +281,9 @@ export async function handleScores(request, env, accounts = null) {
       const late = await lateColumns(db);
       const shown = late.filter(name => name !== 'account_id');
       let result = null;
-      if (dailyDay !== null && !shown.includes('daily')) result = { results: [] }; // no Daily tries yet
+      if ((dailyDay !== null && !shown.includes('daily')) || (endlessBoard && !(shown.includes('endless') && shown.includes('rift_score')))) result = { results: [] }; // no Daily or Endless tries yet
       else if (late.length) {
-        const order = (ruleset === 'keepers' || dailyDay !== null) && shown.includes('rift_score') ? 'rift_score DESC, stage DESC, seconds ASC' : byScore;
+        const order = endlessBoard ? 'rift_score DESC, endless DESC, seconds ASC' : (ruleset === 'keepers' || dailyDay !== null) && shown.includes('rift_score') ? 'rift_score DESC, stage DESC, seconds ASC' : byScore;
         if (accounts && late.includes('account_id') && await accounts.ready(env)) {
           try { result = await db.prepare(query(shown, order, true)).bind(...bound(shown)).all(); } catch (error) {
             // No accounts table after all: read without the join. Late-column errors as before.
@@ -286,12 +294,12 @@ export async function handleScores(request, env, accounts = null) {
           try { result = await db.prepare(query(shown, order)).bind(...bound(shown)).all(); } catch (error) { lateColumnLost(db, error); }
         }
       }
-      // The fallback never names the daily column; a day board without it has no rows.
-      result ||= dailyDay !== null ? { results: [] } : await db.prepare(query([], byScore)).bind(...values).all();
+      // The fallback never names the daily or endless column; those boards without them have no rows.
+      result ||= dailyDay !== null || endlessBoard ? { results: [] } : await db.prepare(query([], byScore)).bind(...values).all();
       return json({
-        scores: result.results.map(({ verified, ...row }) => ({ ...row, death_mode: row.death_mode == null ? null : row.death_mode === 1, game_version: row.game_version ?? null, rift_score: row.rift_score ?? null, daily: row.daily ?? null, verified: verified === 1 || verified === true })),
-        capabilities: { modeFilter: true, versionFilter: true, runMetadata: true, rulesetFilter: true, daily: Boolean(accounts) },
-        ranking: { mode, version, ruleset: ruleset || 'all', ...(dailyDay !== null ? { daily: dailyDay } : {}) },
+        scores: result.results.map(({ verified, ...row }) => ({ ...row, death_mode: row.death_mode == null ? null : row.death_mode === 1, game_version: row.game_version ?? null, rift_score: row.rift_score ?? null, daily: row.daily ?? null, endless: row.endless ?? null, verified: verified === 1 || verified === true })),
+        capabilities: { modeFilter: true, versionFilter: true, runMetadata: true, rulesetFilter: true, daily: Boolean(accounts), endless: true },
+        ranking: { mode, version, ruleset: ruleset || 'all', ...(dailyDay !== null ? { daily: dailyDay } : {}), ...(endlessBoard ? { endless: 1 } : {}) },
         verified: false
       }, 200, origin);
     }
@@ -335,7 +343,15 @@ export async function handleScores(request, env, accounts = null) {
     if (p.rift_score !== undefined && (!isKeepers(p.gameplay_version) || !integer(p.rift_score, RIFT_SCORE_MAX))) return json({ error: 'Invalid rift score' }, 400, origin);
 
     if (p.daily !== undefined && (typeof p.daily !== 'string' || !DAILY_DAY.test(p.daily))) return json({ error: 'Invalid daily' }, 400, origin);
+    // Endless depth: 1 to 999, a KEEPERS stamp with a rift_score, never with a Daily. Accounts only; a depth needs 8 s each.
+    if (p.endless !== undefined && (!Number.isInteger(p.endless) || p.endless < 1 || p.endless > ENDLESS_MAX ||
+      !isKeepers(p.gameplay_version) || p.rift_score === undefined || p.daily !== undefined)) return json({ error: 'Invalid endless' }, 400, origin);
     const late = await lateColumns(db);
+    if (p.endless !== undefined) {
+      if (!account) return json({ error: 'endless_rejected', reason: 'signin' }, 409, origin);
+      if (!late.includes('endless')) return json({ error: 'Leaderboard temporarily unavailable' }, 503, origin);
+      if (p.seconds < ENDLESS_MIN_SECONDS * p.endless) return json({ error: 'endless_rejected', reason: 'too fast' }, 409, origin);
+    }
     if (p.daily !== undefined) {
       if (!accounts) return json({ error: 'Invalid daily' }, 400, origin);
       const reason = await dailyRejection(db, p, account, late);
@@ -368,6 +384,8 @@ export async function handleScores(request, env, accounts = null) {
     if (late.length) {
       try { await insert(late); saved = true; } catch (error) { lateColumnLost(db, error); }
     }
+    // An Endless run never falls back to a column-less insert: it would land on the normal KEEPERS board.
+    if (!saved && p.endless !== undefined) return json({ error: 'Leaderboard temporarily unavailable' }, 503, origin);
     if (!saved) await insert([]);
     return json({ saved: true }, 200, origin);
   } catch (error) {
