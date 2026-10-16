@@ -162,8 +162,7 @@ export function publicBase(env) {
 // Same rule as server/scores-api.js and server/feedback-api.js.
 function originAllowed(origin, env) {
   if (!origin) return true;
-  const defaults = 'https://riftborn.chanmanc10.chatgpt.site' +
-    (isProduction(env) ? '' : ',http://127.0.0.1:4173,http://localhost:4173');
+  const defaults = isProduction(env) ? '' : 'http://127.0.0.1:4173,http://localhost:4173';
   return `${defaults},${env.ALLOWED_ORIGINS || ''}`
     .split(',')
     .map(value => value.trim())

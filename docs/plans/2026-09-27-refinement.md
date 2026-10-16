@@ -1,6 +1,6 @@
 # Riftborn refinement implementation plan
 
-> For agentic workers: use superpowers:executing-plans inline; fresh whole-change review at completion.
+> Execution: inline, with a whole-change review at completion.
 
 Goal: implement the user's eight refinements without changing the game identity or progression.
 Spec: attached eight-part refinement brief, 27 September 2026, in this conversation.

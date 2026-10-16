@@ -16,9 +16,9 @@ Keep the five weapons/worlds, manual fire, PS1 materials/fonts, Normal/Death and
 
 ## Work and ownership
 
-- [x] Core integration: root agent owns game.js, index.html, style.css, build list, harness, pacing/sequence/aim helpers and campaign tests.
-- [x] Mastery: bounded agent owns profile.js, mastery.js and mastery tests; returns integration API. No game/UI edits.
-- [x] Landmarks: bounded agent owns landmarks.js and landmark tests; returns placement/render/disposal API. No game/UI edits.
+- [x] Core integration: core slice covers game.js, index.html, style.css, build list, harness, pacing/sequence/aim helpers and campaign tests.
+- [x] Mastery: separate slice covers profile.js, mastery.js and mastery tests; returns integration API. No game/UI edits.
+- [x] Landmarks: separate slice covers landmarks.js and landmark tests; returns placement/render/disposal API. No game/UI edits.
 - [x] Integrate, verify complete campaigns and focused regressions, inspect local UI; fix findings.
 - [x] Update README/design/balance/editing/validation notes, independent review, verified build and root mirror; prepare existing-Site publication.
 
@@ -37,6 +37,6 @@ Tests must cover sequence skip/finish exactly once, pause/visibility/restart, sa
 - Diagnose and fix additional terrain traps beyond the reserved-route tests; improve elevation readability with contrasting rock faces, upper ledge lips and clearer ramps. Terrain movement remains aligned with rendered triangles and bullet cover.
 - Add Ultra fine pixelation at 720 internal vertical pixels, above Fine (480), preserving explicit selection and saved preferences.
 - Expand original music and SFX; add a quieter menu arrangement after the first user audio-unlock gesture. Keep CPU demo combat SFX silent, volume/mute/hidden behavior and voice limits intact.
-- Additional separated ownership: terrain agent edits terrain.js/traversal tests, music agent edits soundtrack.js/music tests, SFX definitions agent edits audio-effects.js/tests; root integrates triggers, visual mesh and settings.
+- Additional separated ownership: terrain slice covers terrain.js/traversal tests, music slice covers soundtrack.js/music tests, SFX definitions slice covers audio-effects.js/tests; root integrates triggers, visual mesh and settings.
 
 Final local verification: build + all31 test programs pass; five assisted full campaigns reach victory. Independent review and browser audio/visual checks recorded in CAMPAIGN-QUALITY-VALIDATION.md. Publishing uses the existing Site and unchanged public audience.

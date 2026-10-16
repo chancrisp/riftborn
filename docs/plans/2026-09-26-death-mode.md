@@ -1,6 +1,6 @@
 # Death Mode and creature overhaul
 
-> Execution: use superpowers:executing-plans. The Site owner integrates all source changes; delegates only bounded assets/research.
+> Execution: the owner integrates all source changes.
 
 **Goal:** Add a secret Death Mode, readable monster silhouettes and distinct attacks, and remove terrain traps while increasing scenery variety.
 

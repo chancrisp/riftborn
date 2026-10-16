@@ -1,13 +1,13 @@
 # Riftborn on GitHub Pages with a Cloudflare leaderboard
 
-The game is moving to GitHub Pages with a separate Cloudflare Worker + D1 leaderboard. The existing public ChatGPT Site remains live with its original identity, URL, and database. These workflows do not upload to or change that Site.
+The game is moving to GitHub Pages with a separate Cloudflare Worker + D1 leaderboard. The original public site remains live with its original identity, URL, and database. These workflows do not upload to or change that Site.
 
 ## What deploys where
 
-- **GitHub Pages** serves only the static game from `_site/`. The build omits `.openai/` and the generated Sites Worker bundle.
+- **GitHub Pages** serves only the static game from `_site/`. The build omits local-only folders and the generated Worker bundle.
 - **Cloudflare Worker** serves `GET /api/scores` and `POST /api/scores`; D1 stores shared scores. The browser uses the same API contract, and the board remains explicitly client-reported (`verified: false`).
 - **Local preview** continues to use `http://127.0.0.1:4173/api/scores` and its separate `.sites-runtime/preview.sqlite` database.
-- **Existing ChatGPT Site** remains on its current handler and D1 database throughout this transition.
+- **Original site** remains on its current handler and D1 database throughout this transition.
 
 ## GitHub repository settings
 
@@ -59,11 +59,11 @@ The resulting `_site/` folder is generated and ignored by Git. Review it locally
 
 ## Historical scores and safe rollback
 
-The old ChatGPT Site's public leaderboard endpoint returns only the top 25, but its database table viewer provides a separate read-only, paginated export. The initial 16-row snapshot is saved locally at `.sites-runtime/legacy-scores.sql`; that ignored path keeps player rows out of the public repository. Wrangler remote SQL execution currently fails in this Cloudflare account, so run the SQL from that snapshot in D1 Studio. The current imported snapshot contains 16 runs, with newest `played_at` timestamp `1790595906407`. The import uses `ON CONFLICT(id) DO NOTHING`, so it is safe to rerun after refreshing the snapshot.
+The original site's public leaderboard endpoint returns only the top 25, but its database table viewer provides a separate read-only, paginated export. The initial 16-row snapshot is saved locally at `.sites-runtime/legacy-scores.sql`; that ignored path keeps player rows out of the public repository. Wrangler remote SQL execution currently fails in this Cloudflare account, so run the SQL from that snapshot in D1 Studio. The current imported snapshot contains 16 runs, with newest `played_at` timestamp `1790595906407`. The import uses `ON CONFLICT(id) DO NOTHING`, so it is safe to rerun after refreshing the snapshot.
 
-Re-read the Sites table before any future final cutover, because the original game may continue receiving scores. Rebuild the ignored SQL snapshot with newer rows and rerun it in D1 Studio; this makes the catch-up safe without duplicating existing runs. Keep the Sites leaderboard accessible as an archive. The current ChatGPT Site and its database remain live during this transition.
+Re-read the Sites table before any future final cutover, because the original game may continue receiving scores. Rebuild the ignored SQL snapshot with newer rows and rerun it in D1 Studio; this makes the catch-up safe without duplicating existing runs. Keep the Sites leaderboard accessible as an archive. The original site and its database remain live during this transition.
 
-To roll back the website, restore the previous Pages artifact or revert the Git commit. To roll back leaderboard traffic, rebuild Pages with the prior API origin or update its repository variable and redeploy. Keep the current ChatGPT Site and its D1 database available until the GitHub version has passed real-browser checks and the owner has decided where future scores should live.
+To roll back the website, restore the previous Pages artifact or revert the Git commit. To roll back leaderboard traffic, rebuild Pages with the prior API origin or update its repository variable and redeploy. Keep the original site and its D1 database available until the GitHub version has passed real-browser checks and the owner has decided where future scores should live.
 
 ## After every deploy: the post-deploy check, and rolling back
 
@@ -123,4 +123,4 @@ Every build can have its own password-gated link next to dev.riftborn.us, named 
 
 ## Current provisioning state
 
-GitHub repository `chancrisp/riftborn`, Cloudflare D1 database `riftborn-leaderboard`, and the repository API-token secret are configured. D1 migrations `0000`–`0003` are installed. The production Worker is deployed at `https://riftborn-leaderboard.chanmanc10.workers.dev`, with its `DB` binding attached to that database. Its `/api/scores` endpoint has been checked from the GitHub Pages origin and returns all 16 imported historical runs in descending score order; the newest run matches the legacy snapshot. The Pages site is live at `https://chancrisp.github.io/riftborn/`, and its build workflow has succeeded. The API reports `verified: false`: score writes are client-reported and the leaderboard is not an anti-cheat system. A real score submission from a second browser/device has not yet been confirmed. The ChatGPT Site and its database remain live and unchanged.
+GitHub repository `chancrisp/riftborn`, Cloudflare D1 database `riftborn-leaderboard`, and the repository API-token secret are configured. D1 migrations `0000`–`0003` are installed. The production Worker is deployed at `https://riftborn-leaderboard.chanmanc10.workers.dev`, with its `DB` binding attached to that database. Its `/api/scores` endpoint has been checked from the GitHub Pages origin and returns all 16 imported historical runs in descending score order; the newest run matches the legacy snapshot. The Pages site is live at `https://chancrisp.github.io/riftborn/`, and its build workflow has succeeded. The API reports `verified: false`: score writes are client-reported and the leaderboard is not an anti-cheat system. A real score submission from a second browser/device has not yet been confirmed. The original site and its database remain live and unchanged.

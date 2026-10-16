@@ -1,6 +1,6 @@
 # Riftborn leaderboard backend proposal
 
-> **Research snapshot — 28 September 2026.** This note was written before the user authorized a Cloudflare D1 transition. That approval has since been given, and a local deployment package is now prepared; see [the current deployment guide](GITHUB-CLOUDFLARE-DEPLOYMENT.md) and [the implementation plan](superpowers/plans/2026-09-28-github-pages-cloudflare-d1.md). No account, public repository, production Worker, D1 database, data import, or cutover has yet been provisioned. Pricing and quotas are point-in-time facts and should be rechecked immediately before provisioning.
+> **Research snapshot — 28 September 2026.** This note was written before the user authorized a Cloudflare D1 transition. That approval has since been given, and a local deployment package is now prepared; see [the current deployment guide](GITHUB-CLOUDFLARE-DEPLOYMENT.md) and [the implementation plan](plans/2026-09-28-github-pages-cloudflare-d1.md). No account, public repository, production Worker, D1 database, data import, or cutover has yet been provisioned. Pricing and quotas are point-in-time facts and should be rechecked immediately before provisioning.
 
 ## Recommendation
 
@@ -47,7 +47,7 @@ The public components would be:
 - Run the Worker and D1 locally with Wrangler; Cloudflare states that local D1 uses the same D1 version as production. [D1 local development](https://developers.cloudflare.com/d1/best-practices/local-development/)
 - Deploy to a staging Worker and staging D1 database first. Exercise every mode/version query and an idempotent duplicate submission.
 - Build GitHub Pages against the staging API and inspect it in a browser before switching to production.
-- Keep the ChatGPT Site online during the experiment so rollback is just restoring the previous API URL or reverting the Git commit.
+- Keep the original site online during the experiment so rollback is just restoring the previous API URL or reverting the Git commit.
 
 ### Data migration and backups
 

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Move the static game to GitHub Pages and the shared leaderboard API to a Cloudflare Worker backed by D1, while keeping the current public ChatGPT Site available until the new site has been built and checked.
+Move the static game to GitHub Pages and the shared leaderboard API to a Cloudflare Worker backed by D1, while keeping the original public site available until the new site has been built and checked.
 
 ## Current implementation state
 
@@ -24,7 +24,7 @@ Move the static game to GitHub Pages and the shared leaderboard API to a Cloudfl
 3. Set GitHub repository variables and the Cloudflare API token secret described in `docs/GITHUB-CLOUDFLARE-DEPLOYMENT.md`.
 4. Deploy the Worker manually and exercise public ranking plus a disposable score submission.
 5. Deploy GitHub Pages and verify gameplay, assets, score submission, leaderboard reads, and browser refresh under the repository subpath.
-6. Refresh and import the Sites rows immediately before cutover, then keep the ChatGPT Site and its existing D1 database online as a rollback/archive until the replacement is confirmed.
+6. Refresh and import the Sites rows immediately before cutover, then keep the original site and its existing D1 database online as a rollback/archive until the replacement is confirmed.
 
 ## Risks and limits
 

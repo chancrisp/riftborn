@@ -119,7 +119,7 @@ function copyGame(dest, { moveImport = false } = {}) {
   const gameDir = hasLive ? classic : dest;
   fs.mkdirSync(gameDir, { recursive: true });
   for (const entry of fs.readdirSync(path.join(root, 'dist'), { withFileTypes: true })) {
-    if (entry.name === 'server' || entry.name === '.openai') continue;
+    if (entry.name === 'server' || entry.name.startsWith('.')) continue; // the Worker bundle and local-only folders
     copy(path.join(root, 'dist', entry.name), path.join(gameDir, entry.name));
   }
   if (hasLive) copy(live, dest);
