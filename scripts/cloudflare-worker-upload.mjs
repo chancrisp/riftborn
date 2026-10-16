@@ -60,10 +60,15 @@ export function allowedOrigins(siteOrigin) {
   return [...new Set([...WORKER_ALLOWED_ORIGINS, ...extra])];
 }
 
-/** Build multipart metadata for the documented Workers Script Upload API. */
-export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, feedbackKeyStrict, warn = console.warn, ...accountSecrets }) {
+/**
+ * Build multipart metadata for the documented Workers Script Upload API. existingSecrets lists the
+ * secret names the deployed Worker already holds: a secret left unset in GitHub keeps that stored
+ * value (an inherit binding) instead of being dropped, so the repository does not need every secret.
+ */
+export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, feedbackKeyStrict, existingSecrets = [], warn = console.warn, ...accountSecrets }) {
   if (!/^[0-9a-f-]{36}$/i.test(databaseId || '')) throw new Error('Set CLOUDFLARE_D1_DATABASE_ID to the D1 database UUID.');
   const origins = allowedOrigins(siteOrigin);
+  const stored = new Set(existingSecrets);
 
   const metadata = {
     main_module: 'riftborn-worker.mjs',
@@ -117,8 +122,8 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
     metadata.bindings.push({ type: 'secret_text', name: 'DISCORD_WEBHOOK_URL', text: webhook });
   }
   const live = String(accountsLive ?? '').trim() === '1';
-  if (live && !String(accountSecrets.authSigningKey ?? '').trim()) {
-    throw new Error('ACCOUNTS_LIVE=1 but the AUTH_SIGNING_KEY secret is empty: refusing to deploy (players would lose their accounts). Restore the secret.');
+  if (live && !String(accountSecrets.authSigningKey ?? '').trim() && !stored.has('AUTH_SIGNING_KEY')) {
+    throw new Error('ACCOUNTS_LIVE=1 but the AUTH_SIGNING_KEY secret is empty and the Worker holds none: refusing to deploy (players would lose their accounts). Restore the secret.');
   }
   for (const [option, name] of ACCOUNT_SECRETS) {
     const value = String(accountSecrets[option] ?? '').trim();
@@ -126,6 +131,9 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
     if (SIGNING_KEYS.includes(name) && value.length < 32) throw new Error(`${name} must be at least 32 characters (use 32+ random bytes).`);
     metadata.bindings.push({ type: 'secret_text', name, text: value });
   }
+  // Every secret the Worker already stores and this deploy does not set keeps its stored value.
+  const bound = new Set(metadata.bindings.map(binding => binding.name));
+  for (const name of stored) if (!bound.has(name)) metadata.bindings.push({ type: 'inherit', name });
 
   const form = new FormData();
   form.set('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }), 'metadata.json');
@@ -133,9 +141,27 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
   return form;
 }
 
+/**
+ * The secret names the deployed Worker holds ([] before its first deploy). Any other failure stops
+ * the deploy: guessing [] would drop every stored secret the repository does not set.
+ */
+export async function listWorkerSecrets({ accountId, apiToken, fetchImpl = fetch }) {
+  const response = await fetchImpl(`${ACCOUNT_API}/${accountId}/workers/scripts/${WORKER_NAME}/secrets`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${apiToken}` },
+  });
+  if (response.status === 404) return [];
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.success !== true || !Array.isArray(body.result)) {
+    throw new Error(`Could not list the Worker's stored secrets (${response.status}); refusing to deploy so none are dropped.`);
+  }
+  return body.result.map(secret => secret.name).filter(Boolean);
+}
+
 export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, feedbackKeyStrict, warn, fetchImpl = fetch, ...accountSecrets }) {
   if (!/^[0-9a-f]{32}$/i.test(accountId || '')) throw new Error('Set CLOUDFLARE_ACCOUNT_ID to the Cloudflare account ID.');
   if (!apiToken) throw new Error('Set the CLOUDFLARE_API_TOKEN GitHub secret.');
+  const existingSecrets = await listWorkerSecrets({ accountId, apiToken, fetchImpl });
 
   const result = await build({
     entryPoints: ['cloudflare/worker.js'],
@@ -145,7 +171,7 @@ export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin
     target: 'es2022',
     minify: true,
   });
-  const form = createWorkerUpload(result.outputFiles[0].text, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, feedbackKeyStrict, warn, ...accountSecrets });
+  const form = createWorkerUpload(result.outputFiles[0].text, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, feedbackKeyStrict, existingSecrets, warn, ...accountSecrets });
   const response = await fetchImpl(`${ACCOUNT_API}/${accountId}/workers/scripts/${WORKER_NAME}?bindings_inherit=strict`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${apiToken}` },

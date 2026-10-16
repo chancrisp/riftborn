@@ -141,10 +141,29 @@ const deployed = await uploadModule.deployWorker({
   feedbackAdminKey: 'deploy-key',
   warn: quiet,
   fetchImpl: async (url, init) => {
+    if (init.method === 'GET') {
+      assert.equal(url, 'https://api.cloudflare.com/client/v4/accounts/11b52fbbac31279b554fa9490c667017/workers/scripts/riftborn-leaderboard/secrets');
+      assert.equal(init.headers.Authorization, 'Bearer test-token');
+      return new Response(JSON.stringify({ success: true, result: [{ name: 'AUTH_SIGNING_KEY', type: 'secret_text' }] }), { status: 200 });
+    }
     uploadRequest = { url, ...init };
     return new Response(JSON.stringify({ success: true, result: { id: 'test-version' } }), { status: 200 });
   },
 });
+assert.ok(JSON.parse(await uploadRequest.body.get('metadata').text()).bindings.some(binding => binding.type === 'inherit' && binding.name === 'AUTH_SIGNING_KEY'), 'A secret only the Worker holds is kept on deploy');
+
+// Stored Worker secrets: unset in the repository means keep the stored value, never drop it.
+const keepAll = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, accountsLive: '1', existingSecrets: ['AUTH_SIGNING_KEY', 'GOOGLE_CLIENT_SECRET', 'DISCORD_WEBHOOK_URL'] }).get('metadata').text());
+assert.deepEqual(keepAll.bindings.filter(binding => binding.type === 'inherit').map(binding => binding.name).sort(), ['AUTH_SIGNING_KEY', 'DB', 'DISCORD_WEBHOOK_URL', 'GOOGLE_CLIENT_SECRET'], 'Live accounts deploy on the stored signing key');
+assert.ok(!keepAll.bindings.some(binding => binding.type === 'secret_text'), 'Nothing is re-sent when nothing is set');
+const override = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, discordWebhookUrl: 'https://discord.com/api/webhooks/2/new', existingSecrets: ['DISCORD_WEBHOOK_URL'] }).get('metadata').text());
+assert.deepEqual(override.bindings.filter(binding => binding.name === 'DISCORD_WEBHOOK_URL').map(binding => [binding.type, binding.text]), [['secret_text', 'https://discord.com/api/webhooks/2/new']], 'A value set in the repository replaces the stored one (no duplicate binding)');
+assert.throws(() => uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, accountsLive: '1', existingSecrets: ['GOOGLE_CLIENT_ID'] }), /ACCOUNTS_LIVE=1/, 'Live with no signing key anywhere still refuses');
+const listed = (status, body) => uploadModule.listWorkerSecrets({ accountId: 'a', apiToken: 't', fetchImpl: async () => new Response(JSON.stringify(body), { status }) });
+assert.deepEqual(await listed(404, { success: false }), [], 'No Worker yet: nothing stored');
+assert.deepEqual(await listed(200, { success: true, result: [{ name: 'A' }, { name: 'B' }] }), ['A', 'B']);
+await assert.rejects(listed(403, { success: false }), /refusing to deploy/, 'An unreadable secrets list stops the deploy instead of dropping secrets');
+await assert.rejects(listed(200, { success: true, result: null }), /refusing to deploy/);
 assert.equal(deployed.id, 'test-version');
 assert.equal(uploadRequest.url, 'https://api.cloudflare.com/client/v4/accounts/11b52fbbac31279b554fa9490c667017/workers/scripts/riftborn-leaderboard?bindings_inherit=strict');
 assert.equal(uploadRequest.method, 'PUT');
