@@ -44,7 +44,7 @@ so a reload before it lands can't lose it, in this tab's sessionStorage. Runs be
 <script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
 the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
 makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
-window.RIFTBORN_BUILD = "eef502ffff";
+window.RIFTBORN_BUILD = "8c320495c3";
 (function () {
   var b = window.RIFTBORN_BUILD;
   if (b === "dev" || !window.fetch || !window.URL) return;
@@ -424,9 +424,15 @@ src/meta/account.js). "" turns a service off: scores and feedback stay on the de
                        returns to it) or localStorage "riftborn-reborn-dev-accounts" names a loopback
                        accounts harness (site server/dev-accounts.mjs).
   anywhere else        nothing (a claude.ai artifact, a copy on another host).
-A value set before this block (a test page) wins for scores, reads and feedback. .tools/host-config.mjs
-checks this table before every deploy. */
+  portal edition       nothing, whatever the address or preset (window.RIFTBORN_EDITION, written only by
+                       .tools/package-portal.mjs).
+A value set before this block (a test page) wins for scores, reads and feedback, except in the portal
+edition. .tools/host-config.mjs checks this table before every deploy. */
 (function () {
+  if (window.RIFTBORN_EDITION === "portal") {
+    window.RIFTBORN_SCORE_API_BASE = window.RIFTBORN_SCORE_READ_BASE = window.RIFTBORN_FEEDBACK_API_BASE = window.RIFTBORN_ACCOUNT_API_BASE = "";
+    return;
+  }
   var API = "https://api.riftborn.us", OLD_API = "https://riftborn-leaderboard.chanmanc10.workers.dev";
   var h = location.hostname, p = location.pathname, scores = "", reads = "", feedback = "", accounts = "";
   if (h === "riftborn.us") {
@@ -485,7 +491,7 @@ checks this table before every deploy. */
 (function () {
   var HASH = "6057f115a0d917397c72f5ca48b752fd27cf76370e923af446247ab2f525b87c";
   var KEY = "riftborn-dev-gate";
-  var GAME = "js/riftborn.e5b3477f7a.js";
+  var GAME = "js/riftborn.90ce6f2641.js";
   var gate = document.getElementById("devGate");
   var form = document.getElementById("devGateForm");
   var input = document.getElementById("devGatePass");
