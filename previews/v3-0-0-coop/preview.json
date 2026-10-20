@@ -2,10 +2,10 @@
   "name": "v3-0-0-coop",
   "url": "https://v3-0-0-coop.riftborn-dev.pages.dev/",
   "version": "3.0.0",
-  "build": "b19379512f",
-  "module": "js/riftborn.18d5fc03a1.js",
+  "build": "0167e773c1",
+  "module": "js/riftborn.137756f486.js",
   "branch": "claude/multiplayer-3-0-0-a0f81c",
-  "commit": "bcd87777e19b97727268cb398ff5507724d97427",
+  "commit": "0d7951ada7e3b7779f349ad2f1e9f2b4e50a377b",
   "dirty": false,
-  "staged": "2026-10-20T19:45:15.857Z"
+  "staged": "2026-10-20T23:53:02.387Z"
 }
