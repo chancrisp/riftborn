@@ -1,4 +1,4 @@
-// Current ChatGPT Sites worker: serves the game and its same-origin score API.
+// The classic edition Worker: serves the game and its same-origin score API.
 import { handleScores } from './scores-api.js';
 
 export default {

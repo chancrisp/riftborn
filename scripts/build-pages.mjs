@@ -119,7 +119,7 @@ function copyGame(dest, { moveImport = false } = {}) {
   const gameDir = hasLive ? classic : dest;
   fs.mkdirSync(gameDir, { recursive: true });
   for (const entry of fs.readdirSync(path.join(root, 'dist'), { withFileTypes: true })) {
-    if (entry.name === 'server' || entry.name === '.openai') continue;
+    if (entry.name === 'server' || entry.name.startsWith('.')) continue; // the Worker bundle and local-only folders
     copy(path.join(root, 'dist', entry.name), path.join(gameDir, entry.name));
   }
   if (hasLive) copy(live, dest);
@@ -292,7 +292,7 @@ if (config.launched) {
 
 // ---- security headers, from the final HTML ------------------------------------------------------------
 const connect = [config.api, config.workersDev];
-// The visit counter's hosts are allowed on the launched riftborn.us only (the game loads the beacon there); dev, previews and the inbox never.
+// The visit counter's hosts are allowed on the launched riftborn.us only (the game loads the beacon there); dev, preview builds and the inbox never.
 const outputs = [[cfLive, { connect, ...(config.launched ? WEB_ANALYTICS_HOSTS : {}) }], ...(hasDev ? [[cfDev, { connect, noindex: true }]] : [])];
 const summary = [];
 for (const [dir, options] of outputs) {

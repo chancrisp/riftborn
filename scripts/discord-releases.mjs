@@ -275,4 +275,48 @@ Full notes in {#patch-notes} · Play now: https://riftborn.us`,
 
 Full notes in-game: **PATCH NOTES** on the main menu.`,
   },
+  // 2.6.0, owner-approved 2026-10-13 (texts approved, "ping both", "go live"):
+  // News pings on the announcement, Patch pings on the patch notes.
+  {
+    version: '2.6.0',
+    ping: { announcement: true, patchNotes: true },
+    announcement: `**Riftborn 2.6 · The Armory is live!**
+- The weapons are rebuilt: pick **two guns** before a run, grow them with **lane cards**, and claim a third from the **Armory**
+- **Five new guns:** Glaive, Lodestone, Wick, Coil and Wheel
+- The Aurora Citadel is rebuilt as the **Broken Quarters**
+- Four **texture packs** and two new **cursor sets**
+- A new **tutorial** with the Armory Range, new **run endings**, and enemies that **fight back harder**
+
+Full notes in {#patch-notes} · Play now: https://riftborn.us`,
+    patchNotes: `**v2.6 · The Armory** (13 Oct 2026)
+- **Loadout:** before a KEEPERS run you pick two guns to carry. R swaps between them.
+- **Lane cards:** each level-up offers two lane cards for your guns and one shared card. Each gun has three lanes of four tiers, and you can reroll or banish an offer.
+- **Armory:** beating the Iron Maw lets you choose a third gun, or leave it.
+- **New guns:** the Glaive's returning disc, the Lodestone's magnet slams, the Wick's growing burn, the Coil's overloading static and the Wheel's crushing grave wheel, each with two major mods.
+- **Broken Quarters:** the Aurora Citadel is rebuilt as districts on four levels joined by wide ramps. Every part of the map can be reached.
+- **Texture packs:** Clear Day, Dust & Rust, Arcade and Ashen Night, each with its own sky, fog, lighting and enemy colours.
+- **Cursors:** Spark Bolt and Jack-o'-Lantern sets, and new click effects for Gauntlet and Rift Shard.
+- **Tutorial:** learn the loadout, lane cards and the Armory Range, where all ten guns wait at training dummies.
+- **Run endings:** a defeat tears the rift open and a victory plays an arcade-cabinet finale. The results card names each gun's damage.
+- **Enemy pressure:** enemies arrive ahead of you and on your flanks, some in packs, and stragglers are brought back ahead.
+- **The Bellwether:** the toll rings far less often, a new Clapper volley punishes distance, and its health rises from 3000 to 4700.
+- **Harder ramp:** keepers chase harder later on, enemies grow tougher faster, the Restless and Charger can lunge, and healing pauses for 3 s after a hit.
+- **Fixes:** enemies no longer stick on ledges, a charged Lancer shot no longer freezes the game, and the first shot no longer stutters.
+
+Full notes in-game: **PATCH NOTES** on the main menu.`,
+  },
+  // 2.6.2, owner-approved 2026-10-14 (texts approved, "Post, both pings", "go live"):
+  // News pings on the announcement, Patch pings on the patch notes.
+  {
+    version: '2.6.2',
+    ping: { announcement: true, patchNotes: true },
+    announcement: `**Riftborn 2.6.2 · Small Fixes is live!**
+- **Space** only dashes now: it never picks a reward or presses a button by accident
+
+Full notes in {#patch-notes} · Play now: https://riftborn.us`,
+    patchNotes: `**v2.6.2 · Small Fixes** (14 Oct 2026)
+- **Space never selects:** Space only dashes now. A reward that pops up mid-dash waits for you to see it and choose with a click, Enter or the controller. Space still skips cinematics.
+
+Full notes in-game: **PATCH NOTES** on the main menu.`,
+  },
 ];

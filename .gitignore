@@ -1,14 +1,10 @@
 node_modules/
 .sites-runtime/
 dist/server/
-dist/.openai/
 _site/
 .wrangler/
 .wrangler.deployment.jsonc
 _cf/
 
-# Local AI/development files - NEVER publish
-.openai/
-CLAUDE.md
+# Local notes - never publish
 DESIGN.md
-AGENTS.md

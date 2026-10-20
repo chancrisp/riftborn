@@ -1,0 +1,11 @@
+{
+  "name": "v2-6-0-dev",
+  "url": "https://v2-6-0-dev.riftborn-dev.pages.dev/",
+  "version": "2.6.0",
+  "build": "906ce18ed1",
+  "module": "js/riftborn.21e53b1f87.js",
+  "branch": "balance-pass",
+  "commit": "fa964e815ae2c97e0875e9a513edea407b30c728",
+  "dirty": false,
+  "staged": "2026-10-13T14:15:42.015Z"
+}

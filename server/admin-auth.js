@@ -34,8 +34,7 @@ export const json = (value, status = 200, origin = null, extra = {}) => new Resp
 // too, which still need the admin key.
 export function originAllowed(origin, env) {
   if (!origin) return true;
-  const defaults = 'https://riftborn.chanmanc10.chatgpt.site' +
-    (env.ENVIRONMENT === 'production' ? '' : ',http://127.0.0.1:4173,http://localhost:4173');
+  const defaults = env.ENVIRONMENT === 'production' ? '' : 'http://127.0.0.1:4173,http://localhost:4173';
   return `${defaults},${env.ALLOWED_ORIGINS || ''}`
     .split(',')
     .map(value => value.trim())
