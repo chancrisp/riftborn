@@ -194,7 +194,7 @@ export function stagePreviews({ base = root, out = base } = {}) {
   if (problems.length) throw new Error(`Previews not published:\n  - ${problems.join('\n  - ')}`);
   fs.rmSync(to, { recursive: true, force: true });
   fs.mkdirSync(to, { recursive: true });
-  const connect = [HOSTS.api, HOSTS.workersDev]; // the same policy as dev.riftborn.us
+  const connect = [HOSTS.api, HOSTS.workersDev, HOSTS.api.replace(/^https:/, 'wss:')]; // the same policy as dev.riftborn.us, with the co-op relay's WebSocket origin
   const previews = names.map(name => {
     const dir = path.join(to, name);
     fs.cpSync(path.join(from, name), dir, { recursive: true });

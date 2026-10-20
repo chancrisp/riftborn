@@ -292,8 +292,11 @@ if (config.launched) {
 
 // ---- security headers, from the final HTML ------------------------------------------------------------
 const connect = [config.api, config.workersDev];
+// Co-op (3.0.0): the Expedition relay is a WebSocket, and Chromium does not let an https: source cover wss:, so dev and the
+// preview builds name the relay's wss: origin. riftborn.us gets the same entry at the 3.0.0 go-live.
+const devConnect = [...connect, config.api.replace(/^https:/, 'wss:')];
 // The visit counter's hosts are allowed on the launched riftborn.us only (the game loads the beacon there); dev, preview builds and the inbox never.
-const outputs = [[cfLive, { connect, ...(config.launched ? WEB_ANALYTICS_HOSTS : {}) }], ...(hasDev ? [[cfDev, { connect, noindex: true }]] : [])];
+const outputs = [[cfLive, { connect, ...(config.launched ? WEB_ANALYTICS_HOSTS : {}) }], ...(hasDev ? [[cfDev, { connect: devConnect, noindex: true }]] : [])];
 const summary = [];
 for (const [dir, options] of outputs) {
   const { text, hashes, htmlFiles } = buildHeaders(dir, options);
