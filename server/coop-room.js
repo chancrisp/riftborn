@@ -15,17 +15,20 @@
 
 import { createRoomCore } from './coop/room-core.js';
 import { encode, validCode } from './coop/protocol.js';
+import { scoreAccounts } from './accounts-api.js';
+import { insertCoopRun } from './coop-api.js';
 
 /**
  * What the room needs from outside, in one place so the later tasks (and the tests) replace it without touching the class.
- *  - sessionForToken(token, env): the account behind a sign-in token, as scoreAccounts.sessionForToken answers (5.3):
- *    { id, username }, or anything else (unauthorized, unavailable) for a guest seat. Until 5.3 every seat is a guest.
- *  - rank(row, env): writes a cleared run to the CO-OP board (insertCoopRun, 5.3) and answers { ok, reason? }.
+ *  - sessionForToken(token, env): the account behind a sign-in token, as scoreAccounts.sessionForToken answers:
+ *    { id, username }, or anything else (unauthorized, unavailable) for a guest seat.
+ *  - rank(row, env): writes a cleared run to the CO-OP board (insertCoopRun) and answers { ok: true } or
+ *    { ok: false, reason: 'unavailable' }; the core only asks for a row after its own checks (live room, two signed-in seats, matching results).
  *  - now, socketPair, upgradeResponse: the clock and the two Workers-runtime pieces, so the tests can run the class in node.
  */
 export const coopDeps = {
-  sessionForToken: async () => null,
-  rank: async () => ({ ok: false, reason: 'unavailable' }),
+  sessionForToken: (token, env) => scoreAccounts.sessionForToken(token, env),
+  rank: (row, env) => insertCoopRun(env, row),
   now: () => Date.now(),
   socketPair: () => {
     const pair = new WebSocketPair();

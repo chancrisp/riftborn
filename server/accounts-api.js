@@ -1415,6 +1415,28 @@ export async function ipLimitKey(request, env, scope) {
   try { return await hmac(keys.current, `rl:${scope}:ip:${clientIp(request)}`); } catch { return null; }
 }
 
+const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
+
+// The account behind a sign-in token, in the shapes scoreAccounts.session answers for a header (the co-op room reads the token from
+// its hello message, not from a header):
+// - a live session: { id, username };
+// - a token that proves no session (malformed, unknown, revoked or expired): { unauthorized: true };
+// - the lookup cannot be made (database error, no signing key, keys out of step): { unavailable: true }.
+async function sessionForToken(token, env) {
+  if (typeof token !== 'string' || !TOKEN_SHAPE.test(token)) return { unauthorized: true };
+  const keys = signingKeys(env);
+  if (!keys || !env.DB) return { unavailable: true };
+  try {
+    await ensureAccountTables(env.DB);
+    if (!(await keysUsable(env.DB, keys, Date.now()))) return { unavailable: true };
+    const session = await findSession(env.DB, keys, token, Date.now());
+    return session ? { id: session.accountId, username: session.username } : { unauthorized: true };
+  } catch (error) {
+    console.error('Accounts session lookup failed', error?.message || 'unknown error');
+    return { unavailable: true };
+  }
+}
+
 export const scoreAccounts = Object.freeze({
   // Account tables exist (created lazily), so reads can join usernames.
   async ready(env) {
@@ -1433,20 +1455,10 @@ export const scoreAccounts = Object.freeze({
   //   { unavailable: true } (503: the run waits and is retried, never posted as a guest).
   async session(request, env) {
     if (!(request.headers.get('Authorization') || '').trim()) return null;
-    const token = bearerToken(request);
-    if (!token) return { unauthorized: true };
-    const keys = signingKeys(env);
-    if (!keys || !env.DB) return { unavailable: true };
-    try {
-      await ensureAccountTables(env.DB);
-      if (!(await keysUsable(env.DB, keys, Date.now()))) return { unavailable: true };
-      const session = await findSession(env.DB, keys, token, Date.now());
-      return session ? { id: session.accountId, username: session.username } : { unauthorized: true };
-    } catch (error) {
-      console.error('Accounts session lookup failed', error?.message || 'unknown error');
-      return { unavailable: true };
-    }
+    return sessionForToken(bearerToken(request), env);
   },
+  // The same lookup for a token that did not come in a header (the co-op room's hello message; Task 5.3).
+  sessionForToken,
   // Whether a Riftborn account's username is this name in any letter case, or renders like it
   // (the same skeleton, see nameSkeleton): guest name protection. true / false, or
   // { unavailable: true } when the check cannot be made (never "free" by default).

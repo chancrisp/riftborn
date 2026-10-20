@@ -43,8 +43,8 @@ assert.equal(auth.originAllowed(null, {}), true);
   for (const db of [A, B]) assert.match(db.sqlite.prepare("SELECT sql FROM sqlite_master WHERE name = 'daily_stats'").get().sql, /WITHOUT ROWID/, 'one row per upsert, not a row plus an index entry');
   await ensureStatsTable(A); // already there: a no-op
   assert.doesNotThrow(() => A.sqlite.exec(fs.readFileSync('drizzle/0006_daily_stats.sql', 'utf8')), 'the migration is re-runnable');
-  const journal = JSON.parse(fs.readFileSync('drizzle/meta/_journal.json', 'utf8')).entries.at(-1);
-  assert.deepEqual([journal.idx, journal.tag], [6, '0006_daily_stats']);
+  const journal = JSON.parse(fs.readFileSync('drizzle/meta/_journal.json', 'utf8')).entries.find(entry => entry.tag === '0006_daily_stats');
+  assert.deepEqual([journal?.idx, journal?.tag], [6, '0006_daily_stats'], 'the journal holds 0006_daily_stats');
   assert.ok(JSON.parse(fs.readFileSync('drizzle/meta/0006_snapshot.json', 'utf8')).tables.daily_stats, 'the snapshot knows the table');
   assert.equal(utcDay(Date.parse('2026-10-20T23:59:59.999Z')), '2026-10-20');
   assert.equal(utcDay(Date.parse('2026-10-20T23:59:59.999Z') + 1), '2026-10-21');

@@ -2,12 +2,15 @@
 // Local only: a fake `ctx` (storage with an alarm, acceptWebSocket, getWebSockets) and fake sockets stand in for the Workers runtime.
 //   - the two shared files equal the game's; two sockets join, start and relay commands; a rebuilt room keeps its lobby;
 //   - the alarm closes an expired lobby and frees the code; an upgrade into a room never created is a 404; a second create is a 409;
-//   - a started room rebuilt after an eviction answers closed (error); a signed-in seat and the ranking go through coopDeps.
+//   - a started room rebuilt after an eviction answers closed (error); a signed-in seat and the ranking go through coopDeps;
+//   - the real session check, the coop_runs ranking and the CO-OP board (Task 5.3), on an in-memory SQLite stand-in for D1.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { CoopRoom, coopDeps } from '../server/coop-room.js';
 import worker from '../cloudflare/worker.js';
-import { handleCoop, coopOrigin } from '../server/coop-api.js';
+import { handleCoop, coopOrigin, insertCoopRun, coopBoard, ensureCoopTables } from '../server/coop-api.js';
+import { ensureAccountTables, nameSkeleton, randomToken, scoreAccounts, sessionHash } from '../server/accounts-api.js';
+import { createD1, openDatabase } from '../server/d1-sqlite.mjs';
 import { PROTOCOL_VERSION, validCode } from '../server/coop/protocol.js';
 import { HELLO_MS, LOBBY_MS } from '../server/coop/room-core.js';
 
@@ -352,13 +355,231 @@ async function lobbyRoom(extra = {}, helloExtra = [{}, {}]) {
   console.log('PASS coop-room: sessions and ranking go through coopDeps.');
 }
 
-// ---- the defaults: every seat is a guest, nothing ranks ---------------------------------------------------------------
+// ---- the defaults with no database behind them: every seat is a guest, nothing ranks -------------------------------------
 {
   const { ctx } = await lobbyRoom({}, [{ token: 'anything' }, {}]);
   await settle();
   assert.equal(ctx.data.get('room').seats[0].accountId, null);
   assert.deepEqual(await coopDeps.rank({}, {}), { ok: false, reason: 'unavailable' });
-  console.log('PASS coop-room: without the 5.3 functions every seat is a guest.');
+  console.log('PASS coop-room: with no database every seat is a guest and nothing ranks.');
+}
+
+// ---- Task 5.3: the real session check, the ranking into coop_runs and the board ---------------------------------------------
+// An in-memory SQLite database stands in for D1. Sessions are seeded the way accounts-api.js stores them (a keyed hash of the token).
+const KEY = 'test-signing-key-0123456789-abcdefghijklmnop';
+const newDb = async () => {
+  const DB = createD1(openDatabase(':memory:'));
+  await ensureAccountTables(DB);
+  return DB;
+};
+async function seedAccount(DB, id, username, { expiresIn = 86400000 } = {}) {
+  const token = randomToken();
+  const now = Date.now();
+  await DB.prepare('INSERT INTO accounts (id, username, username_skeleton, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').bind(id, username, nameSkeleton(username), now, now).run();
+  await DB.prepare('INSERT INTO sessions (token_hash, account_id, created_at, expires_at, last_seen) VALUES (?, ?, ?, ?, ?)').bind(await sessionHash(KEY, token), id, now, now + expiresIn, now).run();
+  return token;
+}
+const tableRows = (DB, table = 'coop_runs') => (DB.sqlite.prepare('SELECT name FROM sqlite_master WHERE name = ?').get(table) ? DB.sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all() : []);
+const quietly = async fn => {
+  const log = console.error;
+  console.error = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.error = log;
+  }
+};
+
+{
+  const DB = await newDb();
+  const env = { DB, AUTH_SIGNING_KEY: KEY };
+  const ann = await seedAccount(DB, 'acc-ann', 'Ann');
+  const old = await seedAccount(DB, 'acc-old', 'Olga', { expiresIn: -1000 });
+  assert.deepEqual(await scoreAccounts.sessionForToken(ann, env), { id: 'acc-ann', username: 'Ann' }, 'a live token gives its account');
+  assert.deepEqual(await scoreAccounts.sessionForToken(old, env), { unauthorized: true }, 'an expired token is unauthorized');
+  assert.equal(DB.sqlite.prepare('SELECT COUNT(*) AS n FROM sessions WHERE account_id = ?').get('acc-old').n, 0, 'and its session is deleted, as for any request');
+  assert.deepEqual(await scoreAccounts.sessionForToken(randomToken(), env), { unauthorized: true }, 'an unknown token is unauthorized');
+  for (const bad of ['ta', '', ann + 'x', ann.slice(1), 'a b'.padEnd(43, 'c'), null, undefined, 42, {}]) {
+    assert.deepEqual(await scoreAccounts.sessionForToken(bad, env), { unauthorized: true }, `a malformed token is unauthorized: ${String(bad)}`);
+  }
+  assert.deepEqual(await scoreAccounts.sessionForToken(ann, { DB }), { unavailable: true }, 'no signing key: unavailable');
+  assert.deepEqual(await scoreAccounts.sessionForToken(ann, { AUTH_SIGNING_KEY: KEY }), { unavailable: true }, 'no database: unavailable');
+  const broken = { prepare() { throw new Error('D1 down'); }, batch() { throw new Error('D1 down'); } };
+  assert.deepEqual(await quietly(() => scoreAccounts.sessionForToken(ann, { DB: broken, AUTH_SIGNING_KEY: KEY })), { unavailable: true }, 'a database error: unavailable');
+  // session(request) reads the header and answers the same shapes through it.
+  const asked = headers => scoreAccounts.session(new Request('https://api.riftborn.us/x', { headers }), env);
+  assert.equal(await asked({}), null, 'no header is a guest');
+  assert.deepEqual(await asked({ Authorization: 'Bearer ' + ann }), { id: 'acc-ann', username: 'Ann' });
+  assert.deepEqual(await asked({ Authorization: 'Bearer nope' }), { unauthorized: true });
+  assert.deepEqual(await asked({ Authorization: ann }), { unauthorized: true }, 'only a Bearer header counts');
+  console.log('PASS accounts: sessionForToken gives the account for a live token, unauthorized for a bad or expired one, unavailable without keys.');
+}
+
+// A pair in a room played to a cleared run. `tokens` are the two hello tokens; `second` changes the partner's result.
+async function playCleared({ env, live = true, tokens = [undefined, undefined], second = {} }) {
+  const ctx = fakeCtx();
+  const room = new CoopRoom(ctx, env);
+  await create(room, { code: CODE, build: BUILD, proto: PROTOCOL_VERSION, live });
+  const a = await connect(room);
+  const b = await connect(room);
+  await say(room, a, hello('Host', tokens[0] === undefined ? {} : { token: tokens[0] }));
+  await say(room, b, hello('Guest', tokens[1] === undefined ? {} : { token: tokens[1] }));
+  await settle();
+  await say(room, a, HOST);
+  await say(room, b, GUEST);
+  await say(room, a, { type: 'config', config: config() });
+  for (const ws of [a, b]) {
+    await say(room, ws, cmd(0, 60));
+    await say(room, ws, cmd(60, 40));
+  }
+  await say(room, a, { type: 'result', t: 100, outcome: 'cleared', clearTicks: 100, kills: 5, crystals: 3, h: 99 });
+  await say(room, b, { type: 'result', t: 100, outcome: 'cleared', clearTicks: 100, kills: 5, crystals: 3, h: 99, ...second });
+  await settle();
+  await settle();
+  return { ctx, room, a, b, ranked: a.sent.filter(m => m.type === 'ranked') };
+}
+
+{
+  const DB = await newDb();
+  const env = { DB, AUTH_SIGNING_KEY: KEY };
+  const ann = await seedAccount(DB, 'acc-ann', 'Ann');
+  const bob = await seedAccount(DB, 'acc-bob', 'Bob');
+  assert.equal(DB.sqlite.prepare("SELECT name FROM sqlite_master WHERE name = 'coop_runs'").get(), undefined, 'no coop_runs table before the first write');
+  const before = Date.now();
+  const played = await playCleared({ env, tokens: [ann, bob] });
+  assert.deepEqual(played.ranked, [{ type: 'ranked', ok: true }], 'both seats hear the run was ranked');
+  const rows = tableRows(DB);
+  assert.equal(rows.length, 1, 'one row');
+  const { id, created_at: createdAt, ...row } = rows[0];
+  assert.ok(createdAt >= before && createdAt <= Date.now(), 'created_at is the time of the write');
+  assert.deepEqual(row, { version: BUILD, stamp: 'expedition-1', world: 3, seed: 123456789, clear_ms: 1667, kills: 5, a_account: 'acc-ann', a_name: 'Ann', b_account: 'acc-bob', b_name: 'Bob', room: CODE, hash: '00000063' });
+  assert.equal(id, 1);
+  console.log('PASS coop-rank: a matching cleared run from two signed-in seats in a live room writes one row.');
+}
+
+{
+  const DB = await newDb();
+  const env = { DB, AUTH_SIGNING_KEY: KEY };
+  const ann = await seedAccount(DB, 'acc-ann', 'Ann');
+  const bob = await seedAccount(DB, 'acc-bob', 'Bob');
+  const ranked = async options => (await playCleared({ env, ...options })).ranked;
+  assert.deepEqual(await ranked({ live: false, tokens: [ann, bob] }), [{ type: 'ranked', ok: false, reason: 'dev' }], 'a dev room');
+  assert.deepEqual(await ranked({ tokens: [ann, undefined] }), [{ type: 'ranked', ok: false, reason: 'guest' }], 'a guest seat');
+  assert.deepEqual(await ranked({ tokens: [ann, randomToken()] }), [{ type: 'ranked', ok: false, reason: 'guest' }], 'a token that proves nothing is a guest seat');
+  assert.deepEqual(await ranked({ tokens: [ann, ann] }), [{ type: 'ranked', ok: false, reason: 'guest' }], 'one account in both seats');
+  assert.deepEqual(await ranked({ tokens: [ann, bob], second: { kills: 6 } }), [{ type: 'ranked', ok: false, reason: 'mismatch' }], 'a mismatch');
+  assert.deepEqual(await ranked({ tokens: [ann, bob], second: { outcome: 'lost' } }), [{ type: 'ranked', ok: false, reason: 'mismatch' }], 'another outcome');
+  assert.equal(tableRows(DB).length, 0, 'none of them wrote a row');
+  console.log('PASS coop-rank: a dev room, a guest seat or a mismatch writes none.');
+}
+
+{
+  const DB = await newDb();
+  const ann = await seedAccount(DB, 'acc-ann', 'Ann');
+  const bob = await seedAccount(DB, 'acc-bob', 'Bob');
+  // The sessions are read from the real database; only the coop_runs statements fail.
+  const failing = {
+    prepare: sql => {
+      if (/coop_runs/.test(sql)) throw new Error('D1 down');
+      return DB.prepare(sql);
+    },
+    batch: statements => DB.batch(statements),
+    sqlite: DB.sqlite
+  };
+  const played = await quietly(() => playCleared({ env: { DB: failing, AUTH_SIGNING_KEY: KEY }, tokens: [ann, bob] }));
+  assert.deepEqual(played.ranked, [{ type: 'ranked', ok: false, reason: 'unavailable' }], 'a database error answers unavailable');
+  assert.deepEqual(await quietly(() => insertCoopRun({ DB: failing }, { code: CODE })), { ok: false, reason: 'unavailable' });
+  assert.deepEqual(await insertCoopRun({}, { code: CODE }), { ok: false, reason: 'unavailable' }, 'no database: unavailable');
+  assert.deepEqual(await quietly(() => insertCoopRun({ DB }, { code: CODE })), { ok: false, reason: 'unavailable' }, 'a row missing its fields never throws');
+  console.log('PASS coop-rank: a database error answers unavailable.');
+}
+
+// ---- the board ----------------------------------------------------------------------------------------------------------
+const runRow = (clearMs, kills, a, b, extra = {}) => ({
+  code: CODE, build: BUILD, stamp: 'expedition-1', world: 3, seed: 123456789, clearMs, kills,
+  a: { accountId: a, username: 'stored-' + a }, b: { accountId: b, username: 'stored-' + b }, hash: '00000063', ...extra
+});
+const addAccount = (DB, id, name) => DB.prepare('INSERT INTO accounts (id, username, username_skeleton, created_at) VALUES (?, ?, ?, ?)').bind(id, name, nameSkeleton(name), 1).run();
+
+{
+  const DB = await newDb();
+  const env = { DB };
+  assert.deepEqual(await coopBoard(env, null), { rows: [], me: null }, 'an empty board (the table is created on first use)');
+  for (const [id, name] of [['p1', 'Pia'], ['p2', 'Quin'], ['p3', 'Rex'], ['p4', 'Sol']]) await addAccount(DB, id, name);
+  // Tie on time: more kills first; tie on both: the older run first. Other stamps are not on this board.
+  await insertCoopRun(env, runRow(90000, 10, 'p1', 'p2'));
+  await insertCoopRun(env, runRow(80000, 10, 'p3', 'p4'));
+  await insertCoopRun(env, runRow(80000, 12, 'p1', 'p3'));
+  await insertCoopRun(env, runRow(80000, 12, 'p2', 'p4'));
+  await insertCoopRun(env, runRow(1000, 99, 'p1', 'p2', { stamp: 'expedition-2' }));
+  const board = await coopBoard(env, null);
+  assert.deepEqual(board.rows.map(r => [r.rank, r.clearMs, r.kills, r.a, r.b]), [
+    [1, 80000, 12, 'Pia', 'Rex'], [2, 80000, 12, 'Quin', 'Sol'], [3, 80000, 10, 'Rex', 'Sol'], [4, 90000, 10, 'Pia', 'Quin']
+  ], 'ordered by clear time, then kills (most first), then age; current account names');
+  assert.deepEqual(Object.keys(board.rows[0]), ['rank', 'a', 'b', 'world', 'clearMs', 'kills', 'date']);
+  assert.equal(board.rows[0].world, 3);
+  assert.match(board.rows[0].date, /^\d{4}-\d{2}-\d{2}$/, 'the date is a UTC day');
+  assert.equal(board.me, null, 'no account, no me');
+  assert.equal(/"p\d"/.test(JSON.stringify(board)), false, 'no account id is ever returned');
+  assert.deepEqual((await coopBoard(env, 'p4')).me, board.rows[1], 'my best row, with its rank');
+  assert.equal((await coopBoard(env, 'p1')).me.rank, 1, 'either seat counts, and the best row wins');
+  assert.equal((await coopBoard(env, 'p3')).me.rank, 1);
+  assert.equal((await coopBoard(env, 'nobody')).me, null, 'an account with no run');
+
+  // 60 more runs: the board caps at 50; a player below the cut is pinned with a rank past 50.
+  for (let i = 0; i < 60; i++) await insertCoopRun(env, runRow(100000 + i * 10, 1, 'f' + i, 'g' + i));
+  const full = await coopBoard(env, 'f59');
+  assert.equal(full.rows.length, 50, 'capped at 50');
+  assert.deepEqual(full.rows.map(r => r.rank), Array.from({ length: 50 }, (_, i) => i + 1));
+  assert.equal(full.rows.at(-1).clearMs, 100000 + 45 * 10, 'the 50th row is the 46th slow run');
+  assert.equal(full.me.rank, 4 + 60, 'pinned below the cut with its real rank');
+  assert.equal(full.me.clearMs, 100590);
+  assert.equal(full.me.a, 'stored-f59', 'an account that is not in the accounts table keeps the name stored with the run');
+  console.log('PASS coop-board: orders by clear time then kills, caps at 50, pins me.');
+}
+
+{
+  const DB = await newDb();
+  const env = { DB };
+  await addAccount(DB, 'p1', 'Pia');
+  await addAccount(DB, 'p2', 'Quin');
+  await insertCoopRun(env, runRow(80000, 10, 'p1', 'p2'));
+  assert.deepEqual((await coopBoard(env, 'p1')).rows.map(r => [r.a, r.b]), [['Pia', 'Quin']]);
+  await DB.prepare('UPDATE accounts SET username = ? WHERE id = ?').bind('Pia the Bold', 'p1').run();
+  const renamed = await coopBoard(env, 'p1');
+  assert.deepEqual(renamed.rows.map(r => [r.a, r.b]), [['Pia the Bold', 'Quin']], 'a renamed account shows its new name');
+  assert.equal(renamed.me.a, 'Pia the Bold', 'and so does the pinned row');
+  assert.equal(DB.sqlite.prepare('SELECT a_name FROM coop_runs').get().a_name, 'stored-p1', 'the stored name is only the fallback');
+  // No accounts table at all (a bare database): the stored names are shown.
+  const bare = { DB: createD1(openDatabase(':memory:')) };
+  await insertCoopRun(bare, runRow(80000, 10, 'p1', 'p2'));
+  assert.deepEqual((await coopBoard(bare, null)).rows.map(r => [r.a, r.b]), [['stored-p1', 'stored-p2']]);
+  console.log('PASS coop-board: a renamed account shows its new name.');
+}
+
+{
+  // The table and index are created lazily, and drizzle 0007 builds the same ones.
+  const lazy = createD1(openDatabase(':memory:'));
+  await ensureCoopTables(lazy);
+  await ensureCoopTables(lazy);
+  const migrated = createD1(openDatabase(':memory:', 'drizzle', fs));
+  const shape = db => ({
+    columns: db.sqlite.prepare("PRAGMA table_info('coop_runs')").all().map(c => [c.name, c.type, c.notnull, c.dflt_value, c.pk]),
+    indexes: db.sqlite.prepare("PRAGMA index_list('coop_runs')").all().filter(i => i.origin === 'c').map(i => [i.name, db.sqlite.prepare(`PRAGMA index_info('${i.name}')`).all().map(c => c.name)])
+  });
+  assert.deepEqual(shape(migrated), shape(lazy), 'the migration and the lazy bootstrap build the same table');
+  assert.deepEqual(shape(lazy).columns.map(c => c[0]), ['id', 'created_at', 'version', 'stamp', 'world', 'seed', 'clear_ms', 'kills', 'a_account', 'a_name', 'b_account', 'b_name', 'room', 'hash']);
+  assert.deepEqual(shape(lazy).indexes, [['coop_runs_board', ['stamp', 'clear_ms', 'kills']]]);
+  assert.doesNotThrow(() => migrated.sqlite.exec(fs.readFileSync('drizzle/0007_coop_runs.sql', 'utf8').replaceAll('--> statement-breakpoint', '')), 'the migration is re-runnable');
+  const journal = JSON.parse(fs.readFileSync('drizzle/meta/_journal.json', 'utf8')).entries.at(-1);
+  assert.deepEqual([journal.idx, journal.tag], [7, '0007_coop_runs']);
+  const snapshot = JSON.parse(fs.readFileSync('drizzle/meta/0007_snapshot.json', 'utf8'));
+  const previous = JSON.parse(fs.readFileSync('drizzle/meta/0006_snapshot.json', 'utf8'));
+  assert.equal(snapshot.prevId, previous.id);
+  assert.notEqual(snapshot.id, previous.id);
+  assert.deepEqual(Object.keys(snapshot.tables.coop_runs.columns), shape(lazy).columns.map(c => c[0]));
+  assert.ok(snapshot.tables.daily_stats && snapshot.tables.scores, 'the other tables carry over');
+  console.log('PASS coop-runs: the lazy table and drizzle 0007 agree.');
 }
 
 // ---- a finished room rebuilt keeps its done window (a started room with no answer is buried, above) ----------------------
@@ -732,28 +953,71 @@ async function lobbyRoom(extra = {}, helloExtra = [{}, {}]) {
     console.log('PASS coop-api: a failing limiter answers 503, Retry-After is exposed, the unkeyed fallback buckets IPv6 by /64.');
   }
 
-  // The preflight, the other methods, the board's placeholder and unknown paths.
+  // The preflight, the other methods and unknown paths.
   {
     const preflight = await handleCoop(new Request('https://api.riftborn.us/coop/rooms', { method: 'OPTIONS', headers: { Origin: ORIGIN.preview } }), apiEnv());
     assert.equal(preflight.status, 204);
     assert.equal(preflight.headers.get('Access-Control-Allow-Origin'), ORIGIN.preview);
     assert.equal(preflight.headers.get('Access-Control-Allow-Methods'), 'GET, POST, OPTIONS');
-    assert.equal(preflight.headers.get('Access-Control-Allow-Headers'), 'Content-Type');
+    assert.equal(preflight.headers.get('Access-Control-Allow-Headers'), 'Content-Type, Authorization', 'the board takes the sign-in token');
     assert.equal(preflight.headers.get('Vary'), 'Origin');
     assert.equal((await handleCoop(new Request('https://api.riftborn.us/coop/rooms', { method: 'OPTIONS', headers: { Origin: ORIGIN.foreign } }), apiEnv())).status, 403);
     const wrongMethod = await handleCoop(new Request('https://api.riftborn.us/coop/rooms', { headers: { Origin: ORIGIN.live } }), apiEnv());
     assert.equal(wrongMethod.status, 405);
     standard(wrongMethod, ORIGIN.live);
-    const board = await handleCoop(new Request('https://api.riftborn.us/coop/board', { headers: { Origin: ORIGIN.live } }), apiEnv());
-    assert.equal(board.status, 501);
-    assert.deepEqual(await board.json(), { error: 'not yet' });
-    standard(board, ORIGIN.live);
-    assert.equal((await handleCoop(new Request('https://api.riftborn.us/coop/board', { headers: { Origin: ORIGIN.foreign } }), apiEnv())).headers.get('Access-Control-Allow-Origin'), null);
     const unknown = await handleCoop(new Request('https://api.riftborn.us/coop/nothing', { headers: { Origin: ORIGIN.live } }), apiEnv());
     assert.equal(unknown.status, 404);
     standard(unknown, ORIGIN.live);
-    console.log('PASS coop-api: preflight, methods, the board placeholder and unknown paths.');
+    console.log('PASS coop-api: preflight, methods and unknown paths.');
   }
+
+    // The board: a co-op origin only, { rows, me } with the standard headers, me from the Bearer token (null for none or a bad one).
+    {
+      const DB = await newDb();
+      const ann = await seedAccount(DB, 'acc-ann', 'Ann');
+      await seedAccount(DB, 'acc-bob', 'Bob');
+      const env = apiEnv({ DB, AUTH_SIGNING_KEY: KEY });
+      const get = (origin, token, method = 'GET') =>
+        new Request('https://api.riftborn.us/coop/board', { method, headers: { ...(origin ? { Origin: origin } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) } });
+      const empty = await handleCoop(get(ORIGIN.live), env);
+      assert.equal(empty.status, 200);
+      assert.deepEqual(await empty.json(), { rows: [], me: null });
+      standard(empty, ORIGIN.live);
+      assert.equal(empty.headers.get('Content-Type'), 'application/json');
+      await insertCoopRun(env, runRow(80000, 10, 'acc-ann', 'acc-bob'));
+      const anon = await (await handleCoop(get(ORIGIN.dev), env)).json();
+      assert.deepEqual(anon.rows.map(r => [r.rank, r.a, r.b, r.clearMs, r.kills]), [[1, 'Ann', 'Bob', 80000, 10]]);
+      assert.equal(anon.me, null, 'no token: me is null');
+      const mine = await handleCoop(get(ORIGIN.preview, ann), env);
+      assert.equal(mine.status, 200);
+      standard(mine, ORIGIN.preview);
+      assert.deepEqual((await mine.json()).me, anon.rows[0], 'my best row with its rank');
+      for (const token of ['nope', randomToken()]) {
+        const bad = await handleCoop(get(ORIGIN.live, token), env);
+        assert.equal(bad.status, 200, 'a bad token is not an error');
+        assert.equal((await bad.json()).me, null);
+      }
+      for (const origin of [ORIGIN.foreign, null]) {
+        const refused = await handleCoop(get(origin), env);
+        assert.equal(refused.status, 403, `board from ${origin}`);
+        assert.deepEqual(await refused.json(), { error: 'forbidden_origin' });
+        assert.equal(refused.headers.get('Access-Control-Allow-Origin'), null);
+        assert.equal(refused.headers.get('Cache-Control'), 'no-store');
+      }
+      const wrong = await handleCoop(get(ORIGIN.live, undefined, 'POST'), env);
+      assert.equal(wrong.status, 405);
+      assert.equal(wrong.headers.get('Allow'), 'GET, OPTIONS');
+      standard(wrong, ORIGIN.live);
+      const noDb = await handleCoop(get(ORIGIN.live), apiEnv());
+      assert.equal(noDb.status, 503);
+      assert.deepEqual(await noDb.json(), { error: 'unavailable' });
+      standard(noDb, ORIGIN.live);
+      const broken = apiEnv({ DB: { prepare() { throw new Error('D1 down'); }, batch() { throw new Error('D1 down'); } }, AUTH_SIGNING_KEY: KEY });
+      const down = await quietly(() => handleCoop(get(ORIGIN.live), broken));
+      assert.equal(down.status, 503);
+      assert.deepEqual(await down.json(), { error: 'unavailable' });
+      console.log('PASS coop-api: the board answers { rows, me } to co-op origins only, with me from the Bearer token.');
+    }
 }
 
 console.log('PASS coop-room: all checks.');

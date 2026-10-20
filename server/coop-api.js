@@ -5,10 +5,12 @@
 //   OPTIONS *                       the preflight (co-op origins)
 //   POST /coop/rooms { build, proto }   opens a room -> 201 { code }
 //   GET  /coop/rooms/:code/ws          the WebSocket upgrade, forwarded to the room unchanged
-//   GET  /coop/board                   the Expedition board (Task 5.3); 501 until then
+//   GET  /coop/board                   the Expedition board -> { rows, me } (co-op origins only; me from the Bearer token)
+// The ranked runs live in the coop_runs table of the Worker's D1 database (created lazily, like the other tables; drizzle 0007 mirrors it).
 import { HOSTS } from '../site.hosts.mjs';
-import { ipLimitKey, ipSubject } from './accounts-api.js';
+import { ipLimitKey, ipSubject, scoreAccounts } from './accounts-api.js';
 import { readBodyCapped } from './stats-api.js';
+import { utcDay } from './stats-counters.js';
 import { randomCode, validCode } from './coop/protocol.js';
 
 /** A create request is refused above this many bytes (the real one is about 40). */
@@ -17,7 +19,90 @@ export const COOP_CREATE_BODY_MAX = 512;
 export const COOP_CREATE_TRIES = 5;
 
 const PREVIEW_ORIGIN = /^https:\/\/[a-z0-9-]+\.riftborn-dev\.pages\.dev$/;
-const PREFLIGHT = Object.freeze({ 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400' });
+/** The board a run is ranked on (the room's config.stamp), and how many rows it shows. */
+export const COOP_STAMP = 'expedition-1';
+export const COOP_BOARD_ROWS = 50;
+
+// The preflight allows Authorization: the board reads the player's sign-in token to pin their own row.
+const PREFLIGHT = Object.freeze({ 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Max-Age': '86400' });
+
+/**
+ * The ranked runs. The production database is out of reach of migrations, so the table is created on first use (as the accounts,
+ * feedback and daily_stats tables are); drizzle/0007_coop_runs.sql and db/schema.ts mirror it for previews and tests.
+ * A row is one cleared run by two signed-in players; the names are as they were then (the board shows the accounts' current ones).
+ */
+export const COOP_SCHEMA = Object.freeze([
+  'CREATE TABLE IF NOT EXISTS coop_runs (id INTEGER PRIMARY KEY, created_at INTEGER NOT NULL, version TEXT NOT NULL, stamp TEXT NOT NULL, world INTEGER NOT NULL, seed INTEGER NOT NULL, clear_ms INTEGER NOT NULL, kills INTEGER NOT NULL, a_account TEXT NOT NULL, a_name TEXT NOT NULL, b_account TEXT NOT NULL, b_name TEXT NOT NULL, room TEXT NOT NULL, hash TEXT NOT NULL)',
+  'CREATE INDEX IF NOT EXISTS coop_runs_board ON coop_runs (stamp, clear_ms, kills)'
+]);
+
+const tablesReady = new WeakMap(); // DB binding -> Promise, once per isolate
+
+/** Creates the coop_runs table and its index if they are not there yet (once per DB binding; a failed bootstrap retries next time). */
+export function ensureCoopTables(db) {
+  let promise = tablesReady.get(db);
+  if (!promise) {
+    promise = (async () => {
+      if (typeof db.batch === 'function') await db.batch(COOP_SCHEMA.map(sql => db.prepare(sql)));
+      else for (const sql of COOP_SCHEMA) await db.prepare(sql).run();
+    })();
+    tablesReady.set(db, promise);
+    promise.catch(() => tablesReady.delete(db));
+  }
+  return promise;
+}
+
+const INSERT_RUN = 'INSERT INTO coop_runs (created_at, version, stamp, world, seed, clear_ms, kills, a_account, a_name, b_account, b_name, room, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+
+/**
+ * Writes a cleared run to the board. `row` is the room core's board row: { code, build, stamp, world, seed, clearMs, kills,
+ * a: { accountId, username }, b: { accountId, username }, hash }. Never throws: -> { ok: true } or { ok: false, reason: 'unavailable' }.
+ */
+export async function insertCoopRun(env, row) {
+  try {
+    if (!env?.DB) return { ok: false, reason: 'unavailable' };
+    await ensureCoopTables(env.DB);
+    await env.DB.prepare(INSERT_RUN)
+      .bind(Date.now(), row.build, row.stamp, row.world, row.seed, row.clearMs, row.kills, row.a.accountId, row.a.username, row.b.accountId, row.b.username, row.code, row.hash)
+      .run();
+    return { ok: true };
+  } catch (error) {
+    console.error('Coop run write failed', error?.message || 'unknown error');
+    return { ok: false, reason: 'unavailable' };
+  }
+}
+
+// The best time first, then the most kills, then the older run.
+const BOARD_ORDER = 'r.clear_ms ASC, r.kills DESC, r.id ASC';
+const BOARD_COLUMNS = 'r.id AS id, r.world AS world, r.clear_ms AS clear_ms, r.kills AS kills, r.created_at AS created_at';
+
+/**
+ * The Expedition board: { rows, me }. rows are the top 50 as { rank, a, b, world, clearMs, kills, date }, a and b being the accounts'
+ * current usernames (joined at read time, as the score boards do, so a rename reaches old runs; a deleted account keeps the name
+ * stored with its run). me is the account's best row with its real rank (it can be below the 50), or null. No account id is returned.
+ * Throws when the database cannot be read; the route answers 503.
+ */
+export async function coopBoard(env, accountId) {
+  const db = env.DB;
+  await ensureCoopTables(db);
+  const joined = await scoreAccounts.ready(env);
+  const select = joined
+    ? `SELECT ${BOARD_COLUMNS}, COALESCE(x.username, r.a_name) AS a, COALESCE(y.username, r.b_name) AS b FROM coop_runs r LEFT JOIN accounts x ON x.id = r.a_account LEFT JOIN accounts y ON y.id = r.b_account`
+    : `SELECT ${BOARD_COLUMNS}, r.a_name AS a, r.b_name AS b FROM coop_runs r`;
+  const shown = (row, rank) => ({ rank, a: row.a, b: row.b, world: row.world, clearMs: row.clear_ms, kills: row.kills, date: utcDay(row.created_at) });
+  const top = await db.prepare(`${select} WHERE r.stamp = ? ORDER BY ${BOARD_ORDER} LIMIT ${COOP_BOARD_ROWS}`).bind(COOP_STAMP).all();
+  const rows = top.results.map((row, i) => shown(row, i + 1));
+  let me = null;
+  if (typeof accountId === 'string' && accountId) {
+    const best = await db.prepare(`${select} WHERE r.stamp = ? AND (r.a_account = ? OR r.b_account = ?) ORDER BY ${BOARD_ORDER} LIMIT 1`).bind(COOP_STAMP, accountId, accountId).first();
+    if (best) {
+      const ahead = await db.prepare('SELECT COUNT(*) AS n FROM coop_runs WHERE stamp = ? AND (clear_ms < ? OR (clear_ms = ? AND (kills > ? OR (kills = ? AND id < ?))))')
+        .bind(COOP_STAMP, best.clear_ms, best.clear_ms, best.kills, best.kills, best.id).first();
+      me = shown(best, Number(ahead?.n ?? 0) + 1);
+    }
+  }
+  return { rows, me };
+}
 
 /**
  * Which kind of page this Origin is: 'live' (riftborn.us), 'test' (dev.riftborn.us and the branch previews of riftborn-dev), or
@@ -115,6 +200,19 @@ async function openSocket(request, env, origin, code) {
   }
 }
 
+// GET /coop/board: the rows, and the signed-in player's own row. A missing, bad or unverifiable token only means `me` is null.
+async function boardAnswer(request, env, origin) {
+  if (!env.DB) return reply({ error: 'unavailable' }, 503, origin);
+  try {
+    const session = await scoreAccounts.session(request, env);
+    const accountId = session && !session.unauthorized && !session.unavailable && typeof session.id === 'string' ? session.id : null;
+    return reply(await coopBoard(env, accountId), 200, origin);
+  } catch (error) {
+    console.error('Coop board failed', error?.message || 'unknown error');
+    return reply({ error: 'unavailable' }, 503, origin);
+  }
+}
+
 /** The /coop/ routes. -> a Response, or null when the path is not ours. */
 export async function handleCoop(request, env, ctx) {
   const url = new URL(request.url);
@@ -130,7 +228,8 @@ export async function handleCoop(request, env, ctx) {
   }
   if (route === 'board') {
     if (request.method !== 'GET') return reply({ error: 'method_not_allowed' }, 405, origin, { Allow: 'GET, OPTIONS' });
-    return reply({ error: 'not yet' }, 501, origin); // Task 5.3
+    if (!kind) return reply({ error: 'forbidden_origin' }, 403, null);
+    return boardAnswer(request, env, origin);
   }
   if (route === 'rooms') {
     if (request.method !== 'POST') return reply({ error: 'method_not_allowed' }, 405, origin, { Allow: 'POST, OPTIONS' });

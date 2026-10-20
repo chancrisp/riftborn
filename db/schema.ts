@@ -12,3 +12,9 @@ export const feedback=sqliteTable('feedback',{
 // Anonymous daily counters for the player metrics (server/stats-api.js, server/stats-counters.js): one row per day, metric and
 // dimension, never a player. Production gets the table lazily; the migration keeps previews and tests the same.
 export const dailyStats=sqliteTable('daily_stats',{day:text('day').notNull(),metric:text('metric').notNull(),dim:text('dim').notNull(),n:integer('n').notNull().default(0)},table=>[primaryKey({columns:[table.day,table.metric,table.dim]})]);
+// Ranked co-op Expedition clears (server/coop-api.js): one row per cleared run by two signed-in players. Production gets the table
+// lazily; the migration keeps previews and tests the same.
+export const coopRuns=sqliteTable('coop_runs',{
+ id:integer('id').primaryKey(),createdAt:integer('created_at').notNull(),version:text('version').notNull(),stamp:text('stamp').notNull(),world:integer('world').notNull(),seed:integer('seed').notNull(),clearMs:integer('clear_ms').notNull(),kills:integer('kills').notNull(),
+ aAccount:text('a_account').notNull(),aName:text('a_name').notNull(),bAccount:text('b_account').notNull(),bName:text('b_name').notNull(),room:text('room').notNull(),hash:text('hash').notNull()
+},table=>[index('coop_runs_board').on(table.stamp,table.clearMs,table.kills)]);
