@@ -359,4 +359,143 @@ async function lobbyRoom(extra = {}, helloExtra = [{}, {}]) {
   console.log('PASS coop-room: without the 5.3 functions every seat is a guest.');
 }
 
+// ---- a finished room rebuilt keeps its done window (a started room with no answer is buried, above) ----------------------
+{
+  const origin = clock.t;
+  const { ctx, room, a, b } = await lobbyRoom();
+  const secretA = ctx.data.get('room').seats[0].secret;
+  await say(room, a, { type: 'config', config: config() });
+  const done = { type: 'result', t: 100, outcome: 'cleared', clearTicks: 100, kills: 5, crystals: 3, h: 99 };
+  await say(room, a, done);
+  await say(room, b, done);
+  assert.deepEqual(a.sent.filter(m => m.type === 'ranked'), [{ type: 'ranked', ok: false, reason: 'dev' }], 'a dev room answers at once');
+  const saved = ctx.data.get('room');
+  assert.deepEqual(saved.answer, { type: 'ranked', ok: false, reason: 'dev' });
+  assert.ok(saved.doneUntil > clock.t, 'the done window is saved');
+
+  const rebuilt = new CoopRoom(ctx, {});
+  await rebuilt.ready;
+  assert.deepEqual(ctx.data.get('room'), saved, 'a finished room is not buried by the rebuild');
+  assert.ok(ctx.alarm !== null && ctx.alarm <= saved.doneUntil);
+  assert.equal((await create(rebuilt)).status, 409, 'it still holds its code');
+  // The host comes back on a new socket with its secret and takes its seat over from the old one.
+  const c = await connect(rebuilt);
+  await say(rebuilt, c, hello('Host', { resume: secretA, got: -1 }));
+  assert.deepEqual(types(c), ['welcome', 'config', 'start', 'ranked']);
+  assert.deepEqual(a.closed, { code: 1008, reason: 'error' }, 'the old socket is let go');
+  // The window runs out as before: closed done, storage cleared.
+  while (clock.t < saved.doneUntil - 1) {
+    clock.t = Math.min(clock.t + 20000, saved.doneUntil - 1);
+    await say(rebuilt, c, { type: 'ping', id: 1 });
+    await say(rebuilt, b, { type: 'ping', id: 1 });
+  }
+  b.take();
+  c.take();
+  clock.t = saved.doneUntil;
+  await rebuilt.alarm();
+  assert.deepEqual(b.take(), [{ type: 'closed', reason: 'done' }]);
+  assert.equal(ctx.data.size, 0);
+  assert.equal(ctx.alarm, null);
+  clock.t = origin;
+  console.log('PASS coop-room: a finished room rebuilt keeps its done window.');
+}
+
+// ---- the alarm is never later than the core's next deadline, and an early alarm is harmless ---------------------------------
+{
+  const origin = clock.t;
+  const { ctx, room, a, b } = await lobbyRoom();
+  await say(room, a, { type: 'config', config: config() });
+  a.take();
+  b.take();
+  let fired = 0;
+  for (let step = 0; step < 100; step++) {
+    clock.t = origin + (step + 1) * 1500; // 150 s: five seat timeouts' worth
+    if (ctx.alarm !== null && clock.t >= ctx.alarm) {
+      await room.alarm();
+      fired++;
+    }
+    const puts = ctx.puts;
+    const before = ctx.alarm;
+    await say(room, a, { type: 'ping', id: step });
+    await say(room, b, { type: 'ping', id: step });
+    await say(room, a, cmd(step, 1));
+    await say(room, a, { type: 'hash', t: step * 60, h: 1 });
+    assert.equal(ctx.puts, puts, 'cmd, hash and ping write nothing');
+    assert.ok(ctx.alarm <= room.core.nextDeadline(), `the alarm (${ctx.alarm}) is never later than the deadline (${room.core.nextDeadline()})`);
+    assert.ok(ctx.alarm <= before, 'and hot messages never move it later');
+    a.take();
+    b.take();
+  }
+  assert.ok(fired >= 4 && fired <= 8, `the alarm woke the room about once per seat timeout (${fired})`);
+  assert.equal(room.core.closedReason, null, 'the room stayed open');
+  // A stale alarm that is later than the deadline is pulled back by the next hot message.
+  ctx.alarm = room.alarmAt = room.core.nextDeadline() + 50000;
+  await say(room, a, { type: 'ping', id: 1000 });
+  assert.ok(ctx.alarm <= room.core.nextDeadline(), 'a hot message pulls a too-late alarm back');
+  a.take();
+  // An alarm that fires before anything is due changes nothing and sets the right one.
+  const state = JSON.stringify(ctx.data.get('room'));
+  await room.alarm();
+  assert.equal(room.core.closedReason, null);
+  assert.deepEqual([a.take(), b.take()], [[], []], 'nobody is told anything');
+  assert.equal(JSON.stringify(ctx.data.get('room')), state, 'and nothing saved changes');
+  assert.equal(ctx.alarm, room.core.nextDeadline(), 'the alarm is set again, exactly');
+  clock.t = origin;
+  console.log('PASS coop-room: the alarm is never later than the next deadline; an early alarm is harmless.');
+}
+
+// ---- the review's smaller fixes -------------------------------------------------------------------------------------------
+{
+  // A takeover clears the old socket's attachment, so a rebuild gives the seat to the new socket.
+  const { ctx, room, a, b } = await lobbyRoom();
+  const c = await connect(room);
+  await say(room, c, hello('Host', { resume: ctx.data.get('room').seats[0].secret }));
+  b.take();
+  assert.equal(a.deserializeAttachment().seat, null, 'the old socket no longer claims the seat');
+  assert.equal(c.deserializeAttachment().seat, 0);
+  const rebuilt = new CoopRoom(ctx, {});
+  await say(rebuilt, c, lobbyOf(['rift-pistol', 'arc-lance'], 'default', false, 3));
+  assert.deepEqual(types(b), ['peer'], 'the new socket holds the seat after a rebuild');
+
+  // A rebuild puts a lost alarm back.
+  ctx.alarm = null;
+  const again = new CoopRoom(ctx, {});
+  await again.ready;
+  assert.equal(ctx.alarm, again.core.nextDeadline());
+
+  // A failed create leaves nothing behind; a failed upgrade leaves no socket behind.
+  const broken = fakeCtx();
+  const fresh = new CoopRoom(broken, {});
+  const realPut = broken.storage.put;
+  broken.storage.put = async () => {
+    throw new Error('storage failed');
+  };
+  await assert.rejects(create(fresh), /storage failed/);
+  broken.storage.put = realPut;
+  assert.equal((await upgrade(fresh)).status, 404, 'no room was left in memory');
+  assert.equal((await create(fresh)).status, 200);
+  const realSet = broken.storage.setAlarm;
+  broken.storage.setAlarm = async () => {
+    throw new Error('alarm failed');
+  };
+  let server = null;
+  const makePair = coopDeps.socketPair;
+  coopDeps.socketPair = () => {
+    const pair = makePair();
+    server = pair.server;
+    return pair;
+  };
+  await assert.rejects(upgrade(fresh), /alarm failed/);
+  coopDeps.socketPair = makePair;
+  broken.storage.setAlarm = realSet;
+  assert.ok(server.closed, 'the server half of a socket nobody got is closed');
+
+  // A message that changes nothing writes nothing.
+  const same = await lobbyRoom();
+  const puts = same.ctx.puts;
+  await say(same.room, same.a, HOST);
+  assert.equal(same.ctx.puts, puts, 'the same lobby message again saves nothing');
+  console.log('PASS coop-room: takeover attachments, alarm re-armed on rebuild, failed create and upgrade, unchanged saves.');
+}
+
 console.log('PASS coop-room: all checks.');

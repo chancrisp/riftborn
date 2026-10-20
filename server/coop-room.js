@@ -77,6 +77,7 @@ export class CoopRoom {
     this.core = null; // null while no room is held (never created, closed, or lost to an eviction)
     this.conns = new Map(); // attachment id -> { id, ws, seat }; the core's `conn`
     this.alarmAt = null; // the alarm as last set
+    this.lastSaved = null; // the `room` text as last written, so a message that changed nothing writes nothing
     this.settling = false;
     // Everything below waits for the saved state to be read; the runtime holds other events back until it is (and the handlers wait too).
     this.ready = ctx.blockConcurrencyWhile(() => this.load());
@@ -111,6 +112,8 @@ export class CoopRoom {
       this.conns.set(conn.id, conn);
       this.core.attach(conn, conn.seat);
     }
+    // The alarm is checked against the core's deadline on every rebuild, so a room whose alarm was lost still ends.
+    await this.after(false);
   }
 
   makeCore(meta, saved) {
@@ -169,8 +172,13 @@ export class CoopRoom {
     if (!core) return;
     if (core.closedReason) return this.bury();
     if (save) {
-      await this.ctx.storage.put('room', core.toJSON());
-      if (this.core !== core) return;
+      const state = core.toJSON();
+      const text = JSON.stringify(state);
+      if (text !== this.lastSaved) {
+        await this.ctx.storage.put('room', state);
+        if (this.core !== core) return;
+        this.lastSaved = text;
+      }
     }
     const at = core.nextDeadline();
     if (at === null) {
@@ -191,6 +199,7 @@ export class CoopRoom {
     this.core = null;
     this.conns.clear();
     this.alarmAt = null;
+    this.lastSaved = null;
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
   }
@@ -238,8 +247,10 @@ export class CoopRoom {
     if (this.core) return reply(409, { error: 'this code is in use' });
     const meta = { code: body.code, build: body.build, proto: body.proto, live: body.live };
     const core = this.makeCore(meta, null);
+    const state = core.toJSON();
+    await this.ctx.storage.put({ meta, room: state });
     this.core = core;
-    await this.ctx.storage.put({ meta, room: core.toJSON() });
+    this.lastSaved = JSON.stringify(state);
     await this.after(false);
     return reply(200, { ok: true, code: meta.code });
   }
@@ -254,7 +265,15 @@ export class CoopRoom {
     server.serializeAttachment({ conn: conn.id, seat: null });
     this.conns.set(conn.id, conn);
     this.run(conn, () => core.open(conn));
-    await this.after(false);
+    try {
+      await this.after(false);
+    } catch (err) {
+      // The client never gets this socket, so the server half must not be left behind.
+      this.conns.delete(conn.id);
+      this.run(conn, () => core.dropped(conn));
+      turnAway(server);
+      throw err;
+    }
     return coopDeps.upgradeResponse(client);
   }
 
@@ -282,16 +301,17 @@ export class CoopRoom {
     const conn = this.connFor(ws);
     if (!this.core || !conn) return turnAway(ws);
     this.run(conn, () => this.core.message(conn, message));
-    this.syncSeat(conn);
+    // A seat the core took from another connection (a resume) is cleared from that socket's attachment too.
+    for (const other of this.conns.values()) this.syncSeat(other);
     const hot = HOT.has(typeOf(message));
     await this.after(!hot, hot);
   }
 
-  async webSocketClose(ws, code, reason) {
+  async webSocketClose(ws, code) {
     await this.ready;
-    // 1005, 1006 and 1015 only ever describe a close; they cannot be sent back.
+    // 1005, 1006 and 1015 only ever describe a close; they cannot be sent back. The peer's reason is not echoed (123-byte limit).
     try {
-      ws.close(code >= 1000 && code <= 4999 && code !== 1005 && code !== 1006 && code !== 1015 ? code : 1000, String(reason ?? '').slice(0, 100));
+      ws.close(code >= 1000 && code <= 4999 && code !== 1005 && code !== 1006 && code !== 1015 ? code : 1000, '');
     } catch {
       /* already closed */
     }
