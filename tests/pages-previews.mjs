@@ -25,7 +25,7 @@ const walk = (dir, base = dir) => fs.readdirSync(dir, { withFileTypes: true }).f
   const file = path.join(dir, entry.name);
   return entry.isDirectory() ? walk(file, base) : [path.relative(base, file).split(path.sep).join('/')];
 }).sort();
-const OFF = { scores: '', reads: '', feedback: '', accounts: '' };
+const OFF = { scores: '', reads: '', feedback: '', accounts: '', coop: '' };
 const devBuild = JSON.parse(read('dev/version.json'));
 // The previews below hold the dev build, so their names start with its version (2.3.0 -> v2-3-0):
 // A is the untagged one, B a tagged one of the same version.
@@ -82,15 +82,15 @@ const API = 'https://api.riftborn.us';
 // dev.riftborn.us's root page reads the live boards; before it, it reads where it posts (nowhere).
 const devReads = devHtml.includes('RIFTBORN_SCORE_READ_BASE');
 assert.deepEqual(hostServices(devHtml, `${previewOrigin(B)}/`), OFF, 'A preview address gets nothing');
-assert.deepEqual(hostServices(devHtml, 'https://dev.riftborn.us/'), { scores: '', reads: devReads ? API : '', feedback: API, accounts: API }, 'The HOST CONFIG runner is real (dev.riftborn.us gets feedback and accounts, never scores)');
-assert.deepEqual(hostServices(read('live/index.html'), 'https://riftborn.us/'), { scores: API, reads: API, feedback: API, accounts: API }, 'riftborn.us reads where it posts');
+assert.deepEqual(hostServices(devHtml, 'https://dev.riftborn.us/'), { scores: '', reads: devReads ? API : '', feedback: API, accounts: API, coop: '' }, 'The HOST CONFIG runner is real (dev.riftborn.us gets feedback and accounts, never scores)');
+assert.deepEqual(hostServices(read('live/index.html'), 'https://riftborn.us/'), { scores: API, reads: API, feedback: API, accounts: API, coop: '' }, 'riftborn.us reads where it posts');
 // Builds before 2.3.1 set no RIFTBORN_SCORE_READ_BASE: they read where they post, and so does the
 // check. The frozen 2.3.0 HOST CONFIG (tests/fixtures) keeps this covered after dev/ and live/ move on.
 {
   const html = withHostConfig2_3_0(devHtml);
   assert.ok(!html.includes('RIFTBORN_SCORE_READ_BASE'), '2.3.0 predates the read base');
-  assert.deepEqual(hostServices(html, 'https://dev.riftborn.us/'), { scores: '', reads: '', feedback: API, accounts: API }, '2.3.0: dev.riftborn.us reads nothing');
-  assert.deepEqual(hostServices(html, 'https://riftborn.us/'), { scores: API, reads: API, feedback: API, accounts: API }, '2.3.0: riftborn.us reads where it posts');
+  assert.deepEqual(hostServices(html, 'https://dev.riftborn.us/'), { scores: '', reads: '', feedback: API, accounts: API, coop: '' }, '2.3.0: dev.riftborn.us reads nothing');
+  assert.deepEqual(hostServices(html, 'https://riftborn.us/'), { scores: API, reads: API, feedback: API, accounts: API, coop: '' }, '2.3.0: riftborn.us reads where it posts');
   assert.deepEqual(hostServices(html, `${previewOrigin(B)}/`), OFF, '2.3.0: a preview address gets nothing');
 }
 // The 2.3.1 HOST CONFIG: dev.riftborn.us's root page reads the live boards (never posts); riftborn.us
@@ -109,9 +109,9 @@ const withReads = html => {
   return out;
 };
 for (const [label, html] of [['2.3.1', withReads(devHtml)], ...(devReads ? [[`dev/ ${devBuild.version}`, devHtml]] : [])]) {
-  assert.deepEqual(hostServices(html, 'https://dev.riftborn.us/'), { scores: '', reads: API, feedback: API, accounts: API }, `${label}: dev.riftborn.us reads the live boards and posts nothing`);
-  assert.deepEqual(hostServices(html, 'https://dev.riftborn.us/classic/'), { scores: '', reads: '', feedback: API, accounts: API }, `${label}: only the root page reads`);
-  assert.deepEqual(hostServices(html, 'https://riftborn.us/'), { scores: API, reads: API, feedback: API, accounts: API }, `${label}: riftborn.us reads where it posts`);
+  assert.deepEqual(hostServices(html, 'https://dev.riftborn.us/'), { scores: '', reads: API, feedback: API, accounts: API, coop: '' }, `${label}: dev.riftborn.us reads the live boards and posts nothing`);
+  assert.deepEqual(hostServices(html, 'https://dev.riftborn.us/classic/'), { scores: '', reads: '', feedback: API, accounts: API, coop: '' }, `${label}: only the root page reads`);
+  assert.deepEqual(hostServices(html, 'https://riftborn.us/'), { scores: API, reads: API, feedback: API, accounts: API, coop: '' }, `${label}: riftborn.us reads where it posts`);
   assert.deepEqual(hostServices(html, `${previewOrigin(B)}/`), OFF, `${label}: a preview address gets nothing`);
 }
 console.log('PASS preview names: v<major>-<minor>-<patch> of the build plus an optional tag, safe Cloudflare branch aliases only (never main = dev.riftborn.us, never a deployment id); preview addresses get no scores, leaderboard reads, feedback or accounts (reads default to the score base before 2.3.1).');
@@ -202,6 +202,22 @@ refused(`${V}-reading`, { edit: html => withReads(html).replace('} else if (h ==
   // ...while a 2.3.1 build that reads only on dev.riftborn.us stages as before.
   const ok = path.join(tmp, 'ok-reads');
   assert.deepEqual(previewProblems(preview(ok, `${V}-reads`, { edit: withReads }), `${V}-reads`), [], 'A 2.3.1 HOST CONFIG passes the preview check');
+}
+{
+  // Co-op (Task 5.2, spec 8.4): a preview may point the co-op relay at https://api.riftborn.us, and nothing else.
+  const anchor = 'window.RIFTBORN_SCORE_API_BASE = window.RIFTBORN_SCORE_API_BASE || scores;';
+  const withCoop = (value, extra = html => html) => html => extra(html).replace(anchor, () => 'window.RIFTBORN_COOP_API_BASE = ' + JSON.stringify(value) + ';\n  ' + anchor);
+  const ok = path.join(tmp, 'ok-coop');
+  const only = preview(ok, V + '-coop', { edit: withCoop(API) });
+  assert.equal(hostServices(read(path.join(only, 'index.html')), previewOrigin(V + '-coop') + '/').coop, API, 'the HOST CONFIG runner reads the co-op base');
+  assert.deepEqual(previewProblems(only, V + '-coop'), [], 'a preview whose only service is the co-op relay at api.riftborn.us passes');
+  assert.deepEqual(previewProblems(preview(ok, V + '-coopr', { edit: withCoop(API, withReads) }), V + '-coopr'), [], 'with a 2.3.1 HOST CONFIG too');
+  for (const [tag, base] of [['coopworker', 'https://riftborn-leaderboard.chanmanc10.workers.dev'], ['coopevil', 'https://evil.example'], ['coophttp', 'http://api.riftborn.us'], ['coopslash', 'https://api.riftborn.us/'], ['coopdev', 'https://dev.riftborn.us']]) {
+    refused(V + '-' + tag, { edit: withCoop(base) }, new RegExp('HOST CONFIG gives https://' + V + '-' + tag + '\\.riftborn-dev\\.pages\\.dev coop \\(' + dots(base) + '\\); a preview may use the co-op relay at https://api\\.riftborn\\.us only'));
+  }
+  // Any other service still fails beside it, and the co-op base does not hide it.
+  refused(V + '-coopscore', { edit: withCoop(API, html => html.replace('} else if (h === "dev.riftborn.us") {', '} else if (/\\.pages\\.dev$/.test(h)) {\n    scores = API;\n  } else if (h === "dev.riftborn.us") {')) }, /pages\.dev scores \(https:\/\/api\.riftborn\.us\)/);
+  refused(V + '-coopfeed', { edit: withCoop(API, html => html.replace('} else if (h === "dev.riftborn.us") {', '} else if (/\\.pages\\.dev$/.test(h)) {\n    feedback = API;\n  } else if (h === "dev.riftborn.us") {')) }, /pages\.dev feedback \(https:\/\/api\.riftborn\.us\); a preview never posts/);
 }
 refused(`${V}-eager`, { edit: html => html.replace('</body>', '<script src="js/riftborn.0123456789.js" type="module"></script></body>') }, /loads the game before the password gate opens/);
 refused(`${V}-nohostconfig`, { edit: html => html.replace('HOST CONFIG', 'HOST SETTINGS') }, /HOST CONFIG: expected one HOST CONFIG block, found 0/);

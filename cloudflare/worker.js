@@ -3,9 +3,14 @@ import { handleScores } from '../server/scores-api.js';
 import { handleFeedback } from '../server/feedback-api.js';
 import { handleAccounts, scoreAccounts } from '../server/accounts-api.js';
 import { handleStats } from '../server/stats-api.js';
+import { handleCoop } from '../server/coop-api.js';
+
+// A Durable Object class must be a named export of the Worker's entry module for Cloudflare to find it (the binding COOP_ROOM names it).
+// The default export stays the only handler.
+export { CoopRoom } from '../server/coop-room.js';
 
 // Every https answer pins the host to https in the browser (api.riftborn.us and workers.dev).
-// (Only the default export: the Workers runtime treats named exports of an entry as entrypoints.)
+// (The default export is the only handler; the one named export is the CoopRoom Durable Object class, below the imports.)
 const HSTS = 'max-age=31536000';
 
 // Production answers only over https. A plaintext request never reaches a handler, so a Bearer
@@ -36,7 +41,8 @@ export default {
     if (refused) return refused;
     // Accounts first (v2.2); scores get the account hooks (session, name protection, username join).
     const response = (await handleAccounts(request, env, ctx)) || (await handleScores(request, env, scoreAccounts)) ||
-      (await handleFeedback(request, env, ctx)) || (await handleStats(request, env, ctx)) || new Response('Not found', { status: 404 });
+      (await handleFeedback(request, env, ctx)) || (await handleStats(request, env, ctx)) ||
+      (await handleCoop(request, env, ctx)) || new Response('Not found', { status: 404 });
     return url.protocol === 'https:' ? withHsts(response) : response;
   }
 };

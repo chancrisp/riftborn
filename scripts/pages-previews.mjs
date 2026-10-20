@@ -26,7 +26,9 @@
 // Every preview is checked before it is staged: a safe name that starts with its build's version,
 // the password gate (the game module loads only after it opens), noindex, and HOST CONFIG giving the
 // preview's own address nothing (never scores, not even leaderboard reads; feedback and accounts
-// stay off too, the Worker only answers riftborn.us and dev.riftborn.us). It gets the dev build's
+// stay off too, the Worker only answers riftborn.us and dev.riftborn.us). The one exception is co-op
+// (spec 8.4): the HOST CONFIG may give a preview RIFTBORN_COOP_API_BASE = https://api.riftborn.us and no other
+// co-op base; the relay answers preview origins and marks their rooms as test rooms. It gets the dev build's
 // headers (strict CSP with the hash of every inline script, X-Robots-Tag noindex), a 404.html and a
 // robots.txt.
 //
@@ -92,7 +94,7 @@ const storage = () => {
 };
 
 /**
- * { scores, reads, feedback, accounts } that the page's HOST CONFIG block sets at `url` (run for
+ * { scores, reads, feedback, accounts, coop } that the page's HOST CONFIG block sets at `url` (run for
  * real). reads (v2.3.1, RIFTBORN_SCORE_READ_BASE) is where the leaderboards are read; the game reads
  * from the score base when it is absent or "" (builds before 2.3.1 never set it), and so does this.
  */
@@ -107,7 +109,7 @@ export function hostServices(html, url) {
   sandbox.window = sandbox;
   vm.runInNewContext(blocks[0], sandbox, { timeout: 1000 });
   const scores = sandbox.RIFTBORN_SCORE_API_BASE;
-  return { scores, reads: sandbox.RIFTBORN_SCORE_READ_BASE || scores, feedback: sandbox.RIFTBORN_FEEDBACK_API_BASE, accounts: sandbox.RIFTBORN_ACCOUNT_API_BASE };
+  return { scores, reads: sandbox.RIFTBORN_SCORE_READ_BASE || scores, feedback: sandbox.RIFTBORN_FEEDBACK_API_BASE, accounts: sandbox.RIFTBORN_ACCOUNT_API_BASE, coop: sandbox.RIFTBORN_COOP_API_BASE || '' };
 }
 
 const readJson = file => {
@@ -144,7 +146,15 @@ export function previewProblems(dir, name) {
   if (!html.includes('<meta name="robots" content="noindex,nofollow">')) problems.push(`${at}: index.html is not noindex`);
   try {
     const services = hostServices(html, `${previewOrigin(name)}/`);
-    for (const [service, base] of Object.entries(services)) if (base) problems.push(`${at}: HOST CONFIG gives ${previewOrigin(name)} ${service} (${base}); a preview never posts or reads scores and has no feedback or accounts`);
+    for (const [service, base] of Object.entries(services)) {
+      if (!base) continue;
+      // The one exception (co-op spec 8.4): a preview plays co-op through the live relay, which marks its rooms as test rooms.
+      if (service === 'coop') {
+        if (base !== HOSTS.api) problems.push(`${at}: HOST CONFIG gives ${previewOrigin(name)} coop (${base}); a preview may use the co-op relay at ${HOSTS.api} only`);
+        continue;
+      }
+      problems.push(`${at}: HOST CONFIG gives ${previewOrigin(name)} ${service} (${base}); a preview never posts or reads scores and has no feedback or accounts`);
+    }
   } catch (error) {
     problems.push(`${at}: HOST CONFIG: ${error.message}`);
   }

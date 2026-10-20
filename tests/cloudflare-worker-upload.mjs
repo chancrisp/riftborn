@@ -141,6 +141,7 @@ const deployed = await uploadModule.deployWorker({
   feedbackAdminKey: 'deploy-key',
   warn: quiet,
   fetchImpl: async (url, init) => {
+    if (init.method === 'GET' && url.endsWith('/workers/scripts')) return new Response(JSON.stringify({ success: true, result: [{ id: 'riftborn-leaderboard', migration_tag: 'coop-v1' }] }), { status: 200 });
     if (init.method === 'GET') {
       assert.equal(url, 'https://api.cloudflare.com/client/v4/accounts/11b52fbbac31279b554fa9490c667017/workers/scripts/riftborn-leaderboard/secrets');
       assert.equal(init.headers.Authorization, 'Bearer test-token');
@@ -199,6 +200,69 @@ assert.ok(uploadModule.ACCOUNT_SECRETS.every(([, , envName]) => !envName.startsW
 const workflow = fs.readFileSync('.github/workflows/cloudflare-worker.yml', 'utf8');
 for (const [, , envName] of uploadModule.ACCOUNT_SECRETS) assert.ok(workflow.includes(`${envName}: \${{ secrets.${envName} }}`), 'The workflow passes ' + envName);
 for (const path of ['server/accounts-api.js', 'server/username-rules.js', 'server/admin-auth.js', 'server/stats-api.js', 'server/stats-counters.js']) assert.ok(workflow.includes(`- '${path}'`), 'The workflow redeploys on ' + path);
+// Co-op relay (Task 5.2): the CoopRoom Durable Object binding, its rate limiter, and its one-time migration.
+{
+  const { COOP_RATE_LIMITER, createWorkerUpload, deployWorker } = uploadModule;
+  const metaOf = async options => JSON.parse(await createWorkerUpload('x', { databaseId, siteOrigin, ...options }).get('metadata').text());
+  assert.deepEqual(COOP_RATE_LIMITER, { type: 'ratelimit', name: 'COOP_RATE_LIMITER', namespace_id: '3307260', simple: { limit: 10, period: 60 } });
+  assert.deepEqual(metadata.bindings.find(binding => binding.name === 'COOP_RATE_LIMITER'), COOP_RATE_LIMITER, 'the upload binds the co-op limiter');
+  assert.deepEqual(metadata.bindings.filter(binding => binding.type === 'durable_object_namespace'), [{ type: 'durable_object_namespace', name: 'COOP_ROOM', class_name: 'CoopRoom' }], 'the upload binds the CoopRoom namespace');
+  // The migration: made once (an empty tag), never again (coop-v1), and a tag it does not know stops the deploy.
+  for (const migrationTag of [undefined, '', null]) {
+    assert.deepEqual((await metaOf({ migrationTag })).migrations, { new_tag: 'coop-v1', new_sqlite_classes: ['CoopRoom'] }, 'migration for tag ' + JSON.stringify(migrationTag));
+  }
+  assert.deepEqual(metadata.migrations, { new_tag: 'coop-v1', new_sqlite_classes: ['CoopRoom'] }, 'a first upload carries the migration');
+  assert.ok(!('migrations' in (await metaOf({ migrationTag: 'coop-v1' }))), 'no migration once coop-v1 is applied');
+  assert.throws(() => createWorkerUpload('x', { databaseId, siteOrigin, migrationTag: 'other' }), /migration tag/i, 'an unknown tag throws');
+  // wrangler.jsonc says the same.
+  const wranglerJson = JSON.parse(fs.readFileSync('cloudflare/wrangler.jsonc', 'utf8'));
+  assert.deepEqual(wranglerJson.durable_objects, { bindings: [{ name: 'COOP_ROOM', class_name: 'CoopRoom' }] });
+  assert.deepEqual(wranglerJson.migrations, [{ tag: 'coop-v1', new_sqlite_classes: ['CoopRoom'] }]);
+  assert.deepEqual(wranglerJson.ratelimits.find(item => item.name === 'COOP_RATE_LIMITER'), { name: 'COOP_RATE_LIMITER', namespace_id: COOP_RATE_LIMITER.namespace_id, simple: COOP_RATE_LIMITER.simple });
+  assert.ok(workflow.includes("- 'server/coop-api.js'") && workflow.includes("- 'server/coop-room.js'") && workflow.includes("- 'server/coop/**'"), 'the workflow redeploys on the co-op files');
+  // deployWorker reads the Worker's migration tag (GET .../workers/scripts) before it uploads.
+  const accountId = '11b52fbbac31279b554fa9490c667017';
+  const listUrl = url => url.endsWith('/workers/scripts');
+  const run = async scripts => {
+    const seen = [];
+    const result = await deployWorker({
+      accountId, apiToken: 'test-token', databaseId, siteOrigin, warn: quiet,
+      fetchImpl: async (url, init) => {
+        seen.push({ method: init.method, url, body: init.body });
+        if (init.method === 'GET' && listUrl(url)) return new Response(JSON.stringify({ success: true, result: scripts }), { status: 200 });
+        if (init.method === 'GET') return new Response(JSON.stringify({ success: true, result: [] }), { status: 200 });
+        return new Response(JSON.stringify({ success: true, result: { id: 'v' } }), { status: 200 });
+      }
+    });
+    assert.equal(result.id, 'v');
+    return seen;
+  };
+  const putMeta = async seen => JSON.parse(await seen.find(call => call.method === 'PUT').body.get('metadata').text());
+  const first = await run([{ id: 'unrelated', migration_tag: 'zzz' }]);
+  const listAt = first.findIndex(call => call.method === 'GET' && call.url === `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts`);
+  assert.ok(listAt >= 0 && listAt < first.findIndex(call => call.method === 'PUT'), 'scripts are listed before the upload');
+  assert.deepEqual((await putMeta(first)).migrations, { new_tag: 'coop-v1', new_sqlite_classes: ['CoopRoom'] }, 'a Worker not yet deployed is migrated');
+  assert.ok('migrations' in (await putMeta(await run([{ id: 'riftborn-leaderboard' }, { id: 'unrelated', migration_tag: 'zzz' }]))), 'the Worker with no tag is migrated');
+  assert.ok(!('migrations' in (await putMeta(await run([{ id: 'unrelated', migration_tag: 'zzz' }, { id: 'riftborn-leaderboard', migration_tag: 'coop-v1' }])))), 'a Worker at coop-v1 is not migrated again');
+  const refused = async reply => {
+    const sent = [];
+    await assert.rejects(deployWorker({
+      accountId, apiToken: 'test-token', databaseId, siteOrigin, warn: quiet,
+      fetchImpl: async (url, init) => {
+        sent.push(init.method);
+        if (init.method === 'GET' && listUrl(url)) return reply;
+        return new Response(JSON.stringify({ success: true, result: [] }), { status: 200 });
+      }
+    }), /migration tag|scripts/i);
+    assert.ok(!sent.includes('PUT'), 'nothing was uploaded');
+  };
+  await refused(new Response(JSON.stringify({ success: true, result: [{ id: 'riftborn-leaderboard', migration_tag: 'v9' }] }), { status: 200 }));
+  // An unreadable list stops the deploy as well: guessing "no tag" would try the one-time migration a second time.
+  await refused(new Response('{}', { status: 403 }));
+  await refused(new Response(JSON.stringify({ success: true, result: null }), { status: 200 }));
+  assert.match(await first.find(call => call.method === 'PUT').body.get('riftborn-worker.mjs').text(), /\/coop\/rooms/, 'the bundled Worker serves the co-op routes');
+  console.log('PASS Cloudflare Worker upload: the CoopRoom binding, the co-op rate limiter, the one-time coop-v1 migration (empty tag migrates, coop-v1 does not, anything else throws), the scripts listing before the upload, wrangler.jsonc and the path filter.');
+}
 // Key rotation: the previous key is an optional secret with the same length rule; ACCOUNTS_LIVE=1
 // refuses a deploy that would drop AUTH_SIGNING_KEY.
 const rotated = JSON.parse(await uploadModule.createWorkerUpload('x', { databaseId, siteOrigin, authSigningKey: 'n'.repeat(43), authSigningKeyPrevious: ' ' + 'o'.repeat(43) + ' ' }).get('metadata').text());
@@ -216,7 +280,7 @@ const { IP_BINDING_LIMIT } = await import('../server/accounts-api.js');
 const limiter = metadata.bindings.find(binding => binding.name === 'ACCOUNTS_RATE_LIMITER');
 assert.ok(limiter && limiter.type === 'ratelimit', 'The accounts rate limiter is bound');
 assert.deepEqual(limiter.simple, IP_BINDING_LIMIT);
-assert.equal(new Set(metadata.bindings.filter(binding => binding.type === 'ratelimit').map(binding => binding.namespace_id)).size, 3, 'Each limiter has its own namespace');
+assert.equal(new Set(metadata.bindings.filter(binding => binding.type === 'ratelimit').map(binding => binding.namespace_id)).size, 4, 'Each limiter has its own namespace');
 
 const wrangler = fs.readFileSync('cloudflare/wrangler.jsonc', 'utf8');
 assert.deepEqual(JSON.parse(wrangler).ratelimits.find(item => item.name === 'ACCOUNTS_RATE_LIMITER'),

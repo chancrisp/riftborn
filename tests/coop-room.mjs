@@ -6,7 +6,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { CoopRoom, coopDeps } from '../server/coop-room.js';
-import { PROTOCOL_VERSION } from '../server/coop/protocol.js';
+import { handleCoop, coopOrigin } from '../server/coop-api.js';
+import { PROTOCOL_VERSION, validCode } from '../server/coop/protocol.js';
 import { HELLO_MS, LOBBY_MS } from '../server/coop/room-core.js';
 
 // ---- the shared files ----------------------------------------------------------------------------------------------
@@ -496,6 +497,218 @@ async function lobbyRoom(extra = {}, helloExtra = [{}, {}]) {
   await say(same.room, same.a, HOST);
   assert.equal(same.ctx.puts, puts, 'the same lobby message again saves nothing');
   console.log('PASS coop-room: takeover attachments, alarm re-armed on rebuild, failed create and upgrade, unchanged saves.');
+}
+
+// ---- the HTTP routes in front of the room (server/coop-api.js) --------------------------------------------------------
+// A fake env stands in for the Worker bindings: COOP_ROOM (a namespace whose rooms answer create like the real object) and the
+// rate limiter. Nothing here touches Cloudflare.
+{
+  const ORIGIN = { live: 'https://riftborn.us', dev: 'https://dev.riftborn.us', preview: 'https://v3-0-0-coop.riftborn-dev.pages.dev', foreign: 'https://evil.example' };
+  const calls = { names: [], creates: [], forwarded: [], limits: [] };
+  const apiEnv = ({ busy = () => false, limit = () => true, ...extra } = {}) => {
+    let draws = 0;
+    return {
+      ENVIRONMENT: 'production',
+      COOP_RATE_LIMITER: {
+        async limit({ key }) {
+          calls.limits.push(key);
+          return { success: limit(calls.limits.length) };
+        }
+      },
+      COOP_ROOM: {
+        idFromName(name) {
+          calls.names.push(name);
+          return { name };
+        },
+        get(id) {
+          return {
+            async fetch(input, init) {
+              if (input instanceof Request) {
+                calls.forwarded.push({ id, request: input });
+                return { status: 101, webSocket: {} };
+              }
+              const body = JSON.parse(init.body);
+              calls.creates.push({ id, url: input, method: init.method, body });
+              draws++;
+              return busy(draws) ? new Response(JSON.stringify({ error: 'this code is in use' }), { status: 409 }) : new Response(JSON.stringify({ ok: true, code: body.code }), { status: 200 });
+            }
+          };
+        }
+      },
+      ...extra
+    };
+  };
+  const reset = () => Object.values(calls).forEach(list => (list.length = 0));
+  const post = (origin, body = { build: BUILD, proto: PROTOCOL_VERSION }, headers = {}) =>
+    new Request('https://api.riftborn.us/coop/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}), ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) });
+  const ws = (code, origin, upgrade = true) =>
+    new Request(`https://api.riftborn.us/coop/rooms/${code}/ws`, { headers: { ...(origin ? { Origin: origin } : {}), ...(upgrade ? { Upgrade: 'websocket' } : {}) } });
+  const standard = (response, origin) => {
+    assert.equal(response.headers.get('Cache-Control'), 'no-store');
+    assert.equal(response.headers.get('Vary'), 'Origin');
+    assert.equal(response.headers.get('Access-Control-Allow-Origin'), origin, `CORS for ${origin}`);
+  };
+
+  // The origin classes.
+  assert.equal(coopOrigin(ORIGIN.live), 'live');
+  assert.equal(coopOrigin(ORIGIN.dev), 'test');
+  assert.equal(coopOrigin(ORIGIN.preview), 'test');
+  for (const bad of [null, undefined, '', ORIGIN.foreign, 'http://riftborn.us', 'https://riftborn.us.evil.example', 'https://evil.example/https://riftborn.us', 'https://riftborn-dev.pages.dev', 'https://a.b.riftborn-dev.pages.dev', 'https://x.riftborn-dev.pages.dev.evil.example', 'https://X.riftborn-dev.pages.dev', 'https://chancrisp.github.io', 'https://feedback.riftborn.us']) {
+    assert.equal(coopOrigin(bad), null, String(bad));
+  }
+  assert.equal(await handleCoop(new Request('https://api.riftborn.us/api/scores'), apiEnv()), null, 'a path outside /coop/ is not ours');
+
+  // A create returns a valid code, from a live page, with the standard headers; the room is named for it.
+  {
+    reset();
+    const response = await handleCoop(post(ORIGIN.live), apiEnv());
+    assert.equal(response.status, 201);
+    standard(response, ORIGIN.live);
+    assert.equal(response.headers.get('Content-Type'), 'application/json');
+    const { code, ...rest } = await response.json();
+    assert.deepEqual(rest, {}, 'only the code comes back');
+    assert.ok(validCode(code), `a valid room code (${code})`);
+    assert.deepEqual(calls.names, ['room:' + code]);
+    assert.equal(calls.creates.length, 1);
+    assert.equal(calls.creates[0].method, 'POST');
+    assert.equal(new URL(calls.creates[0].url).pathname, '/create');
+    assert.deepEqual(calls.creates[0].body, { code, build: BUILD, proto: PROTOCOL_VERSION, live: true });
+    // A different draw each time: 20 creates are not all one code.
+    const codes = new Set();
+    for (let i = 0; i < 20; i++) codes.add((await (await handleCoop(post(ORIGIN.dev), apiEnv())).json()).code);
+    assert.ok(codes.size > 15, 'the codes are random');
+    console.log('PASS coop-api: a create returns a valid code.');
+  }
+
+  // The 11th create in a minute gets 429 (a fake limiter that allows ten), keyed by something that is not the address.
+  {
+    reset();
+    const env = apiEnv({ limit: n => n <= 10 });
+    for (let i = 0; i < 10; i++) assert.equal((await handleCoop(post(ORIGIN.live, undefined, { 'CF-Connecting-IP': '203.0.113.9' }), env)).status, 201, `create ${i + 1}`);
+    const refused = await handleCoop(post(ORIGIN.live, undefined, { 'CF-Connecting-IP': '203.0.113.9' }), env);
+    assert.equal(refused.status, 429);
+    assert.deepEqual(await refused.json(), { error: 'rate_limited' });
+    assert.equal(refused.headers.get('Retry-After'), '60');
+    standard(refused, ORIGIN.live);
+    assert.equal(calls.creates.length, 10, 'the refused create made no room');
+    assert.ok(calls.limits.length === 11 && calls.limits.every(key => key === calls.limits[0] && typeof key === 'string' && key.length > 0), 'one key per sender');
+    // With a signing key the key is a keyed hash, never the address.
+    reset();
+    const keyed = apiEnv({ AUTH_SIGNING_KEY: 'k'.repeat(40) });
+    await handleCoop(post(ORIGIN.live, undefined, { 'CF-Connecting-IP': '203.0.113.9' }), keyed);
+    assert.ok(!calls.limits[0].includes('203.0.113.9'), 'the address is not the limiter key');
+    // No limiter or no namespace bound: closed, nothing created.
+    reset();
+    const noLimiter = apiEnv();
+    delete noLimiter.COOP_RATE_LIMITER;
+    assert.equal((await handleCoop(post(ORIGIN.live), noLimiter)).status, 503);
+    assert.equal(calls.creates.length, 0);
+    assert.equal((await handleCoop(post(ORIGIN.live), apiEnv({ COOP_ROOM: undefined }))).status, 503);
+    console.log('PASS coop-api: the 11th create in a minute gets 429.');
+  }
+
+  // A busy code is redrawn, up to five times.
+  {
+    reset();
+    const response = await handleCoop(post(ORIGIN.live), apiEnv({ busy: draw => draw <= 2 }));
+    assert.equal(response.status, 201);
+    assert.equal(calls.creates.length, 3, 'two busy codes, then one that took');
+    assert.equal(new Set(calls.names).size, 3, 'each draw names its own room');
+    assert.equal((await response.json()).code, calls.creates[2].body.code, 'the code returned is the one that took');
+    reset();
+    const allBusy = await handleCoop(post(ORIGIN.live), apiEnv({ busy: () => true }));
+    assert.equal(allBusy.status, 503);
+    assert.deepEqual(await allBusy.json(), { error: 'busy' });
+    assert.equal(calls.creates.length, 5, 'five tries, no more');
+    // A room that fails is not retried and not described.
+    reset();
+    const env = apiEnv();
+    env.COOP_ROOM.get = () => ({ fetch: async () => new Response('boom', { status: 500 }) });
+    const failed = await handleCoop(post(ORIGIN.live), env);
+    assert.equal(failed.status, 503);
+    assert.deepEqual(await failed.json(), { error: 'unavailable' });
+    console.log('PASS coop-api: a busy code is redrawn.');
+  }
+
+  // Bad code 400, foreign origin 403, missing upgrade 426; a good upgrade is forwarded as it came.
+  {
+    reset();
+    const env = apiEnv();
+    const bad = await handleCoop(ws('abc123', ORIGIN.live), env);
+    assert.equal(bad.status, 400);
+    assert.deepEqual(await bad.json(), { error: 'bad_code' });
+    assert.equal((await handleCoop(ws('abcd23', ORIGIN.live), env)).status, 400, 'a code is upper case');
+    assert.equal((await handleCoop(ws('ABCDI1', ORIGIN.live), env)).status, 400, 'no I, O, 0 or 1');
+    for (const origin of [ORIGIN.foreign, null, 'http://riftborn.us']) {
+      const refused = await handleCoop(ws(CODE, origin), env);
+      assert.equal(refused.status, 403, String(origin));
+      assert.equal(refused.headers.get('Access-Control-Allow-Origin'), null, 'no CORS for a foreign origin');
+      assert.equal(refused.headers.get('Cache-Control'), 'no-store');
+    }
+    const plain = await handleCoop(ws(CODE, ORIGIN.dev, false), env);
+    assert.equal(plain.status, 426);
+    standard(plain, ORIGIN.dev);
+    assert.equal(calls.forwarded.length, 0, 'nothing reached a room yet');
+    for (const origin of [ORIGIN.live, ORIGIN.dev, ORIGIN.preview]) {
+      reset();
+      const request = ws(CODE, origin);
+      const answer = await handleCoop(request, env);
+      assert.equal(answer.status, 101, `${origin} upgrades`);
+      assert.deepEqual(calls.names, ['room:' + CODE]);
+      assert.equal(calls.forwarded.length, 1);
+      assert.equal(calls.forwarded[0].request, request, 'the request is forwarded unchanged');
+    }
+    // The room's own refusal (an unknown code) keeps its status and gets the standard headers.
+    const missing = apiEnv();
+    missing.COOP_ROOM.get = () => ({ fetch: async () => new Response(JSON.stringify({ error: 'not found' }), { status: 404 }) });
+    const gone = await handleCoop(ws(CODE, ORIGIN.live), missing);
+    assert.equal(gone.status, 404);
+    standard(gone, ORIGIN.live);
+    // The same gates guard a create.
+    for (const origin of [ORIGIN.foreign, null]) assert.equal((await handleCoop(post(origin), env)).status, 403, `create from ${origin}`);
+    // Bad bodies make no room.
+    reset();
+    for (const body of ['not json', '[]', 'null', { build: 5, proto: 1 }, { build: '', proto: 1 }, { build: 'x'.repeat(41), proto: 1 }, { build: BUILD, proto: 'one' }, { build: BUILD }]) {
+      assert.equal((await handleCoop(post(ORIGIN.live, body), env)).status, 400, JSON.stringify(body));
+    }
+    assert.equal((await handleCoop(post(ORIGIN.live, 'x'.repeat(2000)), env)).status, 413);
+    assert.equal((await handleCoop(post(ORIGIN.live, undefined, { 'Content-Type': 'text/plain' }), env)).status, 400);
+    assert.equal(calls.creates.length, 0, 'no bad body made a room');
+    console.log('PASS coop-api: bad code 400, foreign origin 403, missing upgrade 426.');
+  }
+
+  // Only a riftborn.us page in the production Worker makes a live room.
+  {
+    for (const [origin, environment, live] of [[ORIGIN.live, 'production', true], [ORIGIN.live, 'staging', false], [ORIGIN.live, undefined, false], [ORIGIN.dev, 'production', false], [ORIGIN.preview, 'production', false]]) {
+      reset();
+      assert.equal((await handleCoop(post(origin), apiEnv({ ENVIRONMENT: environment }))).status, 201);
+      assert.equal(calls.creates[0].body.live, live, `${origin} in ${environment}`);
+    }
+    console.log('PASS coop-api: a preview or dev room is not live; a riftborn.us room in production is.');
+  }
+
+  // The preflight, the other methods, the board's placeholder and unknown paths.
+  {
+    const preflight = await handleCoop(new Request('https://api.riftborn.us/coop/rooms', { method: 'OPTIONS', headers: { Origin: ORIGIN.preview } }), apiEnv());
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get('Access-Control-Allow-Origin'), ORIGIN.preview);
+    assert.equal(preflight.headers.get('Access-Control-Allow-Methods'), 'GET, POST, OPTIONS');
+    assert.equal(preflight.headers.get('Access-Control-Allow-Headers'), 'Content-Type');
+    assert.equal(preflight.headers.get('Vary'), 'Origin');
+    assert.equal((await handleCoop(new Request('https://api.riftborn.us/coop/rooms', { method: 'OPTIONS', headers: { Origin: ORIGIN.foreign } }), apiEnv())).status, 403);
+    const wrongMethod = await handleCoop(new Request('https://api.riftborn.us/coop/rooms', { headers: { Origin: ORIGIN.live } }), apiEnv());
+    assert.equal(wrongMethod.status, 405);
+    standard(wrongMethod, ORIGIN.live);
+    const board = await handleCoop(new Request('https://api.riftborn.us/coop/board', { headers: { Origin: ORIGIN.live } }), apiEnv());
+    assert.equal(board.status, 501);
+    assert.deepEqual(await board.json(), { error: 'not yet' });
+    standard(board, ORIGIN.live);
+    assert.equal((await handleCoop(new Request('https://api.riftborn.us/coop/board', { headers: { Origin: ORIGIN.foreign } }), apiEnv())).headers.get('Access-Control-Allow-Origin'), null);
+    const unknown = await handleCoop(new Request('https://api.riftborn.us/coop/nothing', { headers: { Origin: ORIGIN.live } }), apiEnv());
+    assert.equal(unknown.status, 404);
+    standard(unknown, ORIGIN.live);
+    console.log('PASS coop-api: preflight, methods, the board placeholder and unknown paths.');
+  }
 }
 
 console.log('PASS coop-room: all checks.');

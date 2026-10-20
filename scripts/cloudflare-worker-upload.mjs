@@ -25,6 +25,12 @@ const SIGNING_KEYS = Object.freeze(['AUTH_SIGNING_KEY', 'AUTH_SIGNING_KEY_PREVIO
 // The feedback admin routes use it too, under their own key (server/feedback-api.js limitAdmin).
 export const ACCOUNTS_RATE_LIMITER = Object.freeze({ type: 'ratelimit', name: 'ACCOUNTS_RATE_LIMITER', namespace_id: '6184035', simple: { limit: 30, period: 60 } });
 
+// The co-op room-creation limiter (server/coop-api.js): ten new rooms a minute per sender, its own namespace.
+export const COOP_RATE_LIMITER = Object.freeze({ type: 'ratelimit', name: 'COOP_RATE_LIMITER', namespace_id: '3307260', simple: { limit: 10, period: 60 } });
+// The Durable Object migration that creates the CoopRoom class (SQLite-backed). It is made once: the deploy reads the Worker's
+// migration tag first and sends it only while the Worker has none. Cloudflare rejects a tag it has already applied.
+export const COOP_MIGRATION_TAG = 'coop-v1';
+
 // The feedback inbox key guards every player message and contact line: a long random value, not a
 // word. Shorter keys are refused when the repository variable FEEDBACK_KEY_STRICT is 1, and warned
 // about otherwise (so a deploy with today's key still goes through until it is rotated).
@@ -65,8 +71,11 @@ export function allowedOrigins(siteOrigin) {
  * secret names the deployed Worker already holds: a secret left unset in GitHub keeps that stored
  * value (an inherit binding) instead of being dropped, so the repository does not need every secret.
  */
-export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, feedbackKeyStrict, existingSecrets = [], warn = console.warn, ...accountSecrets }) {
+export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, feedbackKeyStrict, existingSecrets = [], migrationTag = '', warn = console.warn, ...accountSecrets }) {
   if (!/^[0-9a-f-]{36}$/i.test(databaseId || '')) throw new Error('Set CLOUDFLARE_D1_DATABASE_ID to the D1 database UUID.');
+  // The Worker's current Durable Object migration tag ('' before it has one): none yet -> this upload makes coop-v1; coop-v1 -> nothing to do.
+  const tag = String(migrationTag ?? '');
+  if (tag !== '' && tag !== COOP_MIGRATION_TAG) throw new Error(`The Worker's Durable Object migration tag is ${JSON.stringify(tag)}, not "" or "${COOP_MIGRATION_TAG}": refusing to deploy (a migration this script does not know has been applied).`);
   const origins = allowedOrigins(siteOrigin);
   const stored = new Set(existingSecrets);
 
@@ -104,8 +113,12 @@ export function createWorkerUpload(bundle, { databaseId, siteOrigin, feedbackAdm
         simple: { limit: 3, period: 60 },
       },
       { ...ACCOUNTS_RATE_LIMITER, simple: { ...ACCOUNTS_RATE_LIMITER.simple } },
+      { ...COOP_RATE_LIMITER, simple: { ...COOP_RATE_LIMITER.simple } },
+      // The co-op rooms (server/coop-room.js): one Durable Object per room code, named for the code.
+      { type: 'durable_object_namespace', name: 'COOP_ROOM', class_name: 'CoopRoom' },
     ],
   };
+  if (tag === '') metadata.migrations = { new_tag: COOP_MIGRATION_TAG, new_sqlite_classes: ['CoopRoom'] };
   // Optional secrets: bound only when set, so a deploy without them still succeeds (the
   // feedback inbox then answers 503 and the Discord ping is skipped).
   const adminKey = (feedbackAdminKey || '').trim();
@@ -158,9 +171,27 @@ export async function listWorkerSecrets({ accountId, apiToken, fetchImpl = fetch
   return body.result.map(secret => secret.name).filter(Boolean);
 }
 
+/**
+ * The Worker's Durable Object migration tag ('' before its first deploy, or while it has none), from the account's script list.
+ * Any other failure stops the deploy: guessing '' would send the one-time migration a second time.
+ */
+export async function readMigrationTag({ accountId, apiToken, fetchImpl = fetch }) {
+  const response = await fetchImpl(`${ACCOUNT_API}/${accountId}/workers/scripts`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${apiToken}` },
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.success !== true || !Array.isArray(body.result)) {
+    throw new Error(`Could not list the account's Workers (${response.status}) to read the migration tag; refusing to deploy.`);
+  }
+  const script = body.result.find(entry => entry?.id === WORKER_NAME);
+  return typeof script?.migration_tag === 'string' ? script.migration_tag : '';
+}
+
 export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, feedbackKeyStrict, warn, fetchImpl = fetch, ...accountSecrets }) {
   if (!/^[0-9a-f]{32}$/i.test(accountId || '')) throw new Error('Set CLOUDFLARE_ACCOUNT_ID to the Cloudflare account ID.');
   if (!apiToken) throw new Error('Set the CLOUDFLARE_API_TOKEN GitHub secret.');
+  const migrationTag = await readMigrationTag({ accountId, apiToken, fetchImpl });
   const existingSecrets = await listWorkerSecrets({ accountId, apiToken, fetchImpl });
 
   const result = await build({
@@ -171,7 +202,7 @@ export async function deployWorker({ accountId, apiToken, databaseId, siteOrigin
     target: 'es2022',
     minify: true,
   });
-  const form = createWorkerUpload(result.outputFiles[0].text, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, feedbackKeyStrict, existingSecrets, warn, ...accountSecrets });
+  const form = createWorkerUpload(result.outputFiles[0].text, { databaseId, siteOrigin, feedbackAdminKey, discordWebhookUrl, accountsLive, feedbackKeyStrict, existingSecrets, migrationTag, warn, ...accountSecrets });
   const response = await fetchImpl(`${ACCOUNT_API}/${accountId}/workers/scripts/${WORKER_NAME}?bindings_inherit=strict`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${apiToken}` },
