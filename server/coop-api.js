@@ -29,11 +29,15 @@ const PREFLIGHT = Object.freeze({ 'Access-Control-Allow-Methods': 'GET, POST, OP
 /**
  * The ranked runs. The production database is out of reach of migrations, so the table is created on first use (as the accounts,
  * feedback and daily_stats tables are); drizzle/0007_coop_runs.sql and db/schema.ts mirror it for previews and tests.
- * A row is one cleared run by two signed-in players; the names are as they were then (the board shows the accounts' current ones).
+ * A row is one cleared run by two signed-in players. The names stored are the ones at the time; the board shows the accounts' current
+ * ones. Deleting an account rewrites its side of every row to ('', 'EXILE-xxxx'), as for its score rows (accounts-api.js).
+ * The two account indexes serve the player's own row and that rewrite without reading the whole board.
  */
 export const COOP_SCHEMA = Object.freeze([
   'CREATE TABLE IF NOT EXISTS coop_runs (id INTEGER PRIMARY KEY, created_at INTEGER NOT NULL, version TEXT NOT NULL, stamp TEXT NOT NULL, world INTEGER NOT NULL, seed INTEGER NOT NULL, clear_ms INTEGER NOT NULL, kills INTEGER NOT NULL, a_account TEXT NOT NULL, a_name TEXT NOT NULL, b_account TEXT NOT NULL, b_name TEXT NOT NULL, room TEXT NOT NULL, hash TEXT NOT NULL)',
-  'CREATE INDEX IF NOT EXISTS coop_runs_board ON coop_runs (stamp, clear_ms, kills)'
+  'CREATE INDEX IF NOT EXISTS coop_runs_board ON coop_runs (stamp, clear_ms, kills)',
+  'CREATE INDEX IF NOT EXISTS coop_runs_a ON coop_runs (a_account)',
+  'CREATE INDEX IF NOT EXISTS coop_runs_b ON coop_runs (b_account)'
 ]);
 
 const tablesReady = new WeakMap(); // DB binding -> Promise, once per isolate
@@ -78,23 +82,31 @@ const BOARD_COLUMNS = 'r.id AS id, r.world AS world, r.clear_ms AS clear_ms, r.k
 
 /**
  * The Expedition board: { rows, me }. rows are the top 50 as { rank, a, b, world, clearMs, kills, date }, a and b being the accounts'
- * current usernames (joined at read time, as the score boards do, so a rename reaches old runs; a deleted account keeps the name
- * stored with its run). me is the account's best row with its real rank (it can be below the 50), or null. No account id is returned.
+ * current usernames (joined at read time, as the score boards do, so a rename reaches old runs). An account that is gone shows an
+ * anonymous EXILE-xxxx name, never the name stored with the run (deletion rewrites that one, and a row it missed is still hidden).
+ * me is the account's best row with its real rank (it can be below the 50), or null. No account id is returned.
  * Throws when the database cannot be read; the route answers 503.
  */
 export async function coopBoard(env, accountId) {
   const db = env.DB;
   await ensureCoopTables(db);
   const joined = await scoreAccounts.ready(env);
-  const select = joined
-    ? `SELECT ${BOARD_COLUMNS}, COALESCE(x.username, r.a_name) AS a, COALESCE(y.username, r.b_name) AS b FROM coop_runs r LEFT JOIN accounts x ON x.id = r.a_account LEFT JOIN accounts y ON y.id = r.b_account`
-    : `SELECT ${BOARD_COLUMNS}, r.a_name AS a, r.b_name AS b FROM coop_runs r`;
+  // A player cannot choose a name starting EXILE- (username-rules.js), so a stored one is always a generated one; any other stored
+  // name of a gone account becomes a stable EXILE- name made from the row.
+  const shownName = (account, stored, salt) =>
+    `CASE WHEN ${account}.id IS NOT NULL THEN ${account}.username WHEN r.${stored} LIKE 'EXILE-%' THEN r.${stored} ELSE 'EXILE-' || printf('%04X', (r.id * 40503 + ${salt}) % 65536) END`;
+  // `source` is the rows to read, aliased r.
+  const select = source => joined
+    ? `SELECT ${BOARD_COLUMNS}, ${shownName('x', 'a_name', 1)} AS a, ${shownName('y', 'b_name', 2)} AS b FROM ${source} LEFT JOIN accounts x ON x.id = r.a_account LEFT JOIN accounts y ON y.id = r.b_account`
+    : `SELECT ${BOARD_COLUMNS}, r.a_name AS a, r.b_name AS b FROM ${source}`;
   const shown = (row, rank) => ({ rank, a: row.a, b: row.b, world: row.world, clearMs: row.clear_ms, kills: row.kills, date: utcDay(row.created_at) });
-  const top = await db.prepare(`${select} WHERE r.stamp = ? ORDER BY ${BOARD_ORDER} LIMIT ${COOP_BOARD_ROWS}`).bind(COOP_STAMP).all();
+  const top = await db.prepare(`${select('coop_runs r')} WHERE r.stamp = ? ORDER BY ${BOARD_ORDER} LIMIT ${COOP_BOARD_ROWS}`).bind(COOP_STAMP).all();
   const rows = top.results.map((row, i) => shown(row, i + 1));
   let me = null;
   if (typeof accountId === 'string' && accountId) {
-    const best = await db.prepare(`${select} WHERE r.stamp = ? AND (r.a_account = ? OR r.b_account = ?) ORDER BY ${BOARD_ORDER} LIMIT 1`).bind(COOP_STAMP, accountId, accountId).first();
+    // Starts from the player's own rows (the two account indexes), not from the whole board.
+    const mine = '(SELECT id FROM coop_runs WHERE a_account = ?1 UNION SELECT id FROM coop_runs WHERE b_account = ?1) m CROSS JOIN coop_runs r ON r.id = m.id';
+    const best = await db.prepare(`${select(mine)} WHERE r.stamp = ?2 ORDER BY ${BOARD_ORDER} LIMIT 1`).bind(accountId, COOP_STAMP).first();
     if (best) {
       const ahead = await db.prepare('SELECT COUNT(*) AS n FROM coop_runs WHERE stamp = ? AND (clear_ms < ? OR (clear_ms = ? AND (kills > ? OR (kills = ? AND id < ?))))')
         .bind(COOP_STAMP, best.clear_ms, best.clear_ms, best.kills, best.kills, best.id).first();

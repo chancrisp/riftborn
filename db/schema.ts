@@ -17,4 +17,4 @@ export const dailyStats=sqliteTable('daily_stats',{day:text('day').notNull(),met
 export const coopRuns=sqliteTable('coop_runs',{
  id:integer('id').primaryKey(),createdAt:integer('created_at').notNull(),version:text('version').notNull(),stamp:text('stamp').notNull(),world:integer('world').notNull(),seed:integer('seed').notNull(),clearMs:integer('clear_ms').notNull(),kills:integer('kills').notNull(),
  aAccount:text('a_account').notNull(),aName:text('a_name').notNull(),bAccount:text('b_account').notNull(),bName:text('b_name').notNull(),room:text('room').notNull(),hash:text('hash').notNull()
-},table=>[index('coop_runs_board').on(table.stamp,table.clearMs,table.kills)]);
+},table=>[index('coop_runs_board').on(table.stamp,table.clearMs,table.kills),index('coop_runs_a').on(table.aAccount),index('coop_runs_b').on(table.bAccount)]);

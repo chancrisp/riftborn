@@ -367,8 +367,8 @@ async function lobbyRoom(extra = {}, helloExtra = [{}, {}]) {
 // ---- Task 5.3: the real session check, the ranking into coop_runs and the board ---------------------------------------------
 // An in-memory SQLite database stands in for D1. Sessions are seeded the way accounts-api.js stores them (a keyed hash of the token).
 const KEY = 'test-signing-key-0123456789-abcdefghijklmnop';
-const newDb = async () => {
-  const DB = createD1(openDatabase(':memory:'));
+const newDb = async ({ migrated = false } = {}) => {
+  const DB = createD1(migrated ? openDatabase(':memory:', 'drizzle', fs) : openDatabase(':memory:'));
   await ensureAccountTables(DB);
   return DB;
 };
@@ -534,7 +534,8 @@ const addAccount = (DB, id, name) => DB.prepare('INSERT INTO accounts (id, usern
   assert.equal(full.rows.at(-1).clearMs, 100000 + 45 * 10, 'the 50th row is the 46th slow run');
   assert.equal(full.me.rank, 4 + 60, 'pinned below the cut with its real rank');
   assert.equal(full.me.clearMs, 100590);
-  assert.equal(full.me.a, 'stored-f59', 'an account that is not in the accounts table keeps the name stored with the run');
+  assert.match(full.me.a, /^EXILE-[0-9A-F]{4}$/, 'an account that is gone shows an anonymous name, never the one stored with the run');
+  assert.equal(JSON.stringify(full).includes('stored-'), false, 'no stored name reaches the board while its account is missing');
   console.log('PASS coop-board: orders by clear time then kills, caps at 50, pins me.');
 }
 
@@ -549,11 +550,15 @@ const addAccount = (DB, id, name) => DB.prepare('INSERT INTO accounts (id, usern
   const renamed = await coopBoard(env, 'p1');
   assert.deepEqual(renamed.rows.map(r => [r.a, r.b]), [['Pia the Bold', 'Quin']], 'a renamed account shows its new name');
   assert.equal(renamed.me.a, 'Pia the Bold', 'and so does the pinned row');
-  assert.equal(DB.sqlite.prepare('SELECT a_name FROM coop_runs').get().a_name, 'stored-p1', 'the stored name is only the fallback');
-  // No accounts table at all (a bare database): the stored names are shown.
+  assert.equal(DB.sqlite.prepare('SELECT a_name FROM coop_runs').get().a_name, 'stored-p1', 'the stored name is never shown while the account exists');
+  // No such accounts at all (a bare database): both seats are gone, so both are anonymous.
   const bare = { DB: createD1(openDatabase(':memory:')) };
   await insertCoopRun(bare, runRow(80000, 10, 'p1', 'p2'));
-  assert.deepEqual((await coopBoard(bare, null)).rows.map(r => [r.a, r.b]), [['stored-p1', 'stored-p2']]);
+  const gone = (await coopBoard(bare, null)).rows[0];
+  assert.match(gone.a, /^EXILE-[0-9A-F]{4}$/);
+  assert.match(gone.b, /^EXILE-[0-9A-F]{4}$/);
+  assert.notEqual(gone.a, gone.b, 'the two seats get different names');
+  assert.deepEqual((await coopBoard(bare, null)).rows[0], gone, 'and they are stable from one read to the next');
   console.log('PASS coop-board: a renamed account shows its new name.');
 }
 
@@ -569,7 +574,18 @@ const addAccount = (DB, id, name) => DB.prepare('INSERT INTO accounts (id, usern
   });
   assert.deepEqual(shape(migrated), shape(lazy), 'the migration and the lazy bootstrap build the same table');
   assert.deepEqual(shape(lazy).columns.map(c => c[0]), ['id', 'created_at', 'version', 'stamp', 'world', 'seed', 'clear_ms', 'kills', 'a_account', 'a_name', 'b_account', 'b_name', 'room', 'hash']);
-  assert.deepEqual(shape(lazy).indexes, [['coop_runs_board', ['stamp', 'clear_ms', 'kills']]]);
+  assert.deepEqual(shape(lazy).indexes.sort(), [['coop_runs_a', ['a_account']], ['coop_runs_b', ['b_account']], ['coop_runs_board', ['stamp', 'clear_ms', 'kills']]]);
+  // The statements the board really runs: a player's own row is found through the account indexes, not by reading the board.
+  const seen = [];
+  const spy = { prepare: sql => (seen.push(sql), lazy.prepare(sql)), batch: statements => lazy.batch(statements), sqlite: lazy.sqlite };
+  await coopBoard({ DB: spy }, 'x');
+  const mineSql = seen.find(sql => /\bm CROSS JOIN coop_runs r\b/.test(sql));
+  assert.ok(mineSql, 'the own-row statement was seen');
+  const plan = sql => lazy.sqlite.prepare('EXPLAIN QUERY PLAN ' + sql).all().map(r => r.detail).join(' | ');
+  const minePlan = plan(mineSql.replace(/\?1/g, "'x'").replace(/\?2/g, "'expedition-1'"));
+  assert.match(minePlan, /coop_runs_a \(a_account=\?\)[\s\S]*coop_runs_b \(b_account=\?\)/, 'the own row comes from the account indexes');
+  assert.doesNotMatch(minePlan, /coop_runs_board/, 'and the board index is not scanned for it');
+  assert.match(plan("UPDATE coop_runs SET a_account = '' WHERE a_account = 'x'"), /coop_runs_a/, 'the rewrite on deletion uses the index too');
   assert.doesNotThrow(() => migrated.sqlite.exec(fs.readFileSync('drizzle/0007_coop_runs.sql', 'utf8').replaceAll('--> statement-breakpoint', '')), 'the migration is re-runnable');
   const journal = JSON.parse(fs.readFileSync('drizzle/meta/_journal.json', 'utf8')).entries.at(-1);
   assert.deepEqual([journal.idx, journal.tag], [7, '0007_coop_runs']);
@@ -580,6 +596,58 @@ const addAccount = (DB, id, name) => DB.prepare('INSERT INTO accounts (id, usern
   assert.deepEqual(Object.keys(snapshot.tables.coop_runs.columns), shape(lazy).columns.map(c => c[0]));
   assert.ok(snapshot.tables.daily_stats && snapshot.tables.scores, 'the other tables carry over');
   console.log('PASS coop-runs: the lazy table and drizzle 0007 agree.');
+}
+
+// ---- a deleted account is anonymised on the board, as on the score boards ---------------------------------------------------
+{
+  const GAME = 'http://localhost:8700';
+  const DB = await newDb({ migrated: true });
+  const env = { DB, ENVIRONMENT: 'development', ALLOWED_ORIGINS: GAME, AUTH_SIGNING_KEY: KEY };
+  let ip = 0;
+  const remove = token => worker.fetch(new Request('http://127.0.0.1:8787/api/account', { method: 'DELETE', headers: { Origin: GAME, Authorization: 'Bearer ' + token, 'CF-Connecting-IP': '10.9.0.' + ++ip } }), env);
+  const ann = await seedAccount(DB, 'acc-ann', 'Ann');
+  await seedAccount(DB, 'acc-bob', 'Bob');
+  const catToken = await seedAccount(DB, 'acc-cat', 'Cat');
+  await insertCoopRun(env, runRow(80000, 10, 'acc-ann', 'acc-bob'));
+  await insertCoopRun(env, runRow(85000, 9, 'acc-cat', 'acc-ann'));
+  assert.deepEqual((await coopBoard(env, null)).rows.map(r => [r.a, r.b]), [['Ann', 'Bob'], ['Cat', 'Ann']]);
+
+  assert.equal((await remove(ann)).status, 200);
+  const rows = DB.sqlite.prepare('SELECT a_account, a_name, b_account, b_name FROM coop_runs ORDER BY id').all();
+  assert.equal(rows[0].a_account, '', 'her account link is gone from the table');
+  assert.equal(rows[1].b_account, '');
+  assert.match(rows[0].a_name, /^EXILE-[0-9A-F]{4}$/, 'and her stored name is rewritten');
+  assert.match(rows[1].b_name, /^EXILE-[0-9A-F]{4}$/);
+  assert.deepEqual([rows[0].b_account, rows[0].b_name, rows[1].a_account, rows[1].a_name], ['acc-bob', 'stored-acc-bob', 'acc-cat', 'stored-acc-cat'], 'the partners are untouched');
+  const after = await coopBoard(env, null);
+  assert.equal(after.rows[0].a, rows[0].a_name, 'the board shows the anonymous name');
+  assert.equal(after.rows[0].b, 'Bob');
+  assert.equal(after.rows[1].b, rows[1].b_name);
+  assert.equal(JSON.stringify(after).includes('Ann'), false, 'her name is nowhere on the board');
+  assert.equal(JSON.stringify(after).includes('acc-ann'), false);
+
+  // The name is free again: a new account called Ann owns neither old run.
+  const again = await seedAccount(DB, 'acc-ann2', 'Ann');
+  const board = await coopBoard(env, 'acc-ann2');
+  assert.equal(board.me, null, 'the new Ann has no run');
+  assert.deepEqual(board.rows.map(r => [r.a === 'Ann', r.b === 'Ann']), [[false, false], [false, false]], 'and is not shown on the old ones');
+
+  // An old row whose account is gone but whose stored name was never rewritten is still hidden.
+  DB.sqlite.prepare("UPDATE coop_runs SET b_name = 'Ghost' WHERE id = 2").run();
+  assert.equal((await coopBoard(env, null)).rows[1].b.startsWith('EXILE-'), true, 'a gone seat never shows the saved name');
+  assert.equal((await remove(catToken)).status, 200, 'another delete in the same table works');
+
+  // Deleting an account before any run was ranked: there is no coop_runs table yet.
+  const fresh = await newDb({ migrated: true });
+  fresh.sqlite.exec('DROP TABLE coop_runs');
+  const freshEnv = { ...env, DB: fresh };
+  const dan = await seedAccount(fresh, 'acc-dan', 'Dan');
+  assert.equal(fresh.sqlite.prepare("SELECT name FROM sqlite_master WHERE name = 'coop_runs'").get(), undefined);
+  const removed = await worker.fetch(new Request('http://127.0.0.1:8787/api/account', { method: 'DELETE', headers: { Origin: GAME, Authorization: 'Bearer ' + dan, 'CF-Connecting-IP': '10.9.1.1' } }), freshEnv);
+  assert.equal(removed.status, 200, 'deletion works with no coop_runs table');
+  assert.equal(fresh.sqlite.prepare('SELECT COUNT(*) AS n FROM accounts WHERE id = ?').get('acc-dan').n, 0);
+  assert.equal(fresh.sqlite.prepare("SELECT name FROM sqlite_master WHERE name = 'coop_runs'").get(), undefined, 'and it does not create the table');
+  console.log('PASS coop-board: a deleted account is anonymised on the board; deletion works without the table.');
 }
 
 // ---- a finished room rebuilt keeps its done window (a started room with no answer is buried, above) ----------------------

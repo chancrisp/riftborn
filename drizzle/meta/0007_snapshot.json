@@ -115,6 +115,20 @@
             "kills"
           ],
           "isUnique": false
+        },
+        "coop_runs_a": {
+          "name": "coop_runs_a",
+          "columns": [
+            "a_account"
+          ],
+          "isUnique": false
+        },
+        "coop_runs_b": {
+          "name": "coop_runs_b",
+          "columns": [
+            "b_account"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},

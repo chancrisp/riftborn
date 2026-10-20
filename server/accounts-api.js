@@ -1179,6 +1179,10 @@ async function renameAccount(request, db, keys, session, now) {
   return { account: await loadAccount(db, session.accountId, now) };
 }
 
+async function hasTable(db, name) {
+  return Boolean(await db.prepare("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = ?").bind(name).first());
+}
+
 async function deleteAccount(db, keys, session, now) {
   await limitAccount(db, keys, 'remove', session.accountId, now);
   const id = session.accountId;
@@ -1189,12 +1193,17 @@ async function deleteAccount(db, keys, session, now) {
   ];
   // Leaderboard rows stay, anonymised: no account link, and a fresh EXILE-xxxx name per row.
   const anonymise = db.prepare("UPDATE scores SET account_id = NULL, name = 'EXILE-' || hex(randomblob(2)) WHERE account_id = ?").bind(id);
+  // The CO-OP board's rows (server/coop-api.js) go the same way. Their account columns cannot be NULL, so the link becomes ''
+  // (which is no account's id). The table is created on the first ranked run: before that there is nothing to anonymise.
+  const coop = await hasTable(db, 'coop_runs')
+    ? ['a', 'b'].map(side => db.prepare(`UPDATE coop_runs SET ${side}_account = '', ${side}_name = 'EXILE-' || hex(randomblob(2)) WHERE ${side}_account = ?`).bind(id))
+    : [];
   const late = await lateColumns(db);
   try {
-    await db.batch(late.includes('account_id') ? [anonymise, ...statements] : statements);
+    await db.batch(late.includes('account_id') ? [anonymise, ...coop, ...statements] : [...coop, ...statements]);
   } catch (error) {
     if (!/account_id|no such table: scores/i.test(String(error?.message || error))) throw error;
-    await db.batch(statements); // the scores column vanished: nothing can reference the account
+    await db.batch([...coop, ...statements]); // the scores column vanished: nothing can reference the account
   }
   return { ok: true };
 }
@@ -1415,15 +1424,13 @@ export async function ipLimitKey(request, env, scope) {
   try { return await hmac(keys.current, `rl:${scope}:ip:${clientIp(request)}`); } catch { return null; }
 }
 
-const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
-
 // The account behind a sign-in token, in the shapes scoreAccounts.session answers for a header (the co-op room reads the token from
 // its hello message, not from a header):
 // - a live session: { id, username };
 // - a token that proves no session (malformed, unknown, revoked or expired): { unauthorized: true };
 // - the lookup cannot be made (database error, no signing key, keys out of step): { unavailable: true }.
 async function sessionForToken(token, env) {
-  if (typeof token !== 'string' || !TOKEN_SHAPE.test(token)) return { unauthorized: true };
+  if (typeof token !== 'string' || !TOKEN.test(token)) return { unauthorized: true };
   const keys = signingKeys(env);
   if (!keys || !env.DB) return { unavailable: true };
   try {

@@ -15,4 +15,6 @@ CREATE TABLE IF NOT EXISTS `coop_runs` (
 	`hash` TEXT NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS `coop_runs_board` ON `coop_runs` (`stamp`,`clear_ms`,`kills`);
+CREATE INDEX IF NOT EXISTS `coop_runs_board` ON `coop_runs` (`stamp`,`clear_ms`,`kills`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `coop_runs_a` ON `coop_runs` (`a_account`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `coop_runs_b` ON `coop_runs` (`b_account`);
