@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { CoopRoom, coopDeps } from '../server/coop-room.js';
+import worker from '../cloudflare/worker.js';
 import { handleCoop, coopOrigin } from '../server/coop-api.js';
 import { PROTOCOL_VERSION, validCode } from '../server/coop/protocol.js';
 import { HELLO_MS, LOBBY_MS } from '../server/coop/room-core.js';
@@ -685,6 +686,50 @@ async function lobbyRoom(extra = {}, helloExtra = [{}, {}]) {
       assert.equal(calls.creates[0].body.live, live, `${origin} in ${environment}`);
     }
     console.log('PASS coop-api: a preview or dev room is not live; a riftborn.us room in production is.');
+  }
+
+  // The entry (cloudflare/worker.js) hands a room's 101 to the client intact: its HSTS wrapper used to rebuild every answer, which
+  // throws on a 101 and loses the webSocket.
+  {
+    reset();
+    const webSocket = { peer: 'client half' };
+    const room = { status: 101, statusText: 'Switching Protocols', headers: new Headers(), body: null, webSocket };
+    const env = apiEnv();
+    env.COOP_ROOM.get = () => ({ fetch: async () => room });
+    const answer = await worker.fetch(ws(CODE, ORIGIN.live), env, { waitUntil() {} });
+    assert.equal(answer, room, 'the same answer comes back through worker.fetch');
+    assert.equal(answer.status, 101);
+    assert.equal(answer.webSocket, webSocket, 'with its webSocket');
+    // ...and an ordinary answer on the same route still gets the HSTS header.
+    const plain = await worker.fetch(ws(CODE, ORIGIN.live, false), env, { waitUntil() {} });
+    assert.equal(plain.status, 426);
+    assert.equal(plain.headers.get('Strict-Transport-Security'), 'max-age=31536000');
+    console.log('PASS coop-api: a room\'s 101 reaches the client through the Worker entry untouched.');
+  }
+
+  // A limiter that fails answers 503 with the standard headers; the back-off headers are readable cross-origin; with no signing key
+  // the limiter key buckets IPv6 by its /64 like the hashed key does.
+  {
+    reset();
+    const broken = apiEnv();
+    broken.COOP_RATE_LIMITER.limit = async () => {
+      throw new Error('binding down');
+    };
+    const down = await handleCoop(post(ORIGIN.live), broken);
+    assert.equal(down.status, 503);
+    assert.deepEqual(await down.json(), { error: 'unavailable' });
+    standard(down, ORIGIN.live);
+    assert.equal(calls.creates.length, 0);
+    const limited = await handleCoop(post(ORIGIN.live), apiEnv({ limit: () => false }));
+    assert.equal(limited.headers.get('Access-Control-Expose-Headers'), 'Retry-After');
+    const busy = await handleCoop(post(ORIGIN.live), apiEnv({ busy: () => true }));
+    assert.equal(busy.headers.get('Access-Control-Expose-Headers'), 'Retry-After');
+    reset();
+    const env = apiEnv();
+    await handleCoop(post(ORIGIN.live, undefined, { 'CF-Connecting-IP': '2001:db8:1:2:aaaa::1' }), env);
+    await handleCoop(post(ORIGIN.live, undefined, { 'CF-Connecting-IP': '2001:db8:1:2:bbbb::9' }), env);
+    assert.equal(calls.limits[0], calls.limits[1], 'one /64 is one sender');
+    console.log('PASS coop-api: a failing limiter answers 503, Retry-After is exposed, the unkeyed fallback buckets IPv6 by /64.');
   }
 
   // The preflight, the other methods, the board's placeholder and unknown paths.

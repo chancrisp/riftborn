@@ -7,7 +7,7 @@
 //   GET  /coop/rooms/:code/ws          the WebSocket upgrade, forwarded to the room unchanged
 //   GET  /coop/board                   the Expedition board (Task 5.3); 501 until then
 import { HOSTS } from '../site.hosts.mjs';
-import { ipLimitKey } from './accounts-api.js';
+import { ipLimitKey, ipSubject } from './accounts-api.js';
 import { readBodyCapped } from './stats-api.js';
 import { randomCode, validCode } from './coop/protocol.js';
 
@@ -62,8 +62,16 @@ async function relayed(response, origin) {
 
 async function createRoom(request, env, origin, kind) {
   if (!env.COOP_ROOM || !env.COOP_RATE_LIMITER || typeof env.COOP_RATE_LIMITER.limit !== 'function') return reply({ error: 'unavailable' }, 503, origin);
-  const key = (await ipLimitKey(request, env, 'coop')) || request.headers.get('CF-Connecting-IP') || 'unknown';
-  if ((await env.COOP_RATE_LIMITER.limit({ key })).success === false) return reply({ error: 'rate_limited' }, 429, origin, { 'Retry-After': '60' });
+  // Without a signing key the key is the sender's network (IPv6 by its /64, as the hashed key is), not the full address.
+  let limited;
+  try {
+    const key = (await ipLimitKey(request, env, 'coop')) || ipSubject(request.headers.get('CF-Connecting-IP'));
+    limited = (await env.COOP_RATE_LIMITER.limit({ key })).success === false;
+  } catch (error) {
+    console.error('Coop rate limit failed', error?.message || 'unknown error');
+    return reply({ error: 'unavailable' }, 503, origin);
+  }
+  if (limited) return reply({ error: 'rate_limited' }, 429, origin, { 'Retry-After': '60', 'Access-Control-Expose-Headers': 'Retry-After' });
   if (!(request.headers.get('Content-Type') || '').startsWith('application/json')) return reply({ error: 'bad_shape' }, 400, origin);
   const body = await readBodyCapped(request, COOP_CREATE_BODY_MAX);
   if (body.tooLarge) return reply({ error: 'too_large' }, 413, origin);
@@ -91,7 +99,7 @@ async function createRoom(request, env, origin, kind) {
     if (!made.ok) return reply({ error: 'unavailable' }, 503, origin);
     return reply({ code }, 201, origin);
   }
-  return reply({ error: 'busy' }, 503, origin, { 'Retry-After': '1' });
+  return reply({ error: 'busy' }, 503, origin, { 'Retry-After': '1', 'Access-Control-Expose-Headers': 'Retry-After' });
 }
 
 async function openSocket(request, env, origin, code) {

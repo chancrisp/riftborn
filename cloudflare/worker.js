@@ -29,6 +29,9 @@ function plaintextRefusal(request, env, url) {
 }
 
 function withHsts(response) {
+  // A WebSocket upgrade (the co-op rooms) is handed back as it is: a new Response cannot be built from a 101 and would drop the socket,
+  // and HSTS means nothing on an upgrade.
+  if (response.status === 101 || response.webSocket) return response;
   const headers = new Headers(response.headers);
   headers.set('Strict-Transport-Security', HSTS);
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });

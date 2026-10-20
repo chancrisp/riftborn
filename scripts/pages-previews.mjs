@@ -27,7 +27,7 @@
 // the password gate (the game module loads only after it opens), noindex, and HOST CONFIG giving the
 // preview's own address nothing (never scores, not even leaderboard reads; feedback and accounts
 // stay off too, the Worker only answers riftborn.us and dev.riftborn.us). The one exception is co-op
-// (spec 8.4): the HOST CONFIG may give a preview RIFTBORN_COOP_API_BASE = https://api.riftborn.us and no other
+// (spec 9, Origins): the HOST CONFIG may give a preview RIFTBORN_COOP_API_BASE = https://api.riftborn.us and no other
 // co-op base; the relay answers preview origins and marks their rooms as test rooms. It gets the dev build's
 // headers (strict CSP with the hash of every inline script, X-Robots-Tag noindex), a 404.html and a
 // robots.txt.
@@ -148,7 +148,7 @@ export function previewProblems(dir, name) {
     const services = hostServices(html, `${previewOrigin(name)}/`);
     for (const [service, base] of Object.entries(services)) {
       if (!base) continue;
-      // The one exception (co-op spec 8.4): a preview plays co-op through the live relay, which marks its rooms as test rooms.
+      // The one exception (co-op spec 9, Origins): a preview plays co-op through the live relay, which marks its rooms as test rooms.
       if (service === 'coop') {
         if (base !== HOSTS.api) problems.push(`${at}: HOST CONFIG gives ${previewOrigin(name)} coop (${base}); a preview may use the co-op relay at ${HOSTS.api} only`);
         continue;

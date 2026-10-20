@@ -204,7 +204,7 @@ refused(`${V}-reading`, { edit: html => withReads(html).replace('} else if (h ==
   assert.deepEqual(previewProblems(preview(ok, `${V}-reads`, { edit: withReads }), `${V}-reads`), [], 'A 2.3.1 HOST CONFIG passes the preview check');
 }
 {
-  // Co-op (Task 5.2, spec 8.4): a preview may point the co-op relay at https://api.riftborn.us, and nothing else.
+  // Co-op (Task 5.2, spec 9 Origins): a preview may point the co-op relay at https://api.riftborn.us, and nothing else.
   const anchor = 'window.RIFTBORN_SCORE_API_BASE = window.RIFTBORN_SCORE_API_BASE || scores;';
   const withCoop = (value, extra = html => html) => html => extra(html).replace(anchor, () => 'window.RIFTBORN_COOP_API_BASE = ' + JSON.stringify(value) + ';\n  ' + anchor);
   const ok = path.join(tmp, 'ok-coop');
