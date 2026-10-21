@@ -1,0 +1,11 @@
+{
+  "name": "v3-0-0-daily",
+  "url": "https://v3-0-0-daily.riftborn-dev.pages.dev/",
+  "version": "3.0.0",
+  "build": "4fa6d7b8b2",
+  "module": "js/riftborn.d4440a396f.js",
+  "branch": "daily-gauntlet",
+  "commit": "55c06b9701b1d7b44e2854c1e33475b68c458ad3",
+  "dirty": false,
+  "staged": "2026-10-21T21:23:16.270Z"
+}
