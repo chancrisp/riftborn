@@ -1,0 +1,11 @@
+{
+  "name": "v3-0-0-worlds",
+  "url": "https://v3-0-0-worlds.riftborn-dev.pages.dev/",
+  "version": "3.0.0",
+  "build": "5dd1a33140",
+  "module": "js/riftborn.127f8eb6c7.js",
+  "branch": "new-worlds-foundations",
+  "commit": "945179e6872492f4da91fd2318f4ae1da3880348",
+  "dirty": false,
+  "staged": "2026-10-21T19:51:26.939Z"
+}
