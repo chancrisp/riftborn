@@ -24,7 +24,7 @@ const COMMAND_LIMIT = 65535; // the shape check's bound on each of a command's t
 const ID = /^[a-z0-9-]{1,24}$/;
 const OUTCOMES = ["cleared", "lost", "left", "desync"];
 const CLOSE_REASONS = ["version", "full", "expired", "idle", "error", "done"];
-const WORLDS = 6;
+const WORLDS = 9; // the highest world id a config may name (3.0: worlds 7 to 9, the new worlds)
 const UINT32 = 4294967295;
 
 const isInt = (x) => Number.isSafeInteger(x);
