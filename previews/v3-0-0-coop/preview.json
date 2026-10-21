@@ -2,10 +2,10 @@
   "name": "v3-0-0-coop",
   "url": "https://v3-0-0-coop.riftborn-dev.pages.dev/",
   "version": "3.0.0",
-  "build": "8acb94831f",
-  "module": "js/riftborn.f0a86b8478.js",
-  "branch": "claude/multiplayer-3-0-0-a0f81c",
-  "commit": "c37ec54b1f25772031dae650fa489de51b0f5f93",
+  "build": "8f770f2ad8",
+  "module": "js/riftborn.98aa968632.js",
+  "branch": "claude/game-ui-hud-analysis-cc4abe",
+  "commit": "a44bbf4cdff423b23683439b6f639e8514275d66",
   "dirty": false,
-  "staged": "2026-10-21T12:15:21.826Z"
+  "staged": "2026-10-21T13:38:41.613Z"
 }
