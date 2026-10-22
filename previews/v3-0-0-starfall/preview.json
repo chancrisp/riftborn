@@ -2,10 +2,10 @@
   "name": "v3-0-0-starfall",
   "url": "https://v3-0-0-starfall.riftborn-dev.pages.dev/",
   "version": "3.0.0",
-  "build": "ef65787497",
-  "module": "js/riftborn.5977679410.js",
+  "build": "2d6a81e571",
+  "module": "js/riftborn.bffd8aa346.js",
   "branch": "new-worlds-starfall",
-  "commit": "c63293864589493867acc1d6736686a70e0e6578",
+  "commit": "0219a02b9b44d5d2e2eb8aa39c4959d5ec2b0356",
   "dirty": false,
-  "staged": "2026-10-22T10:57:35.811Z"
+  "staged": "2026-10-22T12:31:46.564Z"
 }
