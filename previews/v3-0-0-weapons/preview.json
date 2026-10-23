@@ -1,0 +1,11 @@
+{
+  "name": "v3-0-0-weapons",
+  "url": "https://v3-0-0-weapons.riftborn-dev.pages.dev/",
+  "version": "3.0.0",
+  "build": "3a29e8f82d",
+  "module": "js/riftborn.33e7d522a5.js",
+  "branch": "weapon-upgrades",
+  "commit": "758d0be97d23447a37b5e60a89f7fe9cdac4eb00",
+  "dirty": false,
+  "staged": "2026-10-23T00:15:17.923Z"
+}
