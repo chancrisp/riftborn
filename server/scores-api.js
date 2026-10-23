@@ -52,7 +52,17 @@ const database = env => {
 // check or ALTER fails is simply left out (re-checked after a cooldown), so scores keep working
 // exactly as before without it. account_id (v2.2) links a run to a Riftborn account; it is set
 // only server-side from a signed-in session, never from the payload, and is never returned.
-const LATE_COLUMNS = Object.freeze({ game_version: 'TEXT', rift_score: 'INTEGER', account_id: 'TEXT', daily: 'TEXT', endless: 'INTEGER' });
+const LATE_COLUMNS = Object.freeze({ game_version: 'TEXT', rift_score: 'INTEGER', account_id: 'TEXT', daily: 'TEXT', endless: 'INTEGER', route: 'TEXT' });
+// The KEEPERS path a campaign row's route follows: one world per position, a fork's either (a copy of the game's
+// riftborn/src/data/campaign.js KEEPERS_PATH, 3.0: 9 the Sketchbook, 7 the Starfall, 8 the Boroughs). A route is that
+// row's worlds joined by '-' ("1-9-6-3-4-5"), as far as the stage it reached at least.
+const KEEPERS_PATH = Object.freeze([[1], [2, 9], [6], [3, 7], [4, 8], [5]]);
+const ROUTE = /^[1-9](-[1-9]){0,5}$/;
+const validRoute = (route, stage) => {
+  if (typeof route !== 'string' || !ROUTE.test(route)) return false;
+  const worlds = route.split('-').map(Number);
+  return worlds.length >= Math.min(Math.max(1, stage), KEEPERS_PATH.length) && worlds.every((world, i) => KEEPERS_PATH[i].includes(world));
+};
 const LATE_RETRY_MS = 300000;
 const lateColumnCache = new WeakMap();
 // -> Promise<string[]> of the late columns the scores table has (LATE_COLUMNS order). Never rejects.
@@ -296,7 +306,7 @@ export async function handleScores(request, env, accounts = null) {
       // The fallback never names the daily or endless column; those boards without them have no rows.
       result ||= dailyDay !== null || endlessBoard ? { results: [] } : await db.prepare(query([], byScore)).bind(...values).all();
       return json({
-        scores: result.results.map(({ verified, ...row }) => ({ ...row, death_mode: row.death_mode == null ? null : row.death_mode === 1, game_version: row.game_version ?? null, rift_score: row.rift_score ?? null, daily: row.daily ?? null, endless: row.endless ?? null, verified: verified === 1 || verified === true })),
+        scores: result.results.map(({ verified, ...row }) => ({ ...row, death_mode: row.death_mode == null ? null : row.death_mode === 1, game_version: row.game_version ?? null, rift_score: row.rift_score ?? null, daily: row.daily ?? null, endless: row.endless ?? null, route: row.route ?? null, verified: verified === 1 || verified === true })),
         capabilities: { modeFilter: true, versionFilter: true, runMetadata: true, rulesetFilter: true, daily: Boolean(accounts), endless: true },
         ranking: { mode, version, ruleset: ruleset || 'all', ...(dailyDay !== null ? { daily: dailyDay } : {}), ...(endlessBoard ? { endless: 1 } : {}) },
         verified: false
@@ -345,6 +355,8 @@ export async function handleScores(request, env, accounts = null) {
     // Endless depth: 1 to 999, a KEEPERS stamp with a rift_score, never with a Daily. Accounts only; a depth needs 8 s each.
     if (p.endless !== undefined && (!Number.isInteger(p.endless) || p.endless < 1 || p.endless > ENDLESS_MAX ||
       !isKeepers(p.gameplay_version) || p.rift_score === undefined || p.daily !== undefined)) return json({ error: 'Invalid endless' }, 400, origin);
+    // A route (3.0): a KEEPERS campaign row only, never with a Daily or an Endless depth, and one that fits the path.
+    if (p.route !== undefined && (!isKeepers(p.gameplay_version) || p.daily !== undefined || p.endless !== undefined || !validRoute(p.route, p.stage ?? 1))) return json({ error: 'Invalid route' }, 400, origin);
     const late = await lateColumns(db);
     if (p.endless !== undefined) {
       if (!account) return json({ error: 'endless_rejected', reason: 'signin' }, 409, origin);
