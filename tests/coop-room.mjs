@@ -1088,4 +1088,12 @@ const addAccount = (DB, id, name) => DB.prepare('INSERT INTO accounts (id, usern
     }
 }
 
+{
+  // 3.0 new worlds: an Expedition config may name worlds 7 to 9 (THE STARFALL, THE BOROUGHS, THE SKETCHBOOK); 10 is still refused.
+  const { validConfig } = await import('../server/coop/protocol.js');
+  assert.equal(validConfig({ ...config(), world: 9 }), true, 'world 9 is a world');
+  assert.equal(validConfig({ ...config(), world: 10 }), false, 'world 10 is not');
+  console.log('PASS coop-room: a config names worlds 1 to 9.');
+}
+
 console.log('PASS coop-room: all checks.');
