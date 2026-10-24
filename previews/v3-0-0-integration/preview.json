@@ -2,10 +2,10 @@
   "name": "v3-0-0-integration",
   "url": "https://v3-0-0-integration.riftborn-dev.pages.dev/",
   "version": "3.0.0",
-  "build": "60e5f92ca1",
-  "module": "js/riftborn.40fb1db519.js",
+  "build": "4e61d20379",
+  "module": "js/riftborn.b015aea05f.js",
   "branch": "new-worlds-integration",
-  "commit": "3c6a8a530c4e145a11df9324d71c1e76d339d93d",
+  "commit": "efd2ec3e3adee0f9bbcf4536da3ef690980dbcc1",
   "dirty": false,
-  "staged": "2026-10-24T04:43:05.223Z"
+  "staged": "2026-10-24T07:23:46.712Z"
 }
