@@ -337,7 +337,7 @@ Full notes in-game: **PATCH NOTES** on the main menu.`,
 Full notes in {#patch-notes} · Play now: https://riftborn.us`,
     patchNotes: `**v3.0 · Endless** (24 Oct 2026)
 - **Endless mode:** choose DESCEND after the Crown, or the ENDLESS tile once you have a victory. Every depth is tougher, every 3rd holds a FRACTURED keeper, and you pick a Fracture Law at each portal.
-- **Corrupted worlds and rift events:** six worlds have a Fracture version, and 1 to 2 events strike each depth. Each depth rolls its own weather.
+- **Corrupted worlds and rift events:** six worlds have a Fracture version, and 1 to 2 events strike each depth.
 - **The Endless crew:** Gravespur, Mantis Nine, Pyrebound and Riptusk, earned at depths 3, 6, 9 and 12.
 - **Daily Rift:** the same three keeper worlds for everyone each day, with a Boon, a Curse and a Twist, a bounty, medals, chips and a shop. One ranked try a day.
 - **Expedition:** two-player co-op. Charge three rift crystals, beat the keeper at the exit and step through together.
@@ -347,12 +347,12 @@ Full notes in {#patch-notes} · Play now: https://riftborn.us`,
 - **Balance:** the Cinder Abbot hunts you, gun damage is rebalanced, and the Daily Rift's later worlds play at their stage's pace.
 - **Fixes:**
   - A 60 FPS cap no longer skips frames, and effects keep their speed under any cap
-  - Rift Storm strikes play their thunder, and lava hisses when it sears a monster
+  - Rift Storm strikes play their thunder, and lava hisses on monsters
   - The Rift Chain timer and overtime count down on their own
   - The Rifle's Marked bonus covers every round, and cleared rounds no longer cost Focus
   - Co-op: your partner's hits, heals and shots no longer flash on your screen
   - Bloom or Haze changes keep the Endless sky tint, and a bound elite's chain clears when its pair is gone
 
-Full notes in-game: **PATCH NOTES** on the main menu.`,
+Full notes: **PATCH NOTES** on the main menu.`,
   },
 ];
