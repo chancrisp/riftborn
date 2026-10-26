@@ -319,4 +319,40 @@ Full notes in {#patch-notes} · Play now: https://riftborn.us`,
 
 Full notes in-game: **PATCH NOTES** on the main menu.`,
   },
+  // 3.0.0, owner-approved 2026-10-24 (texts approved, "Draft one with pings"; "ship it" 2026-10-25):
+  // News pings on the announcement, Patch pings on the patch notes.
+  {
+    version: '3.0.0',
+    ping: { announcement: true, patchNotes: true },
+    announcement: `**Riftborn 3.0 · Endless is live!**
+- **Endless:** beat the Crown and keep going down through Fracture depths that never stop, with Fracture Laws, fork portals, corrupted worlds and rift events
+- **Daily Rift:** one shared three-world run a day, with its own rules, a bounty, medals, chips and a shop
+- **Expedition:** a new two-player co-op mode on one big map
+- **Three new worlds:** the Starfall, the Boroughs and the Sketchbook, each with its own monsters, keeper and Skull Trial, and a choice of rift after three stages
+- **Four new characters**, **eight new battle songs**, menu and pause music, five more texture packs and the Black Glass cursor
+- **Two new horde guns:** the Inferno and the Buzzsaw
+- Rarer weapon cards, a third mod for every original gun, and a fresh look for the menus and the HUD
+- **Fixes:** smoother frames, a 60 FPS cap that no longer skips frames, Rift Storm thunder, and co-op that no longer flashes your partner's hits on your screen
+
+Full notes in {#patch-notes} · Play now: https://riftborn.us`,
+    patchNotes: `**v3.0 · Endless** (24 Oct 2026)
+- **Endless mode:** choose DESCEND after the Crown, or the ENDLESS tile once you have a victory. Every depth is tougher, every 3rd holds a FRACTURED keeper, and you pick a Fracture Law at each portal.
+- **Corrupted worlds and rift events:** six worlds have a Fracture version, and 1 to 2 events strike each depth. Each depth rolls its own weather.
+- **The Endless crew:** Gravespur, Mantis Nine, Pyrebound and Riptusk, earned at depths 3, 6, 9 and 12.
+- **Daily Rift:** the same three keeper worlds for everyone each day, with a Boon, a Curse and a Twist, a bounty, medals, chips and a shop. One ranked try a day.
+- **Expedition:** two-player co-op. Charge three rift crystals, beat the keeper at the exit and step through together.
+- **New worlds:** the Starfall (the Orrery), the Boroughs (the Don) and the Sketchbook (the Monster Under the Bed). Three stages now offer a choice of two rifts.
+- **Weapons:** the Inferno and the Buzzsaw replace the Wick and the Wheel; weapon and mod cards roll common, rare or epic, each original gun gets a third mod and new tiers, and a gun's first epic card grants a run bonus.
+- **Music and looks:** 8 new battle songs, menu and pause themes, five texture packs, retro graphics dials, and new menus and HUD.
+- **Balance:** the Cinder Abbot hunts you, gun damage is rebalanced, and the Daily Rift's later worlds play at their stage's pace.
+- **Fixes:**
+  - A 60 FPS cap no longer skips frames, and effects keep their speed under any cap
+  - Rift Storm strikes play their thunder, and lava hisses when it sears a monster
+  - The Rift Chain timer and overtime count down on their own
+  - The Rifle's Marked bonus covers every round, and cleared rounds no longer cost Focus
+  - Co-op: your partner's hits, heals and shots no longer flash on your screen
+  - Bloom or Haze changes keep the Endless sky tint, and a bound elite's chain clears when its pair is gone
+
+Full notes in-game: **PATCH NOTES** on the main menu.`,
+  },
 ];

@@ -43,7 +43,7 @@ so a reload before it lands can't lose it, in this tab's sessionStorage. Runs be
 <script>/* Auto-update (built pages only): the build stamps RIFTBORN_BUILD and writes version.json. A page
 the browser kept from before a newer deploy re-opens itself on the fresh build right away (a new ?v=
 makes the fresh URL skip the cached copy); later updates show a RELOAD banner on the menu (ui/updater.js). */
-window.RIFTBORN_BUILD = "d8404a8afb";
+window.RIFTBORN_BUILD = "50b781e6f0";
 (function () {
   var b = window.RIFTBORN_BUILD;
   if (b === "dev" || !window.fetch || !window.URL) return;
@@ -173,8 +173,8 @@ body:has(#devGate) #riftLoader{display:none}
 /* Reduced motion: a calm, still screen; the bar and skull step between stages, the eyes just switch on. */
 @media (prefers-reduced-motion:reduce){.rl-embers,.rl-heat,.rl-sweep,.rl-dots{display:none}#riftLoader .rl-ring,#riftLoader .rl-bob,#riftLoader .rl-rift-glow{animation:none}.rl-fill,.rl-rider,.rl-mark{transition:none}#riftLoader.rl-lit .rl-eyes{animation:none;opacity:1}#riftLoader.rl-lit .rl-rift-glow{animation:none;opacity:.9}#riftLoader{transition-duration:.25s}}
 </style>
-<link rel="modulepreload" href="js/riftborn.8a93d8a268.js">
-<link rel="stylesheet" href="css/riftborn.e84ea252b6.css">
+<link rel="modulepreload" href="js/riftborn.8c40cb144f.js">
+<link rel="stylesheet" href="css/riftborn.b6a65d6294.css">
 </head>
 <body class="menu-open">
 <div id="riftLoader" role="dialog" aria-modal="true" aria-label="Loading Riftborn">
@@ -192,6 +192,7 @@ body:has(#devGate) #riftLoader{display:none}
 </div>
 <canvas id="game" aria-label="3D survival arena"></canvas>
 <div id="deathTint" aria-hidden="true"></div>
+<div id="bloodMoonVignette" aria-hidden="true"></div>
 <div id="topTags"><span id="clock">00:00</span><span id="hostiles">0 HOSTILES</span><span id="luckTag" class="hidden" aria-label="Luck"></span><div id="modeBadge" role="status"></div></div>
 <div id="hitflash" aria-hidden="true"></div>
 <div id="buildCue" aria-live="off"></div>
@@ -205,10 +206,11 @@ body:has(#devGate) #riftLoader{display:none}
 
 <div id="waveToast" role="status"></div>
 <div id="damageNumbers" aria-hidden="true"></div>
-<div id="portalCompass" class="portal-compass hidden" aria-live="off"><span class="compass-arrow">➤</span><div><b id="portalLabel">RIFT PORTAL</b><small id="portalDistance">LOCKED · 12 KILLS</small></div></div>
+<div id="portalCompass" class="portal-compass hidden" aria-live="off"><span class="compass-box"><span class="compass-arrow"><svg viewBox="0 0 8 8" aria-hidden="true" focusable="false"><path fill="currentColor" d="M0 3h4V1h1v1h1v1h1v1h1v0H7v1H6v1H5v1H4V5H0z"/></svg></span></span><div><b id="portalLabel">RIFT PORTAL</b><small id="portalDistance">LOCKED · 12 KILLS</small></div></div>
 <aside id="tutorialGuide" class="hidden" aria-label="Tutorial guide"><div class="tutorial-heading"><strong id="tutorialTitle"></strong><span id="tutorialStep"></span></div><p id="tutorialHint" role="status" aria-live="polite"></p><div id="tutorialKeys" class="tutorial-keys hidden"></div><p id="tutorialWeapon"></p><div id="tutorialGun" class="tutorial-gun hidden"><div class="tutorial-gun-head"><span class="tutorial-gun-sprite"><img id="tutorialGunSprite" alt=""></span><div><strong id="tutorialGunName"></strong><small id="tutorialGunRole"></small></div><span id="tutorialGunIndex"></span></div><dl class="tutorial-gun-rows"><dt>HOW</dt><dd id="tutorialGunHow"></dd><dt>TRY</dt><dd id="tutorialGunTry" class="tutorial-gun-try"></dd><dt>WATCH</dt><dd id="tutorialGunWatch" class="tutorial-gun-watch"></dd></dl><div class="tutorial-gun-foot"><ol id="tutorialGunRail" class="tutorial-gun-rail" aria-hidden="true"><li></li><li></li><li></li><li></li><li></li><li></li><li></li><li></li><li></li><li></li></ol><span class="tutorial-gun-tried"><span id="tutorialGunPips" aria-hidden="true"><i></i><i></i><i></i></span><span id="tutorialGunTried"></span></span></div></div></aside>
 <div id="trackedGoal" class="hidden"></div>
 <div id="difficultyMeter" class="hidden"></div>
+<div id="eventBanner" class="hidden" role="status" aria-live="off"></div>
 <div id="trialStatus" role="status" aria-live="off"></div>
 <div id="modStatus"></div>
 <div id="powerupStatus" role="status" aria-live="off"></div>
@@ -266,13 +268,22 @@ body:has(#devGate) #riftLoader{display:none}
     <div class="edition"></div>
     <p id="runSummary"></p>
     <details id="runReport" class="hidden"><summary>RUN REPORT</summary><div id="runDetails"></div></details>
-    <button id="start" type="button" class="primary" disabled>LOADING THE RIFT…</button>
+    <div class="mc-split">
+      <div class="mc-modes"><div class="menu-grid mc-list" id="menuModes" data-nav-grid><button id="start" type="button" class="primary mc-camp" disabled>LOADING THE RIFT…</button><button id="menuDaily" type="button" class="secondary daily-tile"><svg class="daily-crack" viewBox="0 0 300 54" preserveAspectRatio="none" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><polyline points="0,30 40,26 58,34 90,22 120,30 150,18 176,28 210,24 236,34 270,20 300,26" fill="none" stroke="#8f5bff" stroke-width="6" opacity=".25"/><polyline points="0,30 40,26 58,34 90,22 120,30 150,18 176,28 210,24 236,34 270,20 300,26" fill="none" stroke="#d6c2ff" stroke-width="2" opacity=".55"/></svg><svg class="daily-bolt " viewBox="0 0 48 64" aria-hidden="true" focusable="false"><g fill="none" stroke-linejoin="miter" stroke-linecap="square"><g class="daily-bolt-forks"><path d="M28 13 L35 17 L33 21 L41 27 L39 30 L45 35" stroke="#8f5bff" stroke-width="3.6" opacity=".35"/><path d="M28 13 L35 17 L33 21 L41 27 L39 30 L45 35" stroke="#c9b2ff" stroke-width="1.7600000000000002" opacity=".8"/><path d="M28 13 L35 17 L33 21 L41 27 L39 30 L45 35" stroke="#fff" stroke-width="0.8"/><path d="M19 24 L11 28 L13 32 L5 37" stroke="#8f5bff" stroke-width="3.6" opacity=".35"/><path d="M19 24 L11 28 L13 32 L5 37" stroke="#c9b2ff" stroke-width="1.7600000000000002" opacity=".8"/><path d="M19 24 L11 28 L13 32 L5 37" stroke="#fff" stroke-width="0.8"/><path d="M15 41 L22 50 L20 54 L25 60" stroke="#8f5bff" stroke-width="3.6" opacity=".35"/><path d="M15 41 L22 50 L20 54 L25 60" stroke="#c9b2ff" stroke-width="1.7600000000000002" opacity=".8"/><path d="M15 41 L22 50 L20 54 L25 60" stroke="#fff" stroke-width="0.8"/><path d="M35 17 L38 12" stroke="#8f5bff" stroke-width="3.6" opacity=".35"/><path d="M35 17 L38 12" stroke="#c9b2ff" stroke-width="1.7600000000000002" opacity=".8"/><path d="M35 17 L38 12" stroke="#fff" stroke-width="0.8"/></g><path d="M27 -2 L22 8 L28 13 L19 24 L25 28 L15 41 L21 45 L11 66" stroke="#8f5bff" stroke-width="6.3" opacity=".35"/><path d="M27 -2 L22 8 L28 13 L19 24 L25 28 L15 41 L21 45 L11 66" stroke="#c9b2ff" stroke-width="3.08" opacity=".8"/><path d="M27 -2 L22 8 L28 13 L19 24 L25 28 L15 41 L21 45 L11 66" stroke="#fff" stroke-width="1.4"/></g></svg><svg class="daily-bolt is-b" viewBox="0 0 48 64" aria-hidden="true" focusable="false"><g fill="none" stroke-linejoin="miter" stroke-linecap="square"><g class="daily-bolt-forks"><path d="M17 15 L9 19 L11 24 L3 29" stroke="#8f5bff" stroke-width="3.6" opacity=".35"/><path d="M17 15 L9 19 L11 24 L3 29" stroke="#c9b2ff" stroke-width="1.7600000000000002" opacity=".8"/><path d="M17 15 L9 19 L11 24 L3 29" stroke="#fff" stroke-width="0.8"/><path d="M26 26 L34 29 L32 34 L40 38 L38 43" stroke="#8f5bff" stroke-width="3.6" opacity=".35"/><path d="M26 26 L34 29 L32 34 L40 38 L38 43" stroke="#c9b2ff" stroke-width="1.7600000000000002" opacity=".8"/><path d="M26 26 L34 29 L32 34 L40 38 L38 43" stroke="#fff" stroke-width="0.8"/><path d="M23 47 L15 55 L17 59" stroke="#8f5bff" stroke-width="3.6" opacity=".35"/><path d="M23 47 L15 55 L17 59" stroke="#c9b2ff" stroke-width="1.7600000000000002" opacity=".8"/><path d="M23 47 L15 55 L17 59" stroke="#fff" stroke-width="0.8"/><path d="M9 19 L6 14" stroke="#8f5bff" stroke-width="3.6" opacity=".35"/><path d="M9 19 L6 14" stroke="#c9b2ff" stroke-width="1.7600000000000002" opacity=".8"/><path d="M9 19 L6 14" stroke="#fff" stroke-width="0.8"/></g><path d="M18 -2 L24 9 L17 15 L26 26 L20 30 L29 42 L23 47 L33 66" stroke="#8f5bff" stroke-width="6.3" opacity=".35"/><path d="M18 -2 L24 9 L17 15 L26 26 L20 30 L29 42 L23 47 L33 66" stroke="#c9b2ff" stroke-width="3.08" opacity=".8"/><path d="M18 -2 L24 9 L17 15 L26 26 L20 30 L29 42 L23 47 L33 66" stroke="#fff" stroke-width="1.4"/></g></svg><span class="daily-tile-text">DAILY RIFT<span id="menuDailyTag" class="daily-tag"></span></span></button><button id="menuEndless" type="button" class="secondary endless-tile" data-state="locked" aria-disabled="true"><svg class="endless-tunnel" viewBox="0 0 300 66" preserveAspectRatio="none" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><rect x="7.5" y="9.6" width="285.0" height="62.7" fill="#0d0620" stroke="#8f5bff" stroke-opacity="0.15" stroke-width="2"/><rect x="20.5" y="12.4" width="259.1" height="57.0" fill="#1d0b4d" stroke="#8f5bff" stroke-opacity="0.22" stroke-width="2"/><rect x="33.4" y="15.3" width="233.2" height="51.3" fill="#0d0620" stroke="#8f5bff" stroke-opacity="0.30" stroke-width="2"/><rect x="46.4" y="18.1" width="207.3" height="45.6" fill="#1d0b4d" stroke="#8f5bff" stroke-opacity="0.37" stroke-width="2"/><rect x="59.3" y="21.0" width="181.4" height="39.9" fill="#0d0620" stroke="#8f5bff" stroke-opacity="0.44" stroke-width="2"/><rect x="72.3" y="23.8" width="155.5" height="34.2" fill="#1d0b4d" stroke="#8f5bff" stroke-opacity="0.51" stroke-width="2"/><rect x="85.2" y="26.7" width="129.5" height="28.5" fill="#0d0620" stroke="#8f5bff" stroke-opacity="0.59" stroke-width="2"/><rect x="98.2" y="29.5" width="103.6" height="22.8" fill="#1d0b4d" stroke="#8f5bff" stroke-opacity="0.66" stroke-width="2"/><rect x="111.1" y="32.4" width="77.7" height="17.1" fill="#0d0620" stroke="#8f5bff" stroke-opacity="0.73" stroke-width="2"/><rect x="124.1" y="35.2" width="51.8" height="11.4" fill="#1d0b4d" stroke="#8f5bff" stroke-opacity="0.80" stroke-width="2"/><rect x="137.0" y="38.1" width="25.9" height="5.7" fill="#0d0620" stroke="#8f5bff" stroke-opacity="0.88" stroke-width="2"/></svg><span class="endless-lockband"></span><svg class="endless-ico is-lock" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><rect x="2" y="0" width="1" height="1"/><rect x="3" y="0" width="1" height="1"/><rect x="4" y="0" width="1" height="1"/><rect x="5" y="0" width="1" height="1"/><rect x="1" y="1" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="6" y="1" width="1" height="1"/><rect x="1" y="2" width="1" height="1"/><rect x="6" y="2" width="1" height="1"/><rect x="0" y="3" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/><rect x="5" y="3" width="1" height="1"/><rect x="6" y="3" width="1" height="1"/><rect x="7" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/><rect x="1" y="4" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect x="3" y="4" width="1" height="1"/><rect x="4" y="4" width="1" height="1"/><rect x="5" y="4" width="1" height="1"/><rect x="6" y="4" width="1" height="1"/><rect x="7" y="4" width="1" height="1"/><rect x="0" y="5" width="1" height="1"/><rect x="1" y="5" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect class="ac" x="3" y="5" width="1" height="1"/><rect class="ac" x="4" y="5" width="1" height="1"/><rect x="5" y="5" width="1" height="1"/><rect x="6" y="5" width="1" height="1"/><rect x="7" y="5" width="1" height="1"/><rect x="0" y="6" width="1" height="1"/><rect x="1" y="6" width="1" height="1"/><rect x="2" y="6" width="1" height="1"/><rect class="ac" x="3" y="6" width="1" height="1"/><rect class="ac" x="4" y="6" width="1" height="1"/><rect x="5" y="6" width="1" height="1"/><rect x="6" y="6" width="1" height="1"/><rect x="7" y="6" width="1" height="1"/><rect x="0" y="7" width="1" height="1"/><rect x="1" y="7" width="1" height="1"/><rect x="2" y="7" width="1" height="1"/><rect x="3" y="7" width="1" height="1"/><rect x="4" y="7" width="1" height="1"/><rect x="5" y="7" width="1" height="1"/><rect x="6" y="7" width="1" height="1"/><rect x="7" y="7" width="1" height="1"/></svg><span class="endless-tile-text">ENDLESS<span id="menuEndlessTag" class="endless-tag">Beat the Crown to unlock</span></span></button><button id="menuExpedition" type="button" class="secondary expedition-tile" data-state="open"><span class="expedition-tile-text">EXPEDITION<span id="menuExpeditionTag" class="expedition-tag">CO-OP · 2 PLAYERS</span></span><span class="expedition-crystals" aria-hidden="true"><svg class="px" width="23" height="34" viewBox="0 0 8 12" fill="#7bdc8f" style="--ac:#eafff0" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><rect x="3" y="0" width="1" height="1"/><rect x="4" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="3" y="1" width="1" height="1"/><rect x="4" y="1" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="1" y="2" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="3" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="5" y="2" width="1" height="1"/><rect x="6" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="2" y="3" width="1" height="1"/><rect class="ac" x="3" y="3" width="1" height="1"/><rect class="ac" x="4" y="3" width="1" height="1"/><rect x="5" y="3" width="1" height="1"/><rect x="6" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/><rect x="1" y="4" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect class="ac" x="3" y="4" width="1" height="1"/><rect class="ac" x="4" y="4" width="1" height="1"/><rect x="5" y="4" width="1" height="1"/><rect x="6" y="4" width="1" height="1"/><rect x="7" y="4" width="1" height="1"/><rect x="0" y="5" width="1" height="1"/><rect x="1" y="5" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect class="ac" x="3" y="5" width="1" height="1"/><rect x="4" y="5" width="1" height="1"/><rect x="5" y="5" width="1" height="1"/><rect x="6" y="5" width="1" height="1"/><rect x="7" y="5" width="1" height="1"/><rect x="0" y="6" width="1" height="1"/><rect x="1" y="6" width="1" height="1"/><rect x="2" y="6" width="1" height="1"/><rect class="ac" x="3" y="6" width="1" height="1"/><rect x="4" y="6" width="1" height="1"/><rect x="5" y="6" width="1" height="1"/><rect x="6" y="6" width="1" height="1"/><rect x="7" y="6" width="1" height="1"/><rect x="0" y="7" width="1" height="1"/><rect x="1" y="7" width="1" height="1"/><rect x="2" y="7" width="1" height="1"/><rect x="3" y="7" width="1" height="1"/><rect x="4" y="7" width="1" height="1"/><rect x="5" y="7" width="1" height="1"/><rect x="6" y="7" width="1" height="1"/><rect x="7" y="7" width="1" height="1"/><rect x="1" y="8" width="1" height="1"/><rect x="2" y="8" width="1" height="1"/><rect x="3" y="8" width="1" height="1"/><rect x="4" y="8" width="1" height="1"/><rect x="5" y="8" width="1" height="1"/><rect x="6" y="8" width="1" height="1"/><rect x="1" y="9" width="1" height="1"/><rect x="2" y="9" width="1" height="1"/><rect x="3" y="9" width="1" height="1"/><rect x="4" y="9" width="1" height="1"/><rect x="5" y="9" width="1" height="1"/><rect x="6" y="9" width="1" height="1"/><rect x="2" y="10" width="1" height="1"/><rect x="3" y="10" width="1" height="1"/><rect x="4" y="10" width="1" height="1"/><rect x="5" y="10" width="1" height="1"/><rect x="3" y="11" width="1" height="1"/><rect x="4" y="11" width="1" height="1"/></svg><svg class="px" width="29" height="44" viewBox="0 0 8 12" fill="#5b4a99" style="--ac:#8f5bff" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><rect x="3" y="0" width="1" height="1"/><rect x="4" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="3" y="1" width="1" height="1"/><rect x="4" y="1" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="1" y="2" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="3" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="5" y="2" width="1" height="1"/><rect x="6" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="2" y="3" width="1" height="1"/><rect class="ac" x="3" y="3" width="1" height="1"/><rect class="ac" x="4" y="3" width="1" height="1"/><rect x="5" y="3" width="1" height="1"/><rect x="6" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/><rect x="1" y="4" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect class="ac" x="3" y="4" width="1" height="1"/><rect class="ac" x="4" y="4" width="1" height="1"/><rect x="5" y="4" width="1" height="1"/><rect x="6" y="4" width="1" height="1"/><rect x="7" y="4" width="1" height="1"/><rect x="0" y="5" width="1" height="1"/><rect x="1" y="5" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect class="ac" x="3" y="5" width="1" height="1"/><rect x="4" y="5" width="1" height="1"/><rect x="5" y="5" width="1" height="1"/><rect x="6" y="5" width="1" height="1"/><rect x="7" y="5" width="1" height="1"/><rect x="0" y="6" width="1" height="1"/><rect x="1" y="6" width="1" height="1"/><rect x="2" y="6" width="1" height="1"/><rect class="ac" x="3" y="6" width="1" height="1"/><rect x="4" y="6" width="1" height="1"/><rect x="5" y="6" width="1" height="1"/><rect x="6" y="6" width="1" height="1"/><rect x="7" y="6" width="1" height="1"/><rect x="0" y="7" width="1" height="1"/><rect x="1" y="7" width="1" height="1"/><rect x="2" y="7" width="1" height="1"/><rect x="3" y="7" width="1" height="1"/><rect x="4" y="7" width="1" height="1"/><rect x="5" y="7" width="1" height="1"/><rect x="6" y="7" width="1" height="1"/><rect x="7" y="7" width="1" height="1"/><rect x="1" y="8" width="1" height="1"/><rect x="2" y="8" width="1" height="1"/><rect x="3" y="8" width="1" height="1"/><rect x="4" y="8" width="1" height="1"/><rect x="5" y="8" width="1" height="1"/><rect x="6" y="8" width="1" height="1"/><rect x="1" y="9" width="1" height="1"/><rect x="2" y="9" width="1" height="1"/><rect x="3" y="9" width="1" height="1"/><rect x="4" y="9" width="1" height="1"/><rect x="5" y="9" width="1" height="1"/><rect x="6" y="9" width="1" height="1"/><rect x="2" y="10" width="1" height="1"/><rect x="3" y="10" width="1" height="1"/><rect x="4" y="10" width="1" height="1"/><rect x="5" y="10" width="1" height="1"/><rect x="3" y="11" width="1" height="1"/><rect x="4" y="11" width="1" height="1"/></svg><svg class="px" width="23" height="34" viewBox="0 0 8 12" fill="#5b4a99" style="--ac:#8f5bff" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><rect x="3" y="0" width="1" height="1"/><rect x="4" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="3" y="1" width="1" height="1"/><rect x="4" y="1" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="1" y="2" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="3" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="5" y="2" width="1" height="1"/><rect x="6" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="2" y="3" width="1" height="1"/><rect class="ac" x="3" y="3" width="1" height="1"/><rect class="ac" x="4" y="3" width="1" height="1"/><rect x="5" y="3" width="1" height="1"/><rect x="6" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/><rect x="1" y="4" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect class="ac" x="3" y="4" width="1" height="1"/><rect class="ac" x="4" y="4" width="1" height="1"/><rect x="5" y="4" width="1" height="1"/><rect x="6" y="4" width="1" height="1"/><rect x="7" y="4" width="1" height="1"/><rect x="0" y="5" width="1" height="1"/><rect x="1" y="5" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect class="ac" x="3" y="5" width="1" height="1"/><rect x="4" y="5" width="1" height="1"/><rect x="5" y="5" width="1" height="1"/><rect x="6" y="5" width="1" height="1"/><rect x="7" y="5" width="1" height="1"/><rect x="0" y="6" width="1" height="1"/><rect x="1" y="6" width="1" height="1"/><rect x="2" y="6" width="1" height="1"/><rect class="ac" x="3" y="6" width="1" height="1"/><rect x="4" y="6" width="1" height="1"/><rect x="5" y="6" width="1" height="1"/><rect x="6" y="6" width="1" height="1"/><rect x="7" y="6" width="1" height="1"/><rect x="0" y="7" width="1" height="1"/><rect x="1" y="7" width="1" height="1"/><rect x="2" y="7" width="1" height="1"/><rect x="3" y="7" width="1" height="1"/><rect x="4" y="7" width="1" height="1"/><rect x="5" y="7" width="1" height="1"/><rect x="6" y="7" width="1" height="1"/><rect x="7" y="7" width="1" height="1"/><rect x="1" y="8" width="1" height="1"/><rect x="2" y="8" width="1" height="1"/><rect x="3" y="8" width="1" height="1"/><rect x="4" y="8" width="1" height="1"/><rect x="5" y="8" width="1" height="1"/><rect x="6" y="8" width="1" height="1"/><rect x="1" y="9" width="1" height="1"/><rect x="2" y="9" width="1" height="1"/><rect x="3" y="9" width="1" height="1"/><rect x="4" y="9" width="1" height="1"/><rect x="5" y="9" width="1" height="1"/><rect x="6" y="9" width="1" height="1"/><rect x="2" y="10" width="1" height="1"/><rect x="3" y="10" width="1" height="1"/><rect x="4" y="10" width="1" height="1"/><rect x="5" y="10" width="1" height="1"/><rect x="3" y="11" width="1" height="1"/><rect x="4" y="11" width="1" height="1"/></svg></span></button></div></div>
+      <section class="mc-panel mc-detail" id="menuDetail" aria-hidden="true"><h2 class="mc-ph">CAMPAIGN</h2></section>
+    </div>
     <button id="mainMenu" type="button" class="secondary main-menu hidden">MAIN MENU</button>
-    <div class="menu-grid"><button id="menuCosmetics" type="button" class="secondary cosmetics-button">COSMETICS</button><button id="tutorial" type="button" class="secondary tutorial-start" disabled>TUTORIAL</button><button id="menuProfile" type="button" class="secondary journal-button">JOURNAL</button><button id="menuSettings" type="button" class="secondary">SETTINGS</button><button id="menuLeaderboard" type="button" class="secondary">LEADERBOARD</button></div>
+    <div class="menu-grid mc-dock" id="menuDock" data-nav-grid>
+      <button id="menuCosmetics" type="button" class="secondary cosmetics-button">COSMETICS</button>
+      <button id="menuProfile" type="button" class="secondary journal-button"><span class="mc-ic" data-dock-icon="journal" aria-hidden="true"></span>JOURNAL</button>
+      <button id="menuLeaderboard" type="button" class="secondary"><span class="mc-ic" data-dock-icon="board" aria-hidden="true"></span><span class="lg">LEADERBOARD</span><span class="sm">BOARD</span></button>
+      <button id="tutorial" type="button" class="secondary tutorial-start" disabled><span class="mc-ic" data-dock-icon="tutorial" aria-hidden="true"></span>TUTORIAL</button>
+      <button id="menuSettings" type="button" class="secondary"><span class="mc-ic" data-dock-icon="settings" aria-hidden="true"></span>SETTINGS</button>
+    </div>
     <p id="scoreSave" role="status"></p>
     <button id="retryScore" type="button" class="secondary hidden">RETRY SAVING SCORE</button>
     <small id="loadNote">Building your world…</small>
-    <a id="menuPrivacy" class="menu-privacy" href="https://riftborn.us/privacy/" target="_blank" rel="noopener">PRIVACY</a>
+    <div class="mc-foot"><a id="menuPrivacy" class="menu-privacy" href="https://riftborn.us/privacy/" target="_blank" rel="noopener">PRIVACY</a><span></span></div>
   </div>
 </main>
 
@@ -283,7 +294,7 @@ body:has(#devGate) #riftLoader{display:none}
       <label class="username" for="playerName">Username</label>
       <input id="playerName" name="username" maxlength="16" required autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="usernameError">
       <details><summary>ON-SCREEN KEYBOARD</summary><div id="nameKeyboard" aria-label="Username characters"></div></details>
-      <div id="rulesetRow" class="ruleset-row" hidden role="group" aria-label="Ruleset"><span class="ruleset-label">RULESET</span><button id="rulesetKeepers" type="button" class="secondary" aria-pressed="true">KEEPERS</button><button id="rulesetOriginal" type="button" class="secondary" aria-pressed="false">ORIGINAL</button><small id="rulesetHint"></small></div>
+      <div id="rulesetRow" class="ruleset-row" hidden role="group" aria-label="Ruleset"><span class="ruleset-label">RULESET</span><button id="rulesetKeepers" type="button" class="secondary" aria-pressed="true">CAMPAIGN</button><button id="rulesetOriginal" type="button" class="secondary" aria-pressed="false">ORIGINAL</button><small id="rulesetHint"></small></div>
       <label class="practice-option" for="practiceRun"><input id="practiceRun" type="checkbox"><span><strong>PRACTICE RUN</strong><small>Play the full game without saving scores or Journal progress.</small></span></label>
       <p id="devRunNote" class="dev-run-note" role="status" hidden>DEVELOPER MODE: NOT SCORED OR SAVED</p>
       <p id="usernameError" role="alert"></p>
@@ -300,12 +311,25 @@ body:has(#devGate) #riftLoader{display:none}
   <div class="ui-scaled"><h2 id="choiceTitle">CHOOSE AN UPGRADE</h2><p id="choiceContext"></p><div id="cards"></div></div>
 </section>
 
+<!-- The Crown decision (Endless, 3.0.0): a verdict slab split by a violet crack, END on the dim left, DESCEND on the lit right. ui/menus.js crownChoice only toggles .hidden. -->
+<section id="crownChoice" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="crownTitle">
+  <div class="crown-slab ui-scaled">
+    <h2 id="crownTitle">THE CROWN IS BROKEN</h2>
+    <div class="crown-shards"><svg class="crown-art" width="175" height="90" viewBox="-3.222 -1.5 19.444 10" shape-rendering="crispEdges" aria-hidden="true"><rect x="5.4" y="-1.5" width="1.6" height="10" fill="#8f5bff" opacity=".7"/><g transform="translate(-2.222 0)"><rect x="0" y="0" width="1" height="1" fill="#ffd65a"/><rect x="0" y="1" width="2" height="1" fill="#ffd65a"/><rect x="5" y="1" width="1" height="1" fill="#ffd65a"/><rect x="0" y="2" width="3" height="1" fill="#ffd65a"/><rect x="4" y="2" width="3" height="1" fill="#ffd65a"/><rect x="0" y="3" width="6" height="1" fill="#ffd65a"/><rect x="0" y="4" width="7" height="1" fill="#ffd65a"/><rect x="1" y="5" width="5" height="1" fill="#c8921a"/><rect x="1" y="6" width="6" height="1" fill="#c8921a"/></g><g transform="translate(2.222 1)"><rect x="6" y="0" width="1" height="1" fill="#ffd65a"/><rect x="12" y="0" width="1" height="1" fill="#ffd65a"/><rect x="6" y="1" width="2" height="1" fill="#ffd65a"/><rect x="11" y="1" width="2" height="1" fill="#ffd65a"/><rect x="7" y="2" width="2" height="1" fill="#ffd65a"/><rect x="10" y="2" width="3" height="1" fill="#ffd65a"/><rect x="6" y="3" width="7" height="1" fill="#ffd65a"/><rect x="7" y="4" width="6" height="1" fill="#ffd65a"/><rect x="6" y="5" width="6" height="1" fill="#c8921a"/><rect x="7" y="6" width="5" height="1" fill="#c8921a"/></g><rect x="5.8" y="1" width=".8" height="1" fill="#fff"/><rect x="6.2" y="4" width=".8" height="1" fill="#fff"/></svg></div>
+    <div class="crown-halves">
+      <div class="crown-half crown-end"><p>Walk away with your score.</p><button id="crownEnd" type="button" class="secondary">End the run</button></div>
+      <div class="crown-half crown-go"><p>Keep your build. Go deeper.</p><button id="crownDescend" type="button" class="secondary">Descend beyond the Crown</button></div>
+    </div>
+  </div>
+</section>
+
 <section id="pauseMenu" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
   <div class="pause-card pp ui-scaled">
     <div id="pauseBanner" class="pp-banner"><h2 id="pauseTitle" class="pp-paused" aria-label="RUN PAUSED"><span class="pp-ic" data-icon="paused" aria-hidden="true"></span>PAUSED</h2></div>
     <div class="pp-col pp-col-a"><div id="pauseStats" class="pp-stats"></div><div id="pauseWell" class="pp-well"></div><div id="pauseFoot" class="pp-foot"></div></div>
     <div class="pp-col pp-col-b"><div id="pauseCaption" class="pp-cap"></div>
     <div class="pp-actions">
+      <div class="pp-live-badge" aria-hidden="true"><i></i>GAME KEEPS RUNNING</div>
       <button id="resume" type="button" class="primary pp-resume" aria-label="RESUME RUN"><span class="pp-ic" data-icon="resume" aria-hidden="true"></span><span class="pp-lbl">RESUME</span></button>
       <div class="pp-menu" data-nav-grid role="group" aria-label="Menu"><div class="pp-btns"><button id="pauseSettings" type="button" class="secondary pp-btn" aria-label="SETTINGS"><span class="pp-ic" data-icon="settings" aria-hidden="true"></span><span class="pp-lbl">SETTINGS</span></button><button id="pauseLeaderboard" type="button" class="secondary pp-btn" aria-label="LEADERBOARD"><span class="pp-ic" data-icon="leaderboard" aria-hidden="true"></span><span class="pp-lbl"><span class="pp-lg">LEADERBOARD</span><span class="pp-sm">BOARD</span></span></button><button id="pauseProfile" type="button" class="secondary pp-btn" aria-label="JOURNAL"><span class="pp-ic" data-icon="journal" aria-hidden="true"></span><span class="pp-lbl">JOURNAL</span></button><button id="pauseLegend" type="button" class="secondary pp-btn" aria-label="LEGEND" aria-haspopup="dialog"><span class="pp-ic" data-icon="legend" aria-hidden="true"></span><span class="pp-lbl">LEGEND</span></button></div>
       <div class="pp-btns pp-exits"><button id="endRun" type="button" class="secondary pp-btn pp-exit" aria-label="END RUN &amp; SAVE SCORE"><span class="pp-ic" data-icon="end" aria-hidden="true"></span><span class="pp-lbl">END RUN</span></button><button id="quitRun" type="button" class="secondary pp-btn pp-exit" aria-label="QUIT TO MENU"><span class="pp-ic" data-icon="quit" aria-hidden="true"></span><span class="pp-lbl">QUIT</span></button><button id="abandonTrial" type="button" class="secondary pp-btn pp-exit hidden" aria-label="ABANDON TRIAL · KEEP CURSE"><span class="pp-ic" data-icon="abandon" aria-hidden="true"></span><span class="pp-lbl">ABANDON</span></button></div></div>
@@ -339,6 +363,31 @@ body:has(#devGate) #riftLoader{display:none}
   </div>
 </section>
 
+<section id="daily" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="dailyTitle">
+  <div class="settings-panel daily-panel ui-scaled">
+    <div class="panel-head"><h2 id="dailyTitle">DAILY RIFT</h2><button id="closeDaily" type="button" class="secondary">BACK</button></div>
+    <div id="dailyBody"></div>
+  </div>
+</section>
+
+<section id="dailyIntro" class="modal hidden" role="dialog" aria-modal="true" aria-label="Daily Gauntlet rules"></section>
+    <section id="endless" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="endlessTitle">
+  <div class="settings-panel endless-panel ui-scaled">
+    <div class="panel-head"><h2 id="endlessTitle">BEYOND THE CROWN</h2><button id="closeEndless" type="button" class="secondary">BACK</button></div>
+    <div id="endlessBody"></div>
+  </div>
+</section>
+
+<section id="coop" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="coopTitle">
+  <div class="coop-panel ui-scaled">
+    <div id="coopBody"></div>
+  </div>
+</section>
+
+<section id="coopResults" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="coopResultsTitle">
+  <div id="coopResultsBody" class="coop-results ui-scaled"></div>
+</section>
+
 <section id="profile" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="profileTitle">
   <div class="settings-panel ui-scaled">
     <div class="panel-head"><h2 id="profileTitle">JOURNAL</h2><button id="closeProfile" type="button" class="secondary">BACK</button></div>
@@ -363,7 +412,7 @@ body:has(#devGate) #riftLoader{display:none}
 <aside id="devTools" class="hidden" aria-label="Practice tools"></aside>
 
 <noscript><p class="noscript">Riftborn needs JavaScript and WebGL.</p></noscript>
-<script type="module" src="js/riftborn.8a93d8a268.js"></script>
+<script type="module" src="js/riftborn.8c40cb144f.js"></script>
 <script>/* Boot errors before the game is ready: the loading screen stops and says why (src/ui/boot-loader.js does
 the same for a boot that throws). Listening in the capture phase also catches the bundle failing to
 download, a <script> load error that never bubbles; other resources (an image, a font) are ignored. */
@@ -382,25 +431,38 @@ window.addEventListener("error", function (e) {
 <script>/* HOST CONFIG (v2.2): the one place that decides which services each address uses. Scores
 (RIFTBORN_SCORE_API_BASE, the only base a score is ever posted to), the leaderboard reads
 (RIFTBORN_SCORE_READ_BASE, v2.3.1: read only, never posted to; absent, reads use the score base),
-player feedback (RIFTBORN_FEEDBACK_API_BASE) and accounts (RIFTBORN_ACCOUNT_API_BASE,
-src/meta/account.js). "" turns a service off: scores and feedback stay on the device, accounts vanish
-(no welcome popup, no Account settings, no requests; the game plays like 2.1).
+player feedback (RIFTBORN_FEEDBACK_API_BASE), accounts (RIFTBORN_ACCOUNT_API_BASE,
+src/meta/account.js) and the co-op Expedition relay (RIFTBORN_COOP_API_BASE, src/net/coop-api.js).
+"" turns a service off: scores and feedback stay on the device, accounts vanish (no welcome popup, no
+Account settings, no requests; the game plays like 2.1), the EXPEDITION tile says co-op is not here.
   riftborn.us          the live game: all three through api.riftborn.us; scores (and reads) only from
-                       the root game page, never /classic/ or any other path.
+                       the root game page, never /classic/ or any other path. Co-op (api.riftborn.us)
+                       from the root game page only.
   dev.riftborn.us      the password-gated test build: accounts and feedback through api.riftborn.us;
                        the root game page reads the live leaderboards from api.riftborn.us; NEVER
-                       posts scores (no score base: runs stay on the device).
+                       posts scores (no score base: runs stay on the device). Co-op from the root
+                       game page only.
+  *.riftborn-dev.pages.dev  the previews: co-op through api.riftborn.us and nothing else (the relay
+                       answers this Origin; feedback and accounts stay off: the Worker's CORS is
+                       riftborn.us and dev.riftborn.us). The bare riftborn-dev.pages.dev: nothing.
   chancrisp.github.io  the old address, before the move only: scores from /riftborn/ and feedback
                        through the workers.dev URL, as in 2.1. Accounts OFF: never on a shared origin.
   localhost etc.       nothing, unless ?accounts=local (kept for the tab, so the sign-in round trip
                        returns to it) or localStorage "riftborn-reborn-dev-accounts" names a loopback
                        accounts harness (site server/dev-accounts.mjs).
   anywhere else        nothing (a claude.ai artifact, a copy on another host).
-A value set before this block (a test page) wins for scores, reads and feedback. .tools/host-config.mjs
-checks this table before every deploy. */
+  portal edition       nothing, whatever the address or preset (window.RIFTBORN_EDITION, written only by
+                       .tools/package-portal.mjs).
+A value set before this block (a test page) wins for scores, reads and feedback, except in the portal
+edition. The co-op base is never preset (like accounts); a ?relay= flag on a development host overrides it
+in coopBase(), not here. .tools/host-config.mjs checks this table before every deploy. */
 (function () {
+  if (window.RIFTBORN_EDITION === "portal") {
+    window.RIFTBORN_SCORE_API_BASE = window.RIFTBORN_SCORE_READ_BASE = window.RIFTBORN_FEEDBACK_API_BASE = window.RIFTBORN_ACCOUNT_API_BASE = window.RIFTBORN_COOP_API_BASE = "";
+    return;
+  }
   var API = "https://api.riftborn.us", OLD_API = "https://riftborn-leaderboard.chanmanc10.workers.dev";
-  var h = location.hostname, p = location.pathname, scores = "", reads = "", feedback = "", accounts = "";
+  var h = location.hostname, p = location.pathname, scores = "", reads = "", feedback = "", accounts = "", coop = "";
   if (h === "riftborn.us") {
     accounts = feedback = API;
     if (p === "/" || p === "/index.html") scores = API;
@@ -418,10 +480,13 @@ checks this table before every deploy. */
     } catch (e) {}
     if (/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$/.test(local)) accounts = local;
   }
+  // Co-op: the root game page of the live game and the test build, and every preview; nowhere else.
+  if (((h === "riftborn.us" || h === "dev.riftborn.us") && (p === "/" || p === "/index.html")) || /^[a-z0-9-]+\.riftborn-dev\.pages\.dev$/.test(h)) coop = API;
   window.RIFTBORN_SCORE_API_BASE = window.RIFTBORN_SCORE_API_BASE || scores;
   window.RIFTBORN_SCORE_READ_BASE = window.RIFTBORN_SCORE_READ_BASE || reads || window.RIFTBORN_SCORE_API_BASE;
   window.RIFTBORN_FEEDBACK_API_BASE = window.RIFTBORN_FEEDBACK_API_BASE || feedback;
   window.RIFTBORN_ACCOUNT_API_BASE = accounts;
+  window.RIFTBORN_COOP_API_BASE = coop;
 })();
 </script>
 </body>
