@@ -7,7 +7,8 @@
 // Checks:
 //   riftborn.us/version.json   the build committed in live/version.json of this checkout
 //   riftborn.us/               boots with zero console errors and zero uncaught exceptions; the menu
-//                              shows the title and START RUN; SETTINGS opens and closes again
+//                              shows the title and its start button (CAMPAIGN from 3.0, START RUN
+//                              before); SETTINGS opens and closes again
 //   Open Graph / Twitter tags  each tag the committed page has is served (og:url the live root), and
 //                              the card image it names answers 200; not checked for a page without them
 //   key files                  every same-origin file the committed and the served index.html link
@@ -30,7 +31,7 @@
 // on (a newer Build and deploy run is still going, or riftborn.us already serves the newer
 // live/version.json on main), the result is "superseded" and the run passes without an alert: the
 // newer deploy's own check covers riftborn.us (GitHub API, read only; only inside GitHub Actions).
-// Never a scored run, never a sound: START RUN is only read, never clicked; before the page loads,
+// Never a scored run, never a sound: the start button is only read, never clicked; before the page loads,
 // audio is muted (riftborn-reborn-preferences-v1 {muted:true,master:0}, plus Chrome's --mute-audio),
 // the stats switch is off (shareStats:false, the notice counted as seen) and the welcome popup counts as answered; every request from the page other than GET, HEAD or
 // OPTIONS is blocked and reported (a menu that only loads has nothing to send). Results go to GitHub
@@ -702,11 +703,12 @@ async function browseLive(browser, live, outDir) {
       if (!response || response.status() !== 200) throw new Error(`HTTP ${response?.status() ?? 'no response'}`);
       return `HTTP 200, "${await page.title()}"`;
     });
-    await step('menu shows START RUN', async () => {
-      // The button reads LOADING THE RIFT… (disabled) until the world is built. Read, never clicked.
+    await step('menu shows its start button', async () => {
+      // The button reads LOADING THE RIFT… (disabled) until the world is built, then CAMPAIGN (3.0 on)
+      // or START RUN (older builds, so a rollback still passes). Read, never clicked.
       await page.waitForFunction(() => {
         const start = document.getElementById('start');
-        return start && !start.disabled && start.getClientRects().length > 0 && start.textContent.replace(/\s+/g, ' ').trim().toUpperCase() === 'START RUN';
+        return start && !start.disabled && start.getClientRects().length > 0 && ['CAMPAIGN', 'START RUN'].includes(start.textContent.replace(/\s+/g, ' ').trim().toUpperCase());
       }, null, { timeout: 90000, polling: 250 });
       return `ready after ${((Date.now() - started) / 1000).toFixed(1)} s`;
     });
@@ -974,7 +976,7 @@ export function dryRun(base = root) {
     lines.push(`key files (${expect.files.length} linked by the committed page, plus ${EXTRA_PAGES.join(' and ')}): ${expect.files.join(', ')}`);
   }
   lines.push(missing.length ? `MISSING from live/: ${missing.join(', ')}` : 'every file the committed page links is in live/');
-  lines.push('always: version.json match, the page boots with zero console errors, the menu shows the title and START RUN, SETTINGS opens and closes');
+  lines.push('always: version.json match, the page boots with zero console errors, the menu shows the title and its start button (CAMPAIGN or START RUN), SETTINGS opens and closes');
   lines.push(`feedback: ${FEEDBACK_REDIRECTS.map(p => HOSTS.live + p).join(', ')} redirect to ${HOSTS.feedback}/; ${HOSTS.feedback}/ answers 200 with the key form (never filled), CSP connect-src ${HOSTS.api} only, noindex, no referrer, no-cache, nosniff, Permissions-Policy; locked with zero console errors and no request to the API; not attached yet = a warning until ${FEEDBACK_DOMAIN_GRACE_UNTIL}`);
   lines.push(`stats: ${HOSTS.feedback}/metrics/ answers 200 with the key form (never filled) under the same strict headers, its three files answer; locked, no request to the API or any other origin, zero console errors`);
   return { lines, ok: Boolean(expected.live) && !missing.length };
