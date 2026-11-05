@@ -1,0 +1,11 @@
+{
+  "name": "v3-0-0-perf",
+  "url": "https://v3-0-0-perf.riftborn-dev.pages.dev/",
+  "version": "3.0.0",
+  "build": "5a001a9be8",
+  "module": "js/riftborn.b7fd793dc7.js",
+  "branch": "claude/bug-fixes-optimization-e07dc2",
+  "commit": "287148730709691916fd4c9fb9d7a0b515fd4d1a",
+  "dirty": false,
+  "staged": "2026-11-05T02:29:18.452Z"
+}
