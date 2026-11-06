@@ -355,4 +355,18 @@ Full notes in {#patch-notes} · Play now: https://riftborn.us`,
 
 Full notes: **PATCH NOTES** on the main menu.`,
   },
+  // 3.0.1, owner-approved 2026-11-05 ("Post with both pings"; "go live" 2026-11-05):
+  // News pings on the announcement, Patch pings on the patch notes.
+  {
+    version: '3.0.1',
+    ping: { announcement: true, patchNotes: true },
+    announcement: `**Riftborn 3.0.1 · Smoother is live!**
+- **Faster world loading** and **smoother big fights**, most noticeable on phones
+
+Full notes in {#patch-notes} · Play now: https://riftborn.us`,
+    patchNotes: `**v3.0.1 · Smoother** (5 Nov 2026)
+- **Performance:** faster world loading and smoother big fights, most noticeable on phones.
+
+Full notes in-game: **PATCH NOTES** on the main menu.`,
+  },
 ];
