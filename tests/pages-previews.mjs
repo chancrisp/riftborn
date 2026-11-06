@@ -81,9 +81,13 @@ const API = 'https://api.riftborn.us';
 // The committed dev/ and live/ builds, whatever their version: from 2.3.1 (RIFTBORN_SCORE_READ_BASE)
 // dev.riftborn.us's root page reads the live boards; before it, it reads where it posts (nowhere).
 const devReads = devHtml.includes('RIFTBORN_SCORE_READ_BASE');
-assert.deepEqual(hostServices(devHtml, `${previewOrigin(B)}/`), OFF, 'A preview address gets nothing');
-assert.deepEqual(hostServices(devHtml, 'https://dev.riftborn.us/'), { scores: '', reads: devReads ? API : '', feedback: API, accounts: API, coop: '' }, 'The HOST CONFIG runner is real (dev.riftborn.us gets feedback and accounts, never scores)');
-assert.deepEqual(hostServices(read('live/index.html'), 'https://riftborn.us/'), { scores: API, reads: API, feedback: API, accounts: API, coop: '' }, 'riftborn.us reads where it posts');
+// From 3.0 the HOST CONFIG also hands out the co-op relay (RIFTBORN_COOP_API_BASE): to the root game page of riftborn.us and
+// dev.riftborn.us and to every preview, the origins server/coop-api.js accepts. Builds before it (and the frozen 2.3.0 block) have none.
+const coopOf = html => (html.includes('window.RIFTBORN_COOP_API_BASE = coop;') ? API : '');
+const devCoop = coopOf(devHtml);
+assert.deepEqual(hostServices(devHtml, `${previewOrigin(B)}/`), { ...OFF, coop: devCoop }, 'A preview address gets nothing but co-op (3.0 on)');
+assert.deepEqual(hostServices(devHtml, 'https://dev.riftborn.us/'), { scores: '', reads: devReads ? API : '', feedback: API, accounts: API, coop: devCoop }, 'The HOST CONFIG runner is real (dev.riftborn.us gets feedback and accounts, never scores)');
+assert.deepEqual(hostServices(read('live/index.html'), 'https://riftborn.us/'), { scores: API, reads: API, feedback: API, accounts: API, coop: coopOf(read('live/index.html')) }, 'riftborn.us reads where it posts');
 // Builds before 2.3.1 set no RIFTBORN_SCORE_READ_BASE: they read where they post, and so does the
 // check. The frozen 2.3.0 HOST CONFIG (tests/fixtures) keeps this covered after dev/ and live/ move on.
 {
@@ -109,12 +113,12 @@ const withReads = html => {
   return out;
 };
 for (const [label, html] of [['2.3.1', withReads(devHtml)], ...(devReads ? [[`dev/ ${devBuild.version}`, devHtml]] : [])]) {
-  assert.deepEqual(hostServices(html, 'https://dev.riftborn.us/'), { scores: '', reads: API, feedback: API, accounts: API, coop: '' }, `${label}: dev.riftborn.us reads the live boards and posts nothing`);
+  assert.deepEqual(hostServices(html, 'https://dev.riftborn.us/'), { scores: '', reads: API, feedback: API, accounts: API, coop: coopOf(html) }, `${label}: dev.riftborn.us reads the live boards and posts nothing`);
   assert.deepEqual(hostServices(html, 'https://dev.riftborn.us/classic/'), { scores: '', reads: '', feedback: API, accounts: API, coop: '' }, `${label}: only the root page reads`);
-  assert.deepEqual(hostServices(html, 'https://riftborn.us/'), { scores: API, reads: API, feedback: API, accounts: API, coop: '' }, `${label}: riftborn.us reads where it posts`);
-  assert.deepEqual(hostServices(html, `${previewOrigin(B)}/`), OFF, `${label}: a preview address gets nothing`);
+  assert.deepEqual(hostServices(html, 'https://riftborn.us/'), { scores: API, reads: API, feedback: API, accounts: API, coop: coopOf(html) }, `${label}: riftborn.us reads where it posts`);
+  assert.deepEqual(hostServices(html, `${previewOrigin(B)}/`), { ...OFF, coop: coopOf(html) }, `${label}: a preview address gets nothing but co-op (3.0 on)`);
 }
-console.log('PASS preview names: v<major>-<minor>-<patch> of the build plus an optional tag, safe Cloudflare branch aliases only (never main = dev.riftborn.us, never a deployment id); preview addresses get no scores, leaderboard reads, feedback or accounts (reads default to the score base before 2.3.1).');
+console.log('PASS preview names: v<major>-<minor>-<patch> of the build plus an optional tag, safe Cloudflare branch aliases only (never main = dev.riftborn.us, never a deployment id); preview addresses get no scores, leaderboard reads, feedback or accounts (reads default to the score base before 2.3.1), only the co-op relay from 3.0.');
 
 // ---- staging -------------------------------------------------------------------------------------
 const base = path.join(tmp, 'repo');
@@ -206,7 +210,10 @@ refused(`${V}-reading`, { edit: html => withReads(html).replace('} else if (h ==
 {
   // Co-op (Task 5.2, spec 9 Origins): a preview may point the co-op relay at https://api.riftborn.us, and nothing else.
   const anchor = 'window.RIFTBORN_SCORE_API_BASE = window.RIFTBORN_SCORE_API_BASE || scores;';
-  const withCoop = (value, extra = html => html) => html => extra(html).replace(anchor, () => 'window.RIFTBORN_COOP_API_BASE = ' + JSON.stringify(value) + ';\n  ' + anchor);
+  // A 3.0+ build sets its own co-op base (`= coop;`, after the anchor): the test value replaces that line; older builds get it injected.
+  const own = 'window.RIFTBORN_COOP_API_BASE = coop;';
+  const setCoop = (html, value) => (html.includes(own) ? html.replace(own, () => 'window.RIFTBORN_COOP_API_BASE = ' + JSON.stringify(value) + ';') : html.replace(anchor, () => 'window.RIFTBORN_COOP_API_BASE = ' + JSON.stringify(value) + ';\n  ' + anchor));
+  const withCoop = (value, extra = html => html) => html => setCoop(extra(html), value);
   const ok = path.join(tmp, 'ok-coop');
   const only = preview(ok, V + '-coop', { edit: withCoop(API) });
   assert.equal(hostServices(read(path.join(only, 'index.html')), previewOrigin(V + '-coop') + '/').coop, API, 'the HOST CONFIG runner reads the co-op base');
